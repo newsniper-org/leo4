@@ -1,6 +1,19 @@
-//! leo4-abi
+//! leo4-abi — canonical-ABI encode/decode on the Rust side.
 //!
-//! Placeholder. See `LEO4-DESIGN.md` and `ROADMAP.md` for the work
-//! plan. This crate's first real code lands no earlier than Phase 1.
+//! Mirrors `lake/Leo4/Leo4/Marshal.lean` + `lake/Leo4/Leo4/Builtins.lean`.
+//! Two implementations of [`LeanMarshal`] for the same logical type MUST
+//! produce identical bytes on the wire — pinned by `tests/conformance/`.
+//!
+//! Normative wire format: `SPEC/canonical-abi.md`.
+//! Reserved error codes: `SPEC/canonical-abi.md` §13.
 
-#![cfg_attr(not(test), allow(dead_code))]
+pub mod error;
+pub mod marshal;
+pub mod scalars;
+pub mod composites;
+pub mod bignat;
+pub mod bigint;
+pub mod handshake;
+
+pub use error::{error_codes, LeanError};
+pub use marshal::LeanMarshal;
