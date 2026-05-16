@@ -1,0 +1,14 @@
+# Avoid sending large build artefacts as docker build context.
+target/
+**/target/
+**/.lake/
+lake-manifest.json
+**/lake-manifest.json
+result
+**/result
+.git/objects/pack/*.idx
+.git/lfs
+**/.DS_Store
+**/*.swp
+/tmp/
+/wit-validate/

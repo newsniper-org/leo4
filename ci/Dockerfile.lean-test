@@ -1,0 +1,54 @@
+# Linux test image for the leo4 multi-version Lean matrix.
+#
+# Usage: this image is *Lean-version-agnostic*. The desired toolchain is
+# supplied at run time via `LEAN_VERSION=vX.Y.Z`, which `entrypoint.sh`
+# stamps into the appropriate `lean-toolchain` files before delegating
+# to elan. That keeps `docker build` cacheable across the matrix and
+# avoids burning an image-per-version.
+#
+# Build:   docker build -f ci/Dockerfile.lean-test -t leo4-test .
+# Run:     docker run --rm -e LEAN_VERSION=v4.29.1 \
+#            -v "$PWD:/workspace:ro" \
+#            -v "leo4-cache-v4.29.1:/work" \
+#            leo4-test just test
+
+FROM ubuntu:24.04
+
+# ---- system deps -----------------------------------------------------
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl git jq xz-utils \
+        build-essential libssl-dev pkg-config cmake \
+        rsync \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---- elan (Lean toolchain manager) ----------------------------------
+# elan reads `lean-toolchain` at invocation time and installs the named
+# release on demand. We install with --default-toolchain none and let
+# entrypoint.sh stamp the version per run.
+ENV ELAN_HOME=/opt/elan
+ENV PATH=${ELAN_HOME}/bin:${PATH}
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- --default-toolchain none -y --no-modify-path \
+ && elan --version \
+ && lean --version || true
+
+# ---- rustup ---------------------------------------------------------
+ENV RUSTUP_HOME=/opt/rustup
+ENV CARGO_HOME=/opt/cargo
+ENV PATH=${CARGO_HOME}/bin:${PATH}
+RUN curl -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
+ && rustc --version
+
+# ---- Rust-side toolbox ----------------------------------------------
+# wasm-tools and wit-bindgen are required by `just wit-test`. just is the
+# command runner the leo4 workspace expects.
+RUN cargo install --locked --quiet just wasm-tools wit-bindgen-cli
+
+# ---- entrypoint -----------------------------------------------------
+COPY ci/entrypoint.sh /usr/local/bin/leo4-entrypoint
+RUN chmod +x /usr/local/bin/leo4-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/leo4-entrypoint"]
+CMD ["just", "test"]

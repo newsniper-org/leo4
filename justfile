@@ -72,7 +72,7 @@ fmt:
 # Both sides, in order. Lake first per D8.
 build: lake-build cargo-build
 
-test: lake-test cargo-test mangling-test wit-test
+test: lake-test cargo-test mangling-test wit-test conformance-test
 
 # Cross-impl mangling conformance — Lake plugin vs leo4c (Rust).
 mangling-test:
@@ -82,6 +82,10 @@ mangling-test:
 wit-test:
     tests/wit/run.sh
 
+# Lean/Rust encoder byte-for-byte conformance (Phase 4).
+conformance-test:
+    tests/conformance/run.sh
+
 # Validate SPEC/*.md consistency (Phase 1+).
 spec-lint:
     @echo "TODO(phase-1): SPEC consistency checker"
@@ -89,6 +93,26 @@ spec-lint:
 # Show the resolved schema hash for the sample package's handshake file.
 schema-hash: smoke-plugin
     @jq -r '.schema_hash' {{sample_pkg}}/.lake/build/leo4/leo4-sample.leo4-handshake
+
+# ─── Multi-version Lean matrix (Phase 5 prep) ───────────────────────────
+
+# Run `just test` in a hermetic container across the Lean version matrix
+# (default v4.27.0/v4.28.0/v4.29.1/v4.30.0-rc2). The first run pulls each
+# toolchain + builds caches; subsequent runs reuse `/cache/work-<ver>/`.
+ci-matrix:
+    ci/matrix.sh
+
+# Same harness, single Lean version. Drops into the per-version work dir.
+ci-version VERSION:
+    LEAN_VERSION={{VERSION}} ci/matrix.sh
+
+# Build the container image only.
+ci-image:
+    docker build -f ci/Dockerfile.lean-test -t leo4-test .
+
+# Drop the matrix cache volume (next ci-matrix rebuilds it from scratch).
+ci-clean-cache:
+    -docker volume rm leo4-matrix-cache
 
 # Nuke build outputs.
 clean:

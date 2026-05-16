@@ -135,15 +135,14 @@ impl<T: LeanMarshal, E: LeanMarshal> LeanMarshal for Result<T, E> {
 
 macro_rules! tuple_impl {
     ($($name:ident),+) => {
+        #[allow(non_snake_case)]
         impl<$($name: LeanMarshal),+> LeanMarshal for ($($name,)+) {
             fn canonical_encode(&self, buf: &mut Vec<u8>) {
-                #[allow(non_snake_case)]
                 let ($(ref $name,)+) = *self;
                 $($name.canonical_encode(buf);)+
             }
             fn canonical_decode(buf: &[u8], off: usize) -> Result<(Self, usize), LeanError> {
                 let mut off = off;
-                #[allow(non_snake_case)]
                 $(
                     let ($name, next) = $name::canonical_decode(buf, off)?;
                     off = next;

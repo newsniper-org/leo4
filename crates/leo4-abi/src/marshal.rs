@@ -53,3 +53,27 @@ pub fn decode_from_slice<T: LeanMarshal>(buf: &[u8]) -> Result<T, LeanError> {
     }
     Ok(v)
 }
+
+/// Encode `v` into a fixed-capacity buffer. Returns the number of bytes
+/// written.  Matches the shape of the C shim entry point
+/// `leo4_call_<mangled>(…, ret_ptr, ret_cap, ret_len)` from
+/// `SPEC/canonical-abi.md` §14 — Phase 5 wires this into the actual
+/// shim. v0 uses it to surface
+/// [`error_codes::BUFFER_TOO_SMALL`](super::error::error_codes::BUFFER_TOO_SMALL)
+/// through a documented code path.
+///
+/// # Errors
+/// Returns a `LeanError` with `BUFFER_TOO_SMALL` (0x07) when `buf.len()`
+/// is smaller than the encoded value.
+pub fn encode_to_fixed<T: LeanMarshal>(v: &T, buf: &mut [u8]) -> Result<usize, LeanError> {
+    let mut tmp = Vec::new();
+    v.canonical_encode(&mut tmp);
+    if tmp.len() > buf.len() {
+        return Err(LeanError::new(
+            error_codes::BUFFER_TOO_SMALL,
+            format!("encode_to_fixed: need {} bytes, have {}", tmp.len(), buf.len()),
+        ));
+    }
+    buf[..tmp.len()].copy_from_slice(&tmp);
+    Ok(tmp.len())
+}
