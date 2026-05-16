@@ -1,24 +1,21 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
  "outputs":
- {"o": ["8d45e4e63924033d.olean"],
-  "i": "2b2ca78a7003edbc.ilean",
+ {"o": ["389114bdbeed6bb3.olean"],
+  "i": "a8a2d318181018e3.ilean",
   "c": "6b9e1f3c499d1e38.c"},
  "log":
  [{"message":
    ".> LEAN_PATH=/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean:/home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean /opt/lean4/bin/lean /home/ybi/leo4/tests/sample-lean/Sample.lean -o /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.olean -i /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.ilean -c /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c --setup /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.setup.json --json",
-   "level": "trace"},
-  {"message":
-   "Sample.lean:32:22: unused variable `T`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
-   "level": "warning"}],
+   "level": "trace"}],
  "inputs":
  [["Sample:deps",
    [["deps",
      [["«leo4-sample»/Sample:extraDep",
        [["@«leo4-sample»:extraDep", "00000000000006bb"]]],
       ["imports",
-       [["Leo4 transitive imports (legacy)", "d627c0adcdd7a57b"],
-        ["Leo4:importAllArts", "f45e3f0d76ab724d"]]]]],
+       [["Leo4 transitive imports (legacy)", "a0f57d96fe41efd2"],
+        ["Leo4:importAllArts", "e8ec0ab26b948a20"]]]]],
     ["libs",
      [["import dynlibs", "00000000000006bb"],
       ["package external libraries", "00000000000006bb"],
@@ -26,10 +23,10 @@
       ["module plugins", "00000000000006bb"]]]]],
   ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
    "fa77a35a41db35c0"],
-  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "3f5d6029619020bd"],
+  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "1c63e113cb0b690f"],
   ["options", "00000000000006bb"],
   ["isModule: false", "feefd2a0d3a1847e"],
   ["Module.name: Sample", "aa097ba15ee094f1"],
   ["Package.id?: (some leo4-sample)", "553e3cd0f8245097"],
   ["Module.leanArgs: #[]", "00000000000006bb"]],
- "depHash": "3ec38aee65bce2e4"}
+ "depHash": "38b1b84db9b592e1"}

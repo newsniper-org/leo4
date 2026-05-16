@@ -16,7 +16,22 @@ interface_decl  = "interface" , ident , [ generic_params ] , "{" ,
 world_decl      = "world" , ident , "{" , { world_item } , "}" ;                   (* [WIT] *)
 
 generic_params  = "<" , generic_param , { "," , generic_param } , ">" ;            (* [leo4] *)
-generic_param   = ident , [ ":" , constraint_expr ] ;
+generic_param   = type_param | value_param ;                                       (* [leo4] *)
+type_param      = ident , [ ":" , ( kind | constraint_expr ) ] ;
+                                                                                   (* If the `:` annotation is omitted, the param defaults to kind `Type`. *)
+value_param     = ident , ":" , type ;                                             (* [leo4] dependent value generic — erased at the boundary *)
+
+(* Kinds (System Fω style; right-associative `->`).                                *)
+(* `Type` is the kind of ordinary types; `Type -> Type` is the kind of            *)
+(* 1-arity type constructors (HKT); higher arities chain to the right.            *)
+(* value_param's annotation is a `type` from §"type" below — e.g. `Nat`, `u32`,    *)
+(* `My.Pkg.SomeRecord`. The plugin erases value_params at the boundary; the       *)
+(* value never appears in mangled names or wire formats. Real dependent           *)
+(* codomain (return type that depends on a value) remains forbidden by             *)
+(* LEO4-DESIGN.md §4.3.                                                            *)
+kind            = atomic_kind , [ "->" , kind ] ;                                  (* [leo4] *)
+atomic_kind     = "Type"
+                | "(" , kind , ")" ;
 
 constraint_decl = "constraint" , ident , "=" , constraint_body , ";" ;             (* [leo4] *)
 constraint_body = "oneof" , "{" , type , { "," , type } , "}"
@@ -44,13 +59,25 @@ resource_body   = "{" , { func_decl } , "}" ;
 
 type            = primitive | builtin_generic | named_type | record_type
                 | variant_type | tuple_type | flag_type | enum_type
-                | io_type ;                                                        (* [leo4] io_type *)
+                | io_type | self_type ;                                            (* [leo4] io_type, self_type *)
 
 primitive       = "u8" | "u16" | "u32" | "u64"
                 | "i8" | "i16" | "i32" | "i64"
                 | "f32" | "f64"
                 | "bool" | "char" | "string"
                 | "bigint" | "bignat" ;                                            (* [leo4] bigint, bignat *)
+
+(* `Self` inside a record_type, variant_type, or resource_decl body refers
+   to the enclosing nominal type.
+     - `Self` (no args) is syntactic sugar for `Self<…>` with every enclosing
+       generic parameter substituted by itself, i.e. the identity instantiation.
+     - `Self<T₁,…,Tₙ>` allows substituting a subset of the enclosing generic
+       parameters with concrete types (or other in-scope generics). Arity must
+       match the enclosing declaration's generic_params arity.
+   Permitted only as a type leaf inside the immediately enclosing declaration;
+   nested decls reset the binding. Mutual self-reference (two declarations
+   naming each other) is rejected in v0; see LEO4-DESIGN.md §4.3. *)
+self_type       = "Self" , [ "<" , type , { "," , type } , ">" ] ;                 (* [leo4] *)
 
 builtin_generic = "list" , "<" , type , ">"
                 | "option" , "<" , type , ">"
@@ -61,11 +88,18 @@ builtin_generic = "list" , "<" , type , ">"
 
 named_type      = ident , [ "<" , type , { "," , type } , ">" ] ;                  (* [leo4] generic application *)
 
-record_type     = "record" , [ ident ] , "{" , field , { "," , field } , "}" ;
+record_type     = "record" , [ fqn ] , [ generic_params ] ,
+                  "{" , field , { "," , field } , "}" ;
 field           = ident , ":" , type ;
 
-variant_type    = "variant" , [ ident ] , "{" , variant_case , { "," , variant_case } , "}" ;
+variant_type    = "variant" , [ fqn ] , [ generic_params ] ,
+                  "{" , variant_case , { "," , variant_case } , "}" ;
 variant_case    = ident , [ "(" , type , { "," , type } , ")" ] ;
+
+(* Fully-qualified name: module path + base name, joined by `.` in IDL text.
+   Used to disambiguate `Sample.Point` from `Other.Point`.  In mangled
+   names the `.` separators are replaced with `_` (see SPEC/mangling.md §2). *)
+fqn             = ident , { "." , ident } ;
 
 tuple_type      = "tuple" , "<" , type , { "," , type } , ">" ;
 flag_type       = "flags" , [ ident ] , "{" , ident , { "," , ident } , "}" ;

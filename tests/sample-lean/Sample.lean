@@ -27,8 +27,10 @@ def maxScalar {T : Type} [Ord T] (a b : T) : T :=
 
 -- Phantom-generic smoke fixture: `T` is declared but never used in the
 -- signature, so the plugin should emit a single instantiation with
--- `generic_args = [null]`.
+-- `generic_args = [null]`. The underscore prefix silences Lean's
+-- unused-variable linter without altering the plugin's behaviour
+-- (the user name is informational only — phantom detection is FVarId-based).
 @[leo4_export]
-def constantFortyTwo {T : Type} (_x : UInt32) : UInt32 := 42
+def constantFortyTwo {_T : Type} (_x : UInt32) : UInt32 := 42
 
 end Sample

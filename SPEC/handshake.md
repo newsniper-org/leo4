@@ -7,13 +7,38 @@
 
 | File | Producer | Consumer | Purpose |
 |---|---|---|---|
-| `<pkg>.leo4-schema` | Lake | `leo4c` (human/tool) | Full IDL in canonical form |
+| `<pkg>.leo4-schema` | Lake | `leo4c` (human/tool) | Full IDL in canonical form (see below) |
 | `<pkg>.wit` | Lake | wasmtime / others | WIT lowered form (optional) |
 | `<pkg>.leo4-handshake` | Lake | Rust build.rs | Schema hash + ABI version |
 | `<pkg>.leo4-mangling` | Lake | Rust macro | Complete mangled-name table |
 | `<pkg>.leo4-shim.so` | Lake | Rust runtime (linker) | Native shim binary |
 
 All five files share the same `<pkg>` basename per IDL package.
+
+## `<pkg>.leo4-schema`
+
+Plain UTF-8 IDL text in the canonical form defined by `SPEC/mangling.md` §3,
+i.e.
+
+1. comments and doc strings stripped,
+2. whitespace collapsed to single ASCII spaces (with newlines between
+   top-level declarations preserved for human readability — the
+   normalisation that feeds the schema hash collapses *all* whitespace,
+   but the on-disk file may keep one `\n` between declarations and
+   indented members so a human can read it),
+3. `use` decls sorted lexicographically by path,
+4. `interface` decls sorted lexicographically by name,
+5. **type decls before resources before functions** inside each
+   interface, lex-sorted within each band,
+6. record/variant **fields** kept in declaration order (NOT sorted; see
+   `SPEC/canonical-abi.md` §8),
+7. `type` and `constraint` aliases inlined.
+
+The file is the authoritative description of the package's IDL. The
+schema hash in `<pkg>.leo4-handshake` is the FNV-1a-64 of *exactly the
+fully-collapsed form* of this file (whitespace-collapse step applied to
+the whole stream), so re-deriving the hash from a `.leo4-schema` on disk
+must reproduce the handshake's value byte-for-byte.
 
 ## `<pkg>.leo4-handshake`
 

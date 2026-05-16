@@ -151,10 +151,23 @@ constraint ::= "scalar"
 ### 4.3 Forbidden Constructs at the Boundary
 
 - Universe-polymorphic types (`Sort u` for any `u`)
-- Dependent function types where the codomain depends on a value of the domain
-- Non-`Type 0` types
+- **Dependent codomain**: a function whose return type *syntactically*
+  mentions one of its own value generics. Dependent *parameter* types
+  (`(n : Nat) → Vec n α → α`) ARE allowed — the value `n` is erased and
+  `Vec n α` lowers to `list<α>` at the boundary; see SPEC/mangling.md
+  "Value-param erasure". Only when the return type itself depends on a
+  value is the function unmarshallable.
+- Non-`Type 0` types in *parameter / return positions*. Generic
+  parameters themselves may have higher kinds (`F : Type → Type`) or
+  value types (`n : Nat`) — both are erased / monomorphised by the
+  plugin — but the *transported* types after substitution must land in
+  `Type 0`.
 - Recursive constraints (e.g., `T : Marshal` requiring `T → T : Marshal`)
 - Open-ended negation (`¬(T : Marshal)`)
+- **Mutual recursion between two nominal types** (each naming the other
+  via `Self`-or-otherwise). v0 supports only *direct* self-recursion
+  through the `Self` keyword (`SPEC/idl-grammar.ebnf`). Users break a
+  mutual cycle by wrapping one side in a `LeanResource` handle.
 
 The Lake plugin rejects these with diagnostics.
 
@@ -169,8 +182,14 @@ Input:
 Step 1 — admit-set per parameter:
   for each (f, [c1,…,cn]) in C:
     for i in 1..n:
-      if the generic Ti is PHANTOM (does not appear in any parameter type
-                                   or in the return type of f's signature):
+      if the generic Ti is a VALUE_PARAM (its binder type is a `Type`-kinded
+                                          expression like `Nat`, not a kind):
+        admit(f, i) := ERASED       // value generics are not enumerated;
+                                    // the plugin records the param's name
+                                    // and erases it from the boundary.
+                                    // See SPEC/mangling.md "Value-param erasure".
+      else if Ti is PHANTOM (does not appear in any parameter type or in
+                            the return type of f's signature):
         admit(f, i) := PHANTOM     // a single dimensionless slot — see below
       else if ci is absent (the generic has no constraint at all):
         admit(f, i) := UNBOUNDED   // every primitive IDL type — see below
@@ -367,6 +386,68 @@ pub trait LeanMarshal: LeanType {
 ```
 
 Blanket impls for all scalars; `derive(LeanType)` for user records and variants.
+
+## 10.1. Mirroring Type System on the Lean Side
+
+The Lean runtime library (`lake/Leo4`) exposes typeclasses that the plugin
+discovers via `Lean.Meta.instanceExtension`:
+
+```lean
+class LeanMarshal (T : Type) where
+  canonicalEncode : T → ByteArray → ByteArray
+  -- Append `T`'s little-endian wire encoding to `buf`, return updated buffer.
+  canonicalDecode : ByteArray → Nat → Except LeanError (T × Nat)
+  -- Decode one `T` starting at offset `off` in `buf`; return value and the
+  -- offset one past the value's last byte.
+
+class LeanResource (T : Type)                          -- marker, no methods
+
+-- Mutual exclusion: instance LeanMarshal T → no LeanResource T, and vice versa.
+-- The plugin enforces this; users get a diagnostic at instance registration.
+```
+
+`LeanMarshal` and `LeanResource` cover **disjoint** populations: a type is
+either marshalled inline (record / variant / enum / scalar — its bytes
+cross the boundary) or held as a resource handle (its bytes never cross;
+a `u64` handle does). The plugin's admit-set computation treats
+`LeanMarshal` and `LeanResource` as separate `marshal` and `resource`
+constraints (`LEO4-DESIGN.md §4.2`).
+
+### `deriving LeanMarshal`
+
+```lean
+structure Point where
+  x : Float
+  y : Float
+  deriving LeanMarshal           -- field encode/decode in declaration order
+
+inductive Color where
+  | red | green | blue
+  deriving LeanMarshal           -- all-nullary → encoded as IDL `enum` (u32 case index)
+
+inductive Tree where
+  | leaf
+  | node : Tree → Tree → Tree
+  deriving LeanMarshal           -- self-recursive → encoded as IDL `variant`,
+                                 -- recursive fields lower to `Self` in the IDL.
+```
+
+The deriving handler synthesises one `instance : LeanMarshal X` plus, on
+the plugin side, an IDL declaration emitted into `<pkg>.leo4-schema`.
+Field order, nominal-name disambiguation, recursion handling, and
+generic-record mangling all follow `SPEC/mangling.md` and
+`SPEC/canonical-abi.md`. Mutual recursion (two declarations that name each
+other) is **not supported in v0** — the plugin rejects it; users break
+the cycle with a `LeanResource` handle.
+
+### `@[leo4_resource]` shorthand
+
+```lean
+@[leo4_resource]
+opaque ParserHandle : Type
+```
+
+equivalent to a hand-written `instance : LeanResource ParserHandle := ⟨⟩`.
 
 ## 11. Out-of-Scope (v0)
 

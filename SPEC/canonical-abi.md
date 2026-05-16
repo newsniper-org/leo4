@@ -107,9 +107,28 @@ with omitted payloads.
 ## 8. Records
 
 `record R { f₁: T₁, …, fₙ: Tₙ }`:
-- Fields in declaration order (after IDL normalization sorts members).
+- Fields in **declaration order**. Note: IDL normalization
+  (`SPEC/mangling.md` §3) sorts `interface` members, but it does NOT sort
+  record/variant fields — those keep their author-given order so that
+  encode/decode is stable across source rearrangements that should be
+  semantically inert (e.g. doc-comment edits).
 - Each field encoded per its type.
 - No padding between fields.
+
+### 8.1 Self-recursive records and variants
+
+If a field's type is `Self` (see `SPEC/idl-grammar.ebnf`), encode/decode
+recurses into the same record/variant definition. Encoders MUST tolerate
+arbitrary recursion depth; decoders MAY enforce a depth cap configured
+through `leo4.toml` (`max_decode_depth`, default 256) and return error
+code `0x0000_0008` (decode-depth-exceeded) on overflow.
+
+`Self` carries no type information of its own on the wire — its layout
+is identical to the enclosing record/variant's. Hence `Self` does **not**
+appear in the mangled symbol name (it would create infinite expansion);
+the schema hash, however, sees the `Self` token literally in the
+normalized IDL form, so any change to a self-recursive type's other
+fields still rotates every mangled symbol that references it.
 
 ## 9. Variants
 
@@ -192,6 +211,8 @@ leo4 runtime error codes:
 | `0x0000_0004` | Out of memory |
 | `0x0000_0005` | Schema handshake mismatch |
 | `0x0000_0006` | Unknown function |
+| `0x0000_0007` | Return buffer too small (caller retries with larger buffer) |
+| `0x0000_0008` | Decode-depth exceeded on a `Self`-recursive type |
 
 ## 14. Function Call Convention
 
@@ -212,7 +233,6 @@ int32_t leo4_call_<mangled>(
   encoded return value and sets `*ret_len`.
 - If `*ret_len > ret_cap` on entry, callee MAY write nothing and return
   `0x0000_0007` (buffer-too-small); caller retries with larger buffer.
-  TODO: decide if buffer-too-small is in the runtime range or separate.
 
 ### Argument tuple encoding
 

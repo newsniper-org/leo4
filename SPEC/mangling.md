@@ -71,16 +71,163 @@ mangle_type(result<T, E>)    = "Rz_" ++ mangle_type(T) ++ "_" ++ mangle_type(E) 
 mangle_type(result<T>)       = "Rz_" ++ mangle_type(T) ++ "__z"
 mangle_type(tuple<T₁,…,Tₙ>)  = "T_" ++ join("_", map(mangle_type, [T₁,…,Tₙ])) ++ "_t"
 
-mangle_type(record R)        = "S_" ++ R ++ "_s"
-mangle_type(record R<T₁,…>)  = "S_" ++ R ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_s"
-mangle_type(variant V)       = "V_" ++ V ++ "_v"
-mangle_type(variant V<T₁,…>) = "V_" ++ V ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_v"
-mangle_type(enum E)          = "E_" ++ E ++ "_e"
-mangle_type(flags F)         = "F_" ++ F ++ "_f"
-mangle_type(resource R)      = "X_" ++ R ++ "_x"
+mangle_type(record R)        = "S_" ++ fqn(R) ++ "_s"
+mangle_type(record R<T₁,…>)  = "S_" ++ fqn(R) ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_s"
+mangle_type(variant V)       = "V_" ++ fqn(V) ++ "_v"
+mangle_type(variant V<T₁,…>) = "V_" ++ fqn(V) ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_v"
+mangle_type(enum E)          = "E_" ++ fqn(E) ++ "_e"
+mangle_type(flags F)         = "F_" ++ fqn(F) ++ "_f"
+mangle_type(resource R)      = "X_" ++ fqn(R) ++ "_x"
+mangle_type(resource R<T₁,…>)= "X_" ++ fqn(R) ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_x"
 
 mangle_type(io<T>)           = "I_" ++ mangle_type(T) ++ "_i"
+
+mangle_type(Self)            = "self"   -- only inside a record/variant/resource
+                                        -- body; never expands recursively.
 ```
+
+### Fully-qualified names
+
+```
+fqn(name) = name.replace(".", "_")
+```
+
+`fqn` is applied to the IDL-side FQN of a nominal type — i.e. its
+Lean-side module path joined by `.` and then translated to `_` for
+linker friendliness. Example: a record declared in Lean as
+`Sample.Geom.Point` mangles as `S_Sample_Geom_Point_s`.
+
+### Generic records / variants / resources
+
+The mangling of a generic record `R<T₁,…,Tₙ>` includes the substituted
+type arguments at the record level (one mangle_type chunk per
+argument). Field types are **not** independently mangled into the
+record's name — the record-level mangling is sufficient to disambiguate.
+
+If a field of a generic record references one of `R`'s own type
+parameters (e.g. `record Pair<α, β> { fst: α, snd: β }`), the field
+itself contributes nothing to `R`'s mangling beyond what `[T₁,…,Tₙ]`
+already supplies.
+
+### `Self` and `Self<…>`
+
+`Self` mangles to the literal string `self`. It is permitted only as a
+type leaf inside the immediately enclosing record, variant, or
+resource declaration. The plugin does **not** expand `Self` recursively
+into its parent's mangled form — that would loop on self-referential
+types like `record Tree { left: Self, right: Self }`. The canonical
+ABI handles `Self` by recursive traversal at encode/decode time
+(SPEC/canonical-abi.md §8.1).
+
+`Self<T₁,…,Tₙ>` mangles as `self_<mangle_type(T₁)>_<…>_<mangle_type(Tₙ)>_x`,
+i.e. like a generic application whose head is the marker `self`. The
+recursive reference still does not loop because the head mangles to a
+constant `self` token regardless of the enclosing's name; only the
+substituted arguments contribute distinct tokens. Bare `Self` is the
+identity-substitution sugar and mangles as `self`.
+
+### Higher-kinded type parameters
+
+When a generic parameter has kind `Type -> Type` (or higher arity), its
+*type-level uses* in the function signature appear as applications, e.g.
+`F<T>`. Such applications mangle exactly as `mangle_type` would on a
+named type: the head `F` is itself a generic parameter and is replaced
+by its concrete instantiation drawn from the admit-set (a 1-arity record /
+variant / resource, or a builtin like `list` / `option`). The result is
+then mangled per `mangle_type`. There is no separate `mangle_type(F<T>)`
+clause because the substitution erases the HK parameter before mangling.
+
+Example: `func map<F : Type -> Type, A, B>(x: F<A>, f: A -> B) -> F<B>;`
+with the instantiation `F = list, A = u32, B = u64` substitutes to
+`map(x: list<u32>, f: u32 -> u64) -> list<u64>`; the parameter type
+list `[list<u32>, u32 -> u64]` mangles as
+`L_u32_l_<arrow-mangling-TBD>`. Function-arrow mangling for callback
+parameters lands in Phase 4 (function-pointer ABI not yet specified).
+
+## 4. Kind discipline
+
+EBNF describes only the *syntactic* shape of the IDL. The kind system
+imposes semantic constraints that EBNF cannot express; the plugin
+checks them after parsing and rejects ill-kinded declarations with a
+diagnostic.
+
+### Judgment
+
+`Γ ⊢ τ :: κ` reads as "in kind environment `Γ`, the IDL type expression
+`τ` has kind `κ`."
+
+```
+Γ ⊢ u8 :: Type          Γ ⊢ string :: Type          Γ ⊢ bool :: Type
+Γ ⊢ bigint :: Type      Γ ⊢ bignat :: Type          Γ ⊢ char :: Type
+              ⋯ (every primitive has kind Type) ⋯
+
+Γ ⊢ list :: Type -> Type        Γ ⊢ option :: Type -> Type
+Γ ⊢ result :: Type -> Type -> Type    Γ ⊢ tuple :: Type -> ... -> Type
+                                       -- tuple is variadic; arity fixed at use site.
+
+For a named declaration:
+  record R<X₁ : κ₁, …, Xₙ : κₙ> { … }   ⟹   R :: κ₁ -> … -> κₙ -> Type
+  (variants and resources analogous)
+
+For a generic parameter binder:
+  X : κ          ⟹   Γ, X :: κ ⊢ X :: κ
+
+Application:
+  Γ ⊢ f :: κ₁ -> κ₂      Γ ⊢ a :: κ₁
+  ──────────────────────────────────
+        Γ ⊢ f<a> :: κ₂
+
+Self:
+  Inside `record R<X₁ : κ₁, …, Xₙ : κₙ> { … }` the binding
+  Self :: κ₁ -> … -> κₙ -> Type   is in scope.
+  Bare `Self` (no arguments) is sugar for `Self<X₁, …, Xₙ>`.
+```
+
+### Mandatory checks
+
+For every parsed declaration the plugin verifies:
+
+1. Each generic parameter binder is classified as **type_param** or
+   **value_param** (SPEC/idl-grammar.ebnf):
+   - **type_param**: the `:` annotation, if present, is a kind built from
+     `Type` and `->`. Absent annotation defaults to `Type`. Anything else
+     is a *kind* error.
+   - **value_param**: the `:` annotation is a `type`. The annotation
+     itself must be well-kinded `:: Type` (no value-of-HKT, no
+     value-of-value).
+2. Every type-level use is well-kinded: every application `f<a₁,…,aₙ>`
+   has `f :: κ₁ -> … -> κₙ -> κ` for matching `aᵢ :: κᵢ`, and the result
+   kind `κ` is consistent with the position (e.g. function parameter
+   types must be `Type`, not `Type -> Type`).
+3. `Self<…>` arity matches the enclosing declaration's generic_params
+   arity exactly.
+4. **Dependent codomain rejection**: a function's return type may not
+   *syntactically* mention any of the function's value_params — value
+   dependence on the return side is forbidden at the boundary
+   (LEO4-DESIGN.md §4.3). It is fine for *parameter* types to mention
+   value_params (e.g. `Vec n α`), because those types lower to ordinary
+   length-prefixed forms (`list<α>`); the value is implicit in the
+   wire encoding.
+
+Ill-kinded declarations never reach the admit-set enumerator.
+
+### Value-param erasure
+
+A `value_param` carries no contribution to:
+- the mangled name (no `__<n>__` token),
+- the schema-hash input (the `value_param`'s **name** appears in the
+  normalized IDL form, so renaming `n` to `len` rotates the hash, but no
+  *value* of `n` is ever folded in),
+- the function's wire ABI (the parameter is not transmitted; its value
+  is recovered, when needed, from a length prefix elsewhere in the
+  encoding).
+
+In effect, value generics are a Lean-side ergonomics feature; from the
+boundary's perspective the function behaves exactly as if all
+`value_params` had been deleted and the dependent types in the
+parameter list had been replaced by their erased counterparts (`Vec n α`
+→ `list<α>`, `Fin n` → `u32`, etc.). The IDL emitter performs this
+erasure when writing `<pkg>.leo4-schema`.
 
 ### Invariants
 
@@ -198,20 +345,64 @@ leo4__my_data__util__sum__L_u64_l__h<hash>
 Note that `sum`'s parameter list has one parameter, so the type list
 emitted into the symbol is `[list<u64>]`, producing the `L_u64_l` chunk.
 
-### Example 3 — record-returning function
+### Example 3 — record-returning function (FQN)
 
 ```
 package my:geom;
 interface points {
-    record Point { x: f64, y: f64 }
-    func midpoint(a: Point, b: Point) -> Point;
+    record My.Geom.Point { x: f64, y: f64 }
+    func midpoint(a: My.Geom.Point, b: My.Geom.Point) -> My.Geom.Point;
 }
 ```
 
-Mangled:
+`fqn("My.Geom.Point") = "My_Geom_Point"`, so mangled:
 ```
-leo4__my_geom__points__midpoint__S_Point_s_S_Point_s__h<hash>
+leo4__my_geom__points__midpoint__S_My_Geom_Point_s_S_My_Geom_Point_s__h<hash>
 ```
+
+### Example 4 — self-recursive variant
+
+```
+package my:syntax;
+interface ast {
+    variant My.Ast.Tree { leaf, node(Self, Self) }
+    func depth(t: My.Ast.Tree) -> u32;
+}
+```
+
+`Self` mangles to `self` and never expands recursively. The variant
+itself mangles via its FQN. So:
+```
+leo4__my_syntax__ast__depth__V_My_Ast_Tree_v__h<hash>
+```
+
+The mangled name of `Tree` itself, were it ever used as a `mangle_type`
+target, is `V_My_Ast_Tree_v`. The `Self` token only appears inside the
+declaration's body and contributes to the schema hash (via the
+normalized IDL form) but not to any function's mangled symbol.
+
+### Example 5 — generic record
+
+```
+package my:gen;
+interface kv {
+    record My.Kv.Pair<α, β> { fst: α, snd: β }
+    func swap<A, B>(p: My.Kv.Pair<A, B>) -> My.Kv.Pair<B, A>;
+}
+```
+
+For the instantiation `A = u32, B = string`:
+```
+P₁ = My.Kv.Pair<u32, string>  →  S_My_Kv_Pair_u32_str_s
+```
+So:
+```
+leo4__my_gen__kv__swap__S_My_Kv_Pair_u32_str_s__h<hash>
+```
+
+Note that the fields `fst` and `snd` of `Pair` do **not** contribute
+their own mangled tokens — the record's type-argument list `[u32, str]`
+already disambiguates the instantiation at the record level.
 
 ## 5. Cross-Implementation Conformance
 
