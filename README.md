@@ -5,8 +5,9 @@ toolchain version.
 
 ## Status
 
-**Phases 1–4 complete; Phase 5 prep (CI matrix infra) in progress.**
-See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
+**Phases 1–4 complete; Phase 5 prep (CI matrix infra) complete; Phase 5
+itself (C shim + Rust runtime + macros + examples) is the next concrete
+task.** See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
 
 What works today:
 
@@ -54,8 +55,14 @@ What works today:
   `wit-bindgen`. Matrix `v4.27.0 / v4.28.0 / v4.29.1 / v4.30.0-rc2`
   iterates inside a single container; hardlink-shared source mirror
   in a named volume gives union-FS-style dedup without privileged
-  mounts. GitHub Actions is the planned primary CI; Tart is the
-  fallback path once Apple Silicon hardware is available.
+  mounts. **All 4 versions verified green** on the full `just test`
+  ladder (mangling / wit / conformance / cargo / lake); each version
+  produces the same `schema_hash` over the sample fixture
+  (`7vi56qcxzb3xw`), confirming leo4's *Lean-version-independent
+  output* invariant at the matrix level. First-run cold ~50 minutes
+  (toolchain pull + cold builds); subsequent runs ~7 minutes with the
+  persisted cache volume. GitHub Actions is the planned primary CI;
+  Tart is the fallback path once Apple Silicon hardware is available.
 
 What is **not** built yet:
 

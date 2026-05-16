@@ -190,6 +190,28 @@ can't address the right symbols. Phase 3 not strictly required (we
 can use leo4 IDL natively for this phase), but if Phase 3 lands first
 we share `.wit` for component-model packaging.
 
+## Phase 5 prep — CI matrix infra — **DONE 2026-05-16**
+
+Multi-version Lean matrix in a hermetic Ubuntu container, mounted as a
+fallback against GitHub Actions outages. Versions `v4.27.0 / v4.28.0 /
+v4.29.1 / v4.30.0-rc2` iterate in a single container; one named volume
+(`leo4-matrix-cache`) holds a master source mirror plus per-version
+work trees populated via `rsync --link-dest=` (hardlink dedup, no
+privileged mounts).
+
+**Results:** all four versions green on `just test`
+(mangling + wit + conformance + cargo + lake); identical
+`schema_hash` (`7vi56qcxzb3xw`) across versions; cold ~50 min, warm
+~7 min via cache persistence.
+
+**Cross-version drift caught during W7-0a:** v4.30.0-rc2 now requires
+`Lean.enableInitializersExecution` before `Lean.importModules
+(loadExts := true)`. The function is present back to v4.27.0 (no-op
+when called too early), so the plugin calls it unconditionally just
+before `importModules`. This is exactly the kind of API tightening
+the matrix exists to catch. `spike/SPIKE-0-FINDINGS.md` Q4 has been
+extended with the v4.30 data point.
+
 ## Phase 5 — ABI shim synthesis + `cc`/`leanc` driving
 
 The biggest remaining gap: the C shim that bridges the canonical-ABI

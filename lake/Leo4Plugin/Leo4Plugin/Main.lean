@@ -460,6 +460,13 @@ def main (args : List String) : IO UInt32 := do
 
   Lean.initSearchPath (← Lean.findSysroot)
 
+  -- Required since Lean v4.30.0-rc2 before `importModules (loadExts := true)`;
+  -- present (and a no-op until called) in v4.27.0+. We call it
+  -- unconditionally so the same plugin binary works across the
+  -- supported toolchain matrix. `unsafeIO` wrapping reflects the
+  -- function's `unsafe` signature in `Lean.ImportingFlag`.
+  unsafe Lean.enableInitializersExecution
+
   let t0 ← IO.monoNanosNow
   let env ← Lean.importModules
     (imports := #[{ module := cfg.target }, { module := `Leo4 }])

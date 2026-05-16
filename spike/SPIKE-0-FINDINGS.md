@@ -93,6 +93,29 @@ After that one call, the rest of the spike just works:
 - Diffs in `/tmp/lean-history/` (not committed; reproducible from the same `gh api` calls).
 - `grep "^def importModules " /tmp/lean-history/*/Environment.lean` confirms identical default-arg lists.
 
+### Addendum (2026-05-16, from CI matrix run W7-0a)
+
+The Phase 5 prep matrix (`ci/matrix.sh`) added `v4.30.0-rc2` to the
+anchor set and found one *runtime* drift that did not show up in the
+static diff above: **`importModules (loadExts := true)` now requires
+`Lean.enableInitializersExecution` to have been called first**. The
+function itself is defined in `Lean.ImportingFlag` and was present in
+every version we sampled (`v4.27.0`, `v4.28.0`, `v4.29.1`, `v4.30.0-rc2`),
+but only `v4.30` enforces the call order; earlier versions silently
+allowed the call to be skipped.
+
+Fix in the plugin: one line, `unsafe Lean.enableInitializersExecution`,
+just before `Lean.importModules`. Safe in every matrix version (no-op
+when called too early). The matrix now reports all 4 versions green,
+which is the proof that this drift cost us one CI cycle and zero days
+of debugging — exactly the value the matrix was added to deliver.
+
+The takeaway: *static API-shape diffing is a necessary but not
+sufficient stability signal*. Runtime preconditions (initialization
+order, side-effect ordering, default-flag changes) only surface in an
+actual cross-version `just test` run. Keep the matrix in CI from
+Phase 5 onward.
+
 ---
 
 ## Q5: What is the cost of running this hook?
