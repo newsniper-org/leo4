@@ -75,6 +75,9 @@ structure EmitBundle where
   any Lean class we encountered in `[Cls T]` binders. -/
   constraintUniverse : Array (String × Array IDLType)
   entries         : Array ManglingEntry
+  /-- Pretty (newline-decorated) IDL text for the on-disk `<pkg>.leo4-schema`
+  file.  Its fully-collapsed form is the input to `schemaHash`. -/
+  schemaText      : String
   deriving Inhabited
 
 /-! ## JSON encoders (ordered keys) -/
@@ -154,18 +157,20 @@ private def writeAtomic (outDir : System.FilePath) (basename : String) (contents
   IO.FS.rename tmpPath (outDir / basename)
 
 /--
-Write the bundle to `<outDir>/<pkg>.leo4-mangling` and `<outDir>/<pkg>.leo4-handshake`
-atomically.  Handshake is renamed last so Cargo only sees the new snapshot
-once `.leo4-mangling` is already in place.
+Write the bundle to `<outDir>/<pkg>.leo4-schema`,
+`<outDir>/<pkg>.leo4-mangling`, and `<outDir>/<pkg>.leo4-handshake`
+atomically.  Order per SPEC/handshake.md §"Atomic Emission" — handshake
+last, so Cargo (which watches handshake) only sees a fully consistent
+snapshot.
 -/
 def emit (outDir : System.FilePath) (b : EmitBundle) : IO Unit := do
   IO.FS.createDirAll outDir
-  -- Package-name colons can appear in filenames on some filesystems; use the
-  -- mangling-safe segment as the file stem.
   let stem := normalizePackageSegment b.package
+  let schemaText    := b.schemaText
   let manglingText  := (manglingTableJson b).pretty
   let handshakeText := (handshakeJson b).pretty
-  -- Mangling first, handshake last (SPEC §"Atomic Emission" rule).
+  -- schema first (largest text), mangling, handshake last.
+  writeAtomic outDir s!"{stem}.leo4-schema"    schemaText
   writeAtomic outDir s!"{stem}.leo4-mangling"  manglingText
   writeAtomic outDir s!"{stem}.leo4-handshake" handshakeText
 

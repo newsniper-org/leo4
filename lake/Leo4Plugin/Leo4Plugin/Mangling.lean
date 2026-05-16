@@ -142,32 +142,100 @@ def collapseWhitespace (s : String) : String := Id.run do
   if out.endsWith " " then out := (out.dropEnd 1).copy
   return out
 
-/--
-Render a synthetic *canonical IDL form* for a discovered export set. This is
-intentionally a subset of the full grammar (`SPEC/idl-grammar.ebnf`): we
-emit only what the Week 2 plugin currently understands — `package`,
-`interface`, and `func` declarations. The hash computed over this string is
-stable across plugin runs given the same exports.
+/-- IDL textual form of an `IDLType` (human-readable, matches
+`SPEC/idl-grammar.ebnf`). Distinct from `mangleType`, which produces the
+linker-symbol form. -/
+partial def idlForm : IDLType → String
+  | .u8 => "u8" | .u16 => "u16" | .u32 => "u32" | .u64 => "u64"
+  | .i8 => "i8" | .i16 => "i16" | .i32 => "i32" | .i64 => "i64"
+  | .f32 => "f32" | .f64 => "f64"
+  | .bool => "bool" | .char => "char" | .string => "string"
+  | .bigint => "bigint" | .bignat => "bignat"
+  | .list t          => "list<" ++ idlForm t ++ ">"
+  | .option t        => "option<" ++ idlForm t ++ ">"
+  | .result t none   => "result<" ++ idlForm t ++ ">"
+  | .result t (some e) => "result<" ++ idlForm t ++ ", " ++ idlForm e ++ ">"
+  | .tuple ts        => "tuple<" ++ String.intercalate ", " (ts.toList.map idlForm) ++ ">"
+  | .record fqn args =>
+      if args.isEmpty then fqn
+      else fqn ++ "<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
+  | .variant fqn args =>
+      if args.isEmpty then fqn
+      else fqn ++ "<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
+  | .enumT fqn       => fqn
+  | .flagsT fqn      => fqn
+  | .resource fqn args =>
+      if args.isEmpty then fqn
+      else fqn ++ "<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
+  | .io t            => "io<" ++ idlForm t ++ ">"
+  | .self            => "Self"
 
-When the IDL emitter (`<pkg>.leo4-schema`) lands in Phase 3, that file's
-normalised form should produce the same hash.
+/-- Render one `UserDecl` as a single line of IDL text. Field/case order is
+the order in the `UserDecl` (which the walker preserves — declaration
+order, per SPEC/canonical-abi.md §8). -/
+def userDeclToIDL : UserDecl → String
+  | .record fqn _generics fields =>
+      let fieldStrs := fields.map fun (n, t) => s!"{n.toString}: {idlForm t}"
+      "record " ++ fqn ++ " { " ++ String.intercalate ", " fieldStrs.toList ++ " }"
+  | .enumT fqn cases =>
+      let caseStrs := cases.map (·.toString)
+      "enum " ++ fqn ++ " { " ++ String.intercalate ", " caseStrs.toList ++ " }"
+  | .variant fqn _generics cases =>
+      let caseStrs := cases.map fun (cn, payload) =>
+        if payload.isEmpty then cn.toString
+        else cn.toString ++ "(" ++ String.intercalate ", " (payload.toList.map idlForm) ++ ")"
+      "variant " ++ fqn ++ " { " ++ String.intercalate ", " caseStrs.toList ++ " }"
+  | .resource fqn _generics =>
+      "resource " ++ fqn
+
+/-- Sort key tag for SPEC/handshake.md `<pkg>.leo4-schema` ordering:
+type decls first, then resources, then functions; lex by FQN within each band. -/
+private def declBand : UserDecl → Nat
+  | .record _ _ _ => 0
+  | .enumT _ _    => 0
+  | .variant _ _ _ => 0
+  | .resource _ _  => 1   -- resources sorted between types and funcs
+
+/--
+Render the canonical IDL form for the discovered export set + user-type
+declarations.
+
+* `pretty := true`  → newline-decorated form for `<pkg>.leo4-schema`.
+* `pretty := false` → fully-collapsed form (the schema-hash input).
+
+The two forms are byte-identical after the whitespace-collapsing step
+described in `SPEC/handshake.md`; that is the contract between the
+on-disk schema file and the handshake's schema hash.
+
+`SPEC/handshake.md` ordering: type decls first (lex by FQN), then
+resources (lex by FQN), then functions (lex by fname).
 -/
 def renderCanonical
     (pkg : String) (iface : String)
-    (members : Array (String × Array IDLType × IDLType)) : String := Id.run do
-  -- Sort members by function name (SPEC/mangling.md §3 step 6).
-  let sorted := members.qsort fun (a, _, _) (b, _, _) => a < b
-  let mut s : String := "package " ++ pkg ++ "; interface " ++ iface ++ " { "
-  for (fname, params, ret) in sorted do
-    s := s ++ "func " ++ fname ++ "("
+    (userDecls : Array UserDecl)
+    (members : Array (String × Array IDLType × IDLType))
+    (pretty : Bool := false) : String := Id.run do
+  -- Sort user decls: band first, then FQN.
+  let sortedDecls := userDecls.qsort fun a b =>
+    if declBand a == declBand b then a.fqn < b.fqn
+    else declBand a < declBand b
+  let sortedFuncs := members.qsort fun (a, _, _) (b, _, _) => a < b
+  let nl    : String := if pretty then "\n" else " "
+  let ind   : String := if pretty then "  " else ""
+  let mut s : String := "package " ++ pkg ++ ";" ++ nl
+  s := s ++ "interface " ++ iface ++ " {" ++ nl
+  for d in sortedDecls do
+    s := s ++ ind ++ userDeclToIDL d ++ ";" ++ nl
+  for (fname, params, ret) in sortedFuncs do
+    s := s ++ ind ++ "func " ++ fname ++ "("
     for i in [0 : params.size] do
       if i > 0 then s := s ++ ", "
-      s := s ++ "_" ++ toString i ++ ": " ++ mangleType params[i]!
-    s := s ++ ") -> " ++ mangleType ret ++ "; "
+      s := s ++ "_" ++ toString i ++ ": " ++ idlForm params[i]!
+    s := s ++ ") -> " ++ idlForm ret ++ ";" ++ nl
   s := s ++ "}"
-  return collapseWhitespace s
+  return if pretty then s else collapseWhitespace s
 
-/-- Hash the canonical form via FNV-1a-64 (SPEC/mangling.md §3). -/
+/-- Hash the canonical (fully collapsed) form via FNV-1a-64. -/
 def schemaHashOf (canonical : String) : Hash :=
   Hash.ofString canonical
 

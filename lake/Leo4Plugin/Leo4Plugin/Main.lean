@@ -279,12 +279,14 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
     for note in a.notes do
       IO.println s!"      note: {note}"
 
-  -- Mutual-exclusion check: any user type that has both LeanMarshal and
-  -- LeanResource instances violates LEO4-DESIGN.md §10.1.
+  -- Collect every user type referenced by an analysis (param/return).
   let mut allUserTypes : Array String := #[]
   for a in analyses do
     for t in gatherUserTypes a do
       unless allUserTypes.contains t do allUserTypes := allUserTypes.push t
+
+  -- Mutual-exclusion check: any user type that has both LeanMarshal and
+  -- LeanResource instances violates LEO4-DESIGN.md §10.1.
   for fqn in allUserTypes do
     let nm := fqn.toName
     if hasLeanMarshalInstance env nm ∧ hasLeanResourceInstance env nm then
@@ -292,12 +294,33 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
         v0 requires them to be disjoint (LEO4-DESIGN.md §10.1). \
         The plugin keeps the LeanResource interpretation; please remove one."
 
-  -- Build the canonical IDL form (one (fname, params, ret) per instantiation).
+  -- Walk every referenced user type and synthesise its IDL declaration.
+  let userDeclsIO : IO (Array UserDecl) := do
+    let action : MetaM (Array UserDecl) := do
+      let mut out : Array UserDecl := #[]
+      for fqn in allUserTypes do
+        match ← walkUserDecl (← getEnv) {} fqn.toName with
+        | some d => out := out.push d
+        | none   => pure ()
+      return out
+    let coreCtx : Core.Context := { fileName := "<leo4plugin>", fileMap := FileMap.ofString "" }
+    let coreSt  : Core.State   := { env := env }
+    let core    : CoreM (Array UserDecl) := action.run' {} {}
+    let (xs, _) ← core.toIO coreCtx coreSt
+    return xs
+  let userDecls ← userDeclsIO
+
+  IO.println s!"-- user types: {userDecls.size} --"
+  for d in userDecls do
+    IO.println s!"  • {userDeclToIDL d}"
+
+  -- Build the canonical IDL form (declarations + functions).
   let mut members : Array (String × Array IDLType × IDLType) := #[]
   for a in analyses do
     for (_, paramInfos, ret) in a.resolved do
       members := members.push (a.fname, paramInfos.map (·.encoded), ret)
-  let canonical := renderCanonical cfg.pkg cfg.iface members
+  let canonical  := renderCanonical cfg.pkg cfg.iface userDecls members (pretty := false)
+  let schemaText := renderCanonical cfg.pkg cfg.iface userDecls members (pretty := true)
   let schemaHash := schemaHashOf canonical
   IO.println s!"schema_hash (base32lc): {schemaHash.toBase32lc}"
   IO.println s!"schema_hash (hex)     : {schemaHash.toHex}"
@@ -324,10 +347,14 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
       unless cu.any (·.1 == cls.toString) do
         cu := cu.push (cls.toString, ax)
 
+  let resourceCount : Nat := userDecls.foldl (init := 0) fun acc d =>
+    match d with
+    | .resource _ _ => acc + 1
+    | _ => acc
   let ifaceSummary : Emit.InterfaceSummary :=
     { name := cfg.iface
       function_count := analyses.size
-      resource_count := 0 }
+      resource_count := resourceCount }
 
   let bundle : Emit.EmitBundle := {
     package            := cfg.pkg
@@ -338,11 +365,14 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
     interfaces         := #[ifaceSummary]
     constraintUniverse := cu
     entries            := manglingEntries
+    schemaText         := schemaText
   }
 
   Emit.emit cfg.outDir bundle
-  IO.println s!"wrote {cfg.outDir / s!"{normalizePackageSegment cfg.pkg}.leo4-handshake"}"
-  IO.println s!"wrote {cfg.outDir / s!"{normalizePackageSegment cfg.pkg}.leo4-mangling"}"
+  let stem := normalizePackageSegment cfg.pkg
+  IO.println s!"wrote {cfg.outDir / s!"{stem}.leo4-schema"}"
+  IO.println s!"wrote {cfg.outDir / s!"{stem}.leo4-mangling"}"
+  IO.println s!"wrote {cfg.outDir / s!"{stem}.leo4-handshake"}"
 
 def main (args : List String) : IO UInt32 := do
   let cfg := parseArgs args

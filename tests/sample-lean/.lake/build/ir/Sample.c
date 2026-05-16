@@ -124,6 +124,8 @@ static const lean_string_object lp_leo4_x2dsample_Sample_colorName___closed__2_v
 static const lean_object* lp_leo4_x2dsample_Sample_colorName___closed__2 = (const lean_object*)&lp_leo4_x2dsample_Sample_colorName___closed__2_value;
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_colorName(uint8_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_colorName___boxed(lean_object*);
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_parserId(uint64_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_parserId___boxed(lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -1670,6 +1672,23 @@ uint8_t x_2; lean_object* x_3;
 x_2 = lean_unbox(x_1);
 x_3 = lp_leo4_x2dsample_Sample_colorName(x_2);
 return x_3;
+}
+}
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_parserId(uint64_t x_1) {
+_start:
+{
+return x_1;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_parserId___boxed(lean_object* x_1) {
+_start:
+{
+uint64_t x_2; uint64_t x_3; lean_object* x_4; 
+x_2 = lean_unbox_uint64(x_1);
+lean_dec_ref(x_1);
+x_3 = lp_leo4_x2dsample_Sample_parserId(x_2);
+x_4 = lean_box_uint64(x_3);
+return x_4;
 }
 }
 lean_object* initialize_Init(uint8_t builtin);

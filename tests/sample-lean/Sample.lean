@@ -77,4 +77,13 @@ def colorName (c : Color) : String :=
   | .green => "green"
   | .blue  => "blue"
 
+-- W3-5: resource fixture. `@[leo4_resource]` marks `ParserHandle` as
+-- opaque to the boundary; only a `u64` handle crosses the wire.
+@[leo4_resource]
+structure ParserHandle where
+  raw : UInt64
+
+@[leo4_export]
+def parserId (h : ParserHandle) : ParserHandle := h
+
 end Sample
