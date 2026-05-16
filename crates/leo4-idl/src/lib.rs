@@ -20,7 +20,9 @@ pub mod hash;
 pub mod base32;
 pub mod idl;
 pub mod mangle;
+pub mod parse;
 
 pub use hash::Hash;
-pub use idl::{IDLType, UserDecl};
+pub use idl::{FuncDecl, IDLType, Schema, UserDecl};
 pub use mangle::{fqn_seg, mangle, mangle_type};
+pub use parse::{parse, parse_raw, resolve, ParseError, RawSchema, ResolveError};

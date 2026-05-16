@@ -71,3 +71,20 @@ impl UserDecl {
         }
     }
 }
+
+/// A function exported across the boundary, post-resolution.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FuncDecl {
+    pub name: String,
+    pub params: Vec<(String, IDLType)>,
+    pub ret: IDLType,
+}
+
+/// A fully-resolved IDL schema. `parse::parse(...)` returns one of these.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Schema {
+    pub package: String,
+    pub interface: String,
+    pub user_decls: Vec<UserDecl>,
+    pub funcs: Vec<FuncDecl>,
+}
