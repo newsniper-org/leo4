@@ -22,8 +22,10 @@ mangle(f, [P₁, …, Pₘ]) =
 
 ### Components
 
-- `pkg`: the IDL `package` declaration's name. Colons in the package path
-  are replaced with `_` (e.g., `my:lean` → `my_lean`).
+- `pkg`: the IDL `package` declaration's name. Colons **and dashes** in
+  the package path are replaced with `_` (e.g., `my:lean` → `my_lean`;
+  `leo4-sample` → `leo4_sample`). See `fqn` below — both segments use
+  the same dash/dot/colon → underscore normalisation.
 - `iface`: the `interface` declaration's name.
 - `fname`: the function name as written in IDL.
 - `[P₁, …, Pₘ]`: the function's **parameter types**, in declaration order,
@@ -89,13 +91,18 @@ mangle_type(Self)            = "self"   -- only inside a record/variant/resource
 ### Fully-qualified names
 
 ```
-fqn(name) = name.replace(".", "_")
+fqn(name) = name.replace(".", "_").replace("-", "_")
 ```
 
 `fqn` is applied to the IDL-side FQN of a nominal type — i.e. its
 Lean-side module path joined by `.` and then translated to `_` for
-linker friendliness. Example: a record declared in Lean as
-`Sample.Geom.Point` mangles as `S_Sample_Geom_Point_s`.
+linker friendliness. Both dots and dashes collapse to underscores; the
+dash case lets kebab-case names (e.g. `leo4-sample`) survive into the
+mangled symbol as valid C / Lean identifiers (Lean's `@[export ident]`
+attribute parses an unquoted identifier and rejects dashes). Example:
+a record declared in Lean as `Sample.Geom.Point` mangles as
+`S_Sample_Geom_Point_s`; a package named `leo4-sample` mangles as
+`leo4_sample`.
 
 ### Generic records / variants / resources
 

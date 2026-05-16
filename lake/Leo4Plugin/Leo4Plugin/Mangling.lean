@@ -18,8 +18,10 @@ open Leo4Plugin (IDLType)
 private def joinUnderscore (xs : Array String) : String :=
   String.intercalate "_" xs.toList
 
-/-- FQN → mangling-safe segment: dot-separated module path joined by `_`. -/
-def fqnSeg (fqn : String) : String := fqn.replace "." "_"
+/-- FQN → mangling-safe segment: dot- and dash-separated module path
+joined by `_` (SPEC/mangling.md §2 "Fully-qualified names"). -/
+def fqnSeg (fqn : String) : String :=
+  (fqn.replace "." "_").replace "-" "_"
 
 partial def mangleType : IDLType → String
   | .u8  => "u8"  | .u16 => "u16" | .u32 => "u32" | .u64 => "u64"
@@ -109,11 +111,51 @@ def toBase32lc (h : Hash) : String := Id.run do
 
 end Hash
 
+/-! ## IDL → Lean type-expression mapping -/
+
+/--
+Render an `IDLType` as the source-level Lean type that the canonical
+ABI maps it to.  Used by `Leo4Plugin.Main` when emitting the Lean
+wrapper file (`<pkg>.leo4-exports.lean`) — every `@[leo4_export]`
+monomorphisation gets a thin wrapper whose signature is built from
+this function, and whose body forwards to the user's original decl.
+
+Inverse of `Leo4Plugin.AdmitSet.leanNameToIDL` for the cases the
+plugin currently rounds-trips.  Composite cases produce parenthesised
+forms so the result can be slotted into a binder position without
+further wrapping. -/
+partial def idlToLeanType : IDLType → String
+  | .u8  => "UInt8"  | .u16 => "UInt16" | .u32 => "UInt32" | .u64 => "UInt64"
+  | .i8  => "Int8"   | .i16 => "Int16"  | .i32 => "Int32"  | .i64 => "Int64"
+  | .f32 => "Float32"
+  | .f64 => "Float"
+  | .bool   => "Bool"
+  | .char   => "Char"
+  | .string => "String"
+  | .bigint => "Int"
+  | .bignat => "Nat"
+  | .list t          => "(List " ++ idlToLeanType t ++ ")"
+  | .option t        => "(Option " ++ idlToLeanType t ++ ")"
+  | .result t none   => "(Except Empty " ++ idlToLeanType t ++ ")"
+  | .result t (some e) =>
+      "(Except " ++ idlToLeanType e ++ " " ++ idlToLeanType t ++ ")"
+  | .tuple ts =>
+      "(" ++ String.intercalate " × " (ts.toList.map idlToLeanType) ++ ")"
+  | .record fqn _ | .variant fqn _ | .resource fqn _ => fqn
+  | .enumT fqn      | .flagsT fqn   => fqn
+  | .io t           => "(IO " ++ idlToLeanType t ++ ")"
+  | .self           => "_"      -- only reachable inside a nominal body
+  | .selfApp _      => "_"
+
 /-! ## Function-name mangling (SPEC/mangling.md §1) -/
 
-/-- Per SPEC: `pkg` colons (`:`) are replaced with `_`. -/
+/-- Per SPEC/mangling.md §1: `pkg` colons (`:`) and dashes (`-`) are
+both replaced with `_`. Dashes are normalised so kebab-case package
+names (e.g. `leo4-sample`) become valid linker symbols and valid Lean
+identifiers — Lean's `@[export ident]` attribute parses an unquoted
+identifier and rejects dashes. -/
 def normalizePackageSegment (pkg : String) : String :=
-  pkg.replace ":" "_"
+  (pkg.replace ":" "_").replace "-" "_"
 
 /-- Full mangled name. See `SPEC/mangling.md` §1. -/
 def mangle

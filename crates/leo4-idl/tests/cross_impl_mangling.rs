@@ -16,11 +16,11 @@ use std::collections::BTreeSet;
 
 use leo4_idl::{mangle, parse, render_canonical, Hash};
 
-const SCHEMA_PATH: &str = "../../tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-schema";
+const SCHEMA_PATH: &str = "../../tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-schema";
 const MANGLING_PATH: &str =
-    "../../tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-mangling";
+    "../../tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-mangling";
 const HANDSHAKE_PATH: &str =
-    "../../tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-handshake";
+    "../../tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-handshake";
 
 #[test]
 fn schema_hash_matches_lake_plugin() {

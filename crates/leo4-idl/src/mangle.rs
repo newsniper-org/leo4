@@ -8,11 +8,13 @@
 use crate::hash::Hash;
 use crate::idl::IDLType;
 
-/// FQN → mangling-safe segment: dotted Lean name joined by `_`.
-/// SPEC/mangling.md §2 "Fully-qualified names".
+/// FQN → mangling-safe segment: dotted/kebab Lean name joined by `_`.
+/// SPEC/mangling.md §2 "Fully-qualified names". Both dots and dashes
+/// collapse to underscores so kebab-case names survive as valid C /
+/// Lean identifiers (`@[export ident]` rejects dashes).
 #[must_use]
 pub fn fqn_seg(fqn: &str) -> String {
-    fqn.replace('.', "_")
+    fqn.replace('.', "_").replace('-', "_")
 }
 
 /// Type encoding per SPEC/mangling.md §2.
@@ -71,7 +73,7 @@ fn join_underscore(ts: &[IDLType]) -> String {
 /// parameter types verbatim.
 #[must_use]
 pub fn mangle(pkg: &str, iface: &str, fname: &str, args: &[IDLType], schema_hash: Hash) -> String {
-    let pkg_seg = pkg.replace(':', "_");
+    let pkg_seg = pkg.replace(':', "_").replace('-', "_");
     let args_seg = args.iter().map(mangle_type).collect::<Vec<_>>().join("_");
     format!(
         "leo4__{pkg_seg}__{iface}__{fname}__{args_seg}__h{}",

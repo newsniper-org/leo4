@@ -22,9 +22,9 @@ just smoke-plugin > /dev/null
 cargo build --quiet -p leo4c
 BIN="$ROOT/target/debug/leo4c"
 
-SCHEMA="$ROOT/tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-schema"
-LEAN_MANGLING="$ROOT/tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-mangling"
-LEAN_HANDSHAKE="$ROOT/tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-handshake"
+SCHEMA="$ROOT/tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-schema"
+LEAN_MANGLING="$ROOT/tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-mangling"
+LEAN_HANDSHAKE="$ROOT/tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-handshake"
 
 # Schema hash check.
 RUST_HASH=$("$BIN" mangle "$SCHEMA" | jq -r .schema_hash)

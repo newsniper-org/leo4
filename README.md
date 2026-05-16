@@ -162,8 +162,8 @@ just                    # list recipes
 just plugin-build       # build the Lake plugin (and Leo4)
 just sample-build       # build tests/sample-lean
 just smoke-plugin       # run leo4plugin against the sample, emit
-                        # leo4-sample.{leo4-schema,leo4-mangling,leo4-handshake}
-just smoke-plugin-with-wit  # also emit leo4-sample.wit via `leo4c lower`
+                        # leo4_sample.{leo4-schema,leo4-mangling,leo4-handshake}
+just smoke-plugin-with-wit  # also emit leo4_sample.wit via `leo4c lower`
 just schema-hash        # print the sample's resolved schema hash
 just clean              # nuke build outputs
 

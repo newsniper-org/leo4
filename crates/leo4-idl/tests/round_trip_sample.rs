@@ -2,7 +2,7 @@ use leo4_idl::parse;
 
 #[test]
 fn parses_lake_plugin_sample_schema() {
-    let path = "../../tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-schema";
+    let path = "../../tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-schema";
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|_| panic!("schema fixture missing at {path}; run `just smoke-plugin` first"));
     let schema = parse(&text).expect("parse should succeed");
