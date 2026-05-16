@@ -10,5 +10,8 @@ description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
 
 [dependencies]
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

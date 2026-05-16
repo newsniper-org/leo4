@@ -39,7 +39,11 @@ inductive IDLType where
   | flagsT   (fqn : String)
   | resource (fqn : String) (args : Array IDLType)
   | io       (t : IDLType)
+  /-- Bare `Self` — identity-substitution sugar for `Self<X₁, …, Xₙ>`. -/
   | self
+  /-- `Self<T₁, …, Tₙ>` — explicit substitution; mangles as `self_<…>_x`
+  (SPEC/mangling.md §"Self and Self<…>"). -/
+  | selfApp (args : Array IDLType)
   deriving Repr, Inhabited, BEq
 
 /-- A user-package nominal type declaration. The plugin discovers these by
@@ -160,9 +164,14 @@ partial def exprToIDLSubst
       let b ← exprToIDLSubst env enclosing subst args[1]!
       pure (.tuple #[a, b])
   | .const n _, _ =>
-      -- Self-reference?
+      -- Self-reference? Bare `Tree` = `.self`; `Tree α` = `.selfApp [α']`.
       if enclosing == some n then
-        some .self
+        if args.isEmpty then some .self
+        else
+          let argsIdl? : Option (Array IDLType) :=
+            args.foldlM (init := (#[] : Array IDLType)) fun acc a =>
+              (exprToIDLSubst env enclosing subst a).map (acc.push ·)
+          argsIdl?.map IDLType.selfApp
       -- Primitive?
       else if let some idl := leanNameToIDL n then
         some idl

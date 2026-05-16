@@ -49,6 +49,7 @@ partial def mangleType : IDLType → String
       else "X_" ++ fqnSeg fqn ++ "_" ++ joinUnderscore (args.map mangleType) ++ "_x"
   | .io t       => "I_" ++ mangleType t ++ "_i"
   | .self       => "self"
+  | .selfApp args => "self_" ++ joinUnderscore (args.map mangleType) ++ "_x"
 
 /-! ## Schema hash (SPEC/mangling.md §3) -/
 
@@ -169,6 +170,7 @@ partial def idlForm : IDLType → String
       else fqn ++ "<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
   | .io t            => "io<" ++ idlForm t ++ ">"
   | .self            => "Self"
+  | .selfApp args    => "Self<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
 
 /-- Render one `UserDecl` as a single line of IDL text. Field/case order is
 the order in the `UserDecl` (which the walker preserves — declaration

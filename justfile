@@ -64,9 +64,9 @@ build: lake-build cargo-build
 
 test: lake-test cargo-test mangling-test
 
-# Cross-impl mangling conformance — Lake vs leo4c (Rust). Phase 3+.
+# Cross-impl mangling conformance — Lake plugin vs leo4c (Rust).
 mangling-test:
-    @echo "TODO(phase-3): cross-impl mangling conformance test"
+    tests/mangling/run.sh
 
 # Validate SPEC/*.md consistency (Phase 1+).
 spec-lint:

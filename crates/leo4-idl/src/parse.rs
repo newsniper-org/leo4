@@ -103,12 +103,90 @@ pub struct RawFunc {
     pub ret: RawType,
 }
 
+/// A `use path [as ident];` declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UseDeclRaw {
+    /// Dotted/colon-segmented path, raw text.
+    pub path: String,
+    /// Optional rename via `as <ident>`.
+    pub alias: Option<String>,
+}
+
+/// A `type Name [generic_params] = type;` alias.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeAliasRaw {
+    pub name: String,
+    pub generics: Vec<GenericParamRaw>,
+    pub body: RawType,
+}
+
+/// A `constraint Name = body;` declaration. v0 keeps the body raw text;
+/// constraint evaluation lives in the plugin / Phase 4.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConstraintDeclRaw {
+    pub name: String,
+    /// Verbatim body text (whitespace-collapsed). Parsed lazily by the
+    /// plugin's constraint-evaluator; the parser only confirms balanced
+    /// braces.
+    pub body: String,
+}
+
+/// A single `interface Name [generic_params] { … }` block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InterfaceRaw {
+    pub name: String,
+    pub generics: Vec<GenericParamRaw>,
+    pub decls: Vec<RawDecl>,
+    pub funcs: Vec<RawFunc>,
+    pub use_decls: Vec<UseDeclRaw>,
+}
+
+/// A `world Name { … }` block. Currently parsed but not used by the
+/// downstream resolver — Phase 3+ WIT lowering revisits this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorldRaw {
+    pub name: String,
+    /// Verbatim body lines, post-whitespace collapse.
+    pub items: Vec<String>,
+}
+
+/// `generic_params` entry, pre-resolution. The body fields keep raw
+/// text for the `:` annotation; the Phase 1 `Schema` collapses this to
+/// just the param name (kind/value erasure lives at admit-set time).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GenericParamRaw {
+    /// `T : kind` or bare `T` (defaults to `Type`).
+    Type {
+        name: String,
+        kind: Option<RawKind>,
+        constraint: Option<String>,
+    },
+    /// `n : <value-type>` — dependent value generic, erased at the boundary.
+    Value { name: String, ty: RawType },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RawKind {
+    Type,
+    Arrow(Box<RawKind>, Box<RawKind>),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawSchema {
     pub package: String,
+    /// Convenience: name of the first interface, if any (else "").
     pub interface: String,
+    /// Convenience: all nominal decls from top level and from the first
+    /// interface, in source order with top-level first.
     pub decls: Vec<RawDecl>,
+    /// Convenience: funcs from the first interface.
     pub funcs: Vec<RawFunc>,
+    /// Full document detail (Phase 2+).
+    pub use_decls: Vec<UseDeclRaw>,
+    pub type_decls: Vec<TypeAliasRaw>,
+    pub constraint_decls: Vec<ConstraintDeclRaw>,
+    pub interfaces: Vec<InterfaceRaw>,
+    pub worlds: Vec<WorldRaw>,
 }
 
 /// Top-level entry: parse and resolve in one shot.
@@ -118,52 +196,102 @@ pub fn parse(input: &str) -> Result<Schema, Box<dyn std::error::Error>> {
     Ok(schema)
 }
 
-/// Parse to `RawSchema` without resolving named types.
+/// Parse to `RawSchema` without resolving named types. Accepts the full
+/// `SPEC/idl-grammar.ebnf` `document` shape (`package_decl`, `use_decl`,
+/// `interface_decl`, `world_decl`, top-level `type_decl`/`constraint_decl`/
+/// `nominal_decl`). The Lake plugin currently emits exactly one
+/// interface; multiple interfaces / worlds are accepted at parse time
+/// for tools that hand-write IDL.
 pub fn parse_raw(input: &str) -> Result<RawSchema, ParseError> {
     let mut p = Parser::new(input);
     p.skip_ws();
-    p.expect_keyword("package")?;
-    let package = p.parse_ident_or_kebab()?;
-    p.expect_char(';')?;
-    p.expect_keyword("interface")?;
-    let interface = p.parse_ident()?;
-    p.expect_char('{')?;
 
-    let mut decls: Vec<RawDecl> = Vec::new();
-    let mut funcs: Vec<RawFunc> = Vec::new();
+    // ── package_decl (required, exactly one) ─────────────────────────
+    p.expect_keyword("package")?;
+    let pkg_name = p.parse_ident_or_kebab()?;
+    p.skip_ws();
+    let pkg_subnamespace = if p.peek_char() == Some(':') {
+        p.pos += 1;
+        Some(p.parse_ident_or_kebab()?)
+    } else {
+        None
+    };
+    p.skip_ws();
+    if p.peek_char() == Some('@') {
+        // semver suffix; parsed but not retained — informational on the wire.
+        p.pos += 1;
+        let _ver = p.parse_semver_segment()?;
+    }
+    p.expect_char(';')?;
+
+    let package = match pkg_subnamespace {
+        Some(sub) => format!("{pkg_name}:{sub}"),
+        None => pkg_name,
+    };
+
+    // ── top-level items, until EOF ────────────────────────────────────
+    let mut top_use_decls: Vec<UseDeclRaw> = Vec::new();
+    let mut top_type_decls: Vec<TypeAliasRaw> = Vec::new();
+    let mut top_constraint_decls: Vec<ConstraintDeclRaw> = Vec::new();
+    let mut top_nominal_decls: Vec<RawDecl> = Vec::new();
+    let mut interfaces: Vec<InterfaceRaw> = Vec::new();
+    let mut worlds: Vec<WorldRaw> = Vec::new();
 
     loop {
         p.skip_ws();
-        if p.peek_char() == Some('}') {
+        if p.at_end() {
             break;
         }
-        if p.peek_keyword("enum") {
-            decls.push(p.parse_enum_decl()?);
-        } else if p.peek_keyword("record") {
-            decls.push(p.parse_record_decl()?);
-        } else if p.peek_keyword("variant") {
-            decls.push(p.parse_variant_decl()?);
-        } else if p.peek_keyword("resource") {
-            decls.push(p.parse_resource_decl()?);
-        } else if p.peek_keyword("func") {
-            funcs.push(p.parse_func_decl()?);
+        if p.peek_keyword("use") {
+            top_use_decls.push(p.parse_use_decl()?);
+        } else if p.peek_keyword("interface") {
+            interfaces.push(p.parse_interface_decl()?);
+        } else if p.peek_keyword("world") {
+            worlds.push(p.parse_world_decl()?);
+        } else if p.peek_keyword("type") {
+            top_type_decls.push(p.parse_type_alias_decl()?);
+        } else if p.peek_keyword("constraint") {
+            top_constraint_decls.push(p.parse_constraint_decl()?);
+        } else if p.peek_keyword("record")
+            || p.peek_keyword("variant")
+            || p.peek_keyword("enum")
+            || p.peek_keyword("resource")
+            || p.peek_keyword("flags")
+        {
+            top_nominal_decls.push(p.parse_nominal_decl()?);
         } else {
             return Err(ParseError::Expected {
                 at: p.pos,
-                what: "`enum`/`record`/`variant`/`resource`/`func` decl or `}`".into(),
+                what: "top-level item (`use`/`interface`/`world`/`type`/`constraint`/nominal decl)".into(),
             });
         }
-        p.skip_ws();
-        p.expect_char(';')?;
     }
 
-    p.expect_char('}')?;
-    p.skip_ws();
-    if !p.at_end() {
-        return Err(ParseError::TrailingInput { at: p.pos });
-    }
+    // For backward-compat with the rest of this crate (which expects one
+    // interface), pick the first interface as *the* interface and inline
+    // its nominal/func decls. Hand-written IDL with multiple interfaces
+    // is fine for `parse_raw`; downstream callers that need the full
+    // structure read `RawSchema.interfaces` directly.
+    let (interface_name, decls, funcs) = match interfaces.first() {
+        Some(iface) => {
+            let mut decls: Vec<RawDecl> = top_nominal_decls.clone();
+            decls.extend(iface.decls.iter().cloned());
+            (iface.name.clone(), decls, iface.funcs.clone())
+        }
+        None => ("".to_string(), top_nominal_decls.clone(), Vec::new()),
+    };
 
-    Ok(RawSchema { package, interface, decls, funcs })
+    Ok(RawSchema {
+        package,
+        interface: interface_name,
+        decls,
+        funcs,
+        use_decls: top_use_decls,
+        type_decls: top_type_decls,
+        constraint_decls: top_constraint_decls,
+        interfaces,
+        worlds,
+    })
 }
 
 /// Resolve all `Named { fqn, args }` references against the user
@@ -348,20 +476,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_str(&mut self, s: &str) -> Result<(), ParseError> {
-        self.skip_ws();
-        let bytes = s.as_bytes();
-        if self.input.get(self.pos..self.pos + bytes.len()) == Some(bytes) {
-            self.pos += bytes.len();
-            Ok(())
-        } else {
-            Err(ParseError::Expected {
-                at: self.pos,
-                what: format!("`{s}`"),
-            })
-        }
-    }
-
     /// Match keyword `s` only when the following byte is not an identifier
     /// continuation. e.g. `peek_keyword("u8")` against `"u8"` ⇒ true,
     /// against `"u8x"` ⇒ false. Does NOT advance `pos`.
@@ -517,13 +631,12 @@ impl<'a> Parser<'a> {
         }
         if self.peek_keyword("Self") {
             self.expect_keyword("Self")?;
-            // optional <args> — SPEC syntax allows Self<…>; for v0 we
-            // mangle to bare `self`, so swallow any args without
-            // distinguishing.
+            self.skip_ws();
             if self.peek_char() == Some('<') {
                 self.expect_char('<')?;
+                let mut args: Vec<IDLType> = Vec::new();
                 loop {
-                    let _ = self.parse_type()?;
+                    args.push(raw_to_builtin(self.parse_type()?)?);
                     self.skip_ws();
                     if self.peek_char() == Some(',') {
                         self.pos += 1;
@@ -532,6 +645,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect_char('>')?;
+                return Ok(RawType::Builtin(IDLType::SelfApp(args)));
             }
             return Ok(RawType::Builtin(IDLType::Self_));
         }
@@ -561,6 +675,7 @@ impl<'a> Parser<'a> {
     fn parse_enum_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("enum")?;
         let fqn = self.parse_fqn()?;
+        let _generics = self.parse_optional_generic_params()?;
         self.expect_char('{')?;
         let mut cases: Vec<String> = Vec::new();
         loop {
@@ -577,12 +692,14 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_char('}')?;
+        self.expect_char(';')?;
         Ok(RawDecl::Enum { fqn, cases })
     }
 
     fn parse_record_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("record")?;
         let fqn = self.parse_fqn()?;
+        let _generics = self.parse_optional_generic_params()?;
         self.expect_char('{')?;
         let mut fields: Vec<(String, RawType)> = Vec::new();
         loop {
@@ -602,12 +719,14 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_char('}')?;
+        self.expect_char(';')?;
         Ok(RawDecl::Record { fqn, fields })
     }
 
     fn parse_variant_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("variant")?;
         let fqn = self.parse_fqn()?;
+        let _generics = self.parse_optional_generic_params()?;
         self.expect_char('{')?;
         let mut cases: Vec<(String, Vec<RawType>)> = Vec::new();
         loop {
@@ -643,18 +762,418 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_char('}')?;
+        self.expect_char(';')?;
         Ok(RawDecl::Variant { fqn, cases })
     }
 
     fn parse_resource_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("resource")?;
         let fqn = self.parse_fqn()?;
+        let _generics = self.parse_optional_generic_params()?;
+        self.skip_ws();
+        // Optional `{ … }` body of methods — accepted, skip-balanced.
+        // v0 plugin doesn't emit a body; Phase 3+ may consume it for
+        // method dispatch.
+        if self.peek_char() == Some('{') {
+            self.pos += 1;
+            let mut depth: i32 = 1;
+            while self.pos < self.input.len() && depth > 0 {
+                let c = self.input[self.pos];
+                if c == b'{' {
+                    depth += 1;
+                } else if c == b'}' {
+                    depth -= 1;
+                }
+                self.pos += 1;
+            }
+        }
+        self.expect_char(';')?;
         Ok(RawDecl::Resource { fqn })
+    }
+
+    fn parse_use_decl(&mut self) -> Result<UseDeclRaw, ParseError> {
+        self.expect_keyword("use")?;
+        let path = self.parse_path()?;
+        self.skip_ws();
+        let alias = if self.peek_keyword("as") {
+            self.expect_keyword("as")?;
+            Some(self.parse_ident()?)
+        } else {
+            None
+        };
+        self.expect_char(';')?;
+        Ok(UseDeclRaw { path, alias })
+    }
+
+    fn parse_path(&mut self) -> Result<String, ParseError> {
+        self.skip_ws();
+        let mut s = self.parse_ident()?;
+        loop {
+            if self.peek_char() == Some(':') {
+                self.pos += 1;
+                let next = self.parse_ident()?;
+                s.push(':');
+                s.push_str(&next);
+            } else if self.peek_char() == Some('/') {
+                self.pos += 1;
+                let next = self.parse_ident()?;
+                s.push('/');
+                s.push_str(&next);
+            } else {
+                break;
+            }
+        }
+        Ok(s)
+    }
+
+    fn parse_semver_segment(&mut self) -> Result<String, ParseError> {
+        self.skip_ws();
+        let start = self.pos;
+        while self.pos < self.input.len() {
+            let c = self.input[self.pos];
+            if c.is_ascii_digit() || c == b'.' || c == b'-' || c.is_ascii_alphabetic() {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        if self.pos == start {
+            return Err(ParseError::Expected {
+                at: self.pos,
+                what: "semver".into(),
+            });
+        }
+        Ok(std::str::from_utf8(&self.input[start..self.pos])
+            .unwrap()
+            .to_string())
+    }
+
+    fn parse_type_alias_decl(&mut self) -> Result<TypeAliasRaw, ParseError> {
+        self.expect_keyword("type")?;
+        let name = self.parse_ident()?;
+        let generics = self.parse_optional_generic_params()?;
+        self.expect_char('=')?;
+        let body = self.parse_type()?;
+        self.expect_char(';')?;
+        Ok(TypeAliasRaw {
+            name,
+            generics,
+            body,
+        })
+    }
+
+    fn parse_constraint_decl(&mut self) -> Result<ConstraintDeclRaw, ParseError> {
+        self.expect_keyword("constraint")?;
+        let name = self.parse_ident()?;
+        self.expect_char('=')?;
+        // Capture body verbatim up to the terminating `;` (respecting `{}` /
+        // `()` nesting). Whitespace will be collapsed by callers that care.
+        let body = self.parse_balanced_to_semicolon()?;
+        self.expect_char(';')?;
+        Ok(ConstraintDeclRaw { name, body })
+    }
+
+    fn parse_balanced_to_semicolon(&mut self) -> Result<String, ParseError> {
+        self.skip_ws();
+        let start = self.pos;
+        let mut depth_brace = 0i32;
+        let mut depth_paren = 0i32;
+        let mut depth_angle = 0i32;
+        while self.pos < self.input.len() {
+            let c = self.input[self.pos];
+            match c {
+                b'{' => depth_brace += 1,
+                b'}' => depth_brace -= 1,
+                b'(' => depth_paren += 1,
+                b')' => depth_paren -= 1,
+                b'<' => depth_angle += 1,
+                b'>' => depth_angle -= 1,
+                b';' if depth_brace == 0 && depth_paren == 0 && depth_angle == 0 => break,
+                _ => {}
+            }
+            self.pos += 1;
+        }
+        let s = std::str::from_utf8(&self.input[start..self.pos])
+            .unwrap()
+            .trim()
+            .to_string();
+        Ok(s)
+    }
+
+    fn parse_interface_decl(&mut self) -> Result<InterfaceRaw, ParseError> {
+        self.expect_keyword("interface")?;
+        let name = self.parse_ident()?;
+        let generics = self.parse_optional_generic_params()?;
+        self.expect_char('{')?;
+
+        let mut decls: Vec<RawDecl> = Vec::new();
+        let mut funcs: Vec<RawFunc> = Vec::new();
+        let mut use_decls: Vec<UseDeclRaw> = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.peek_char() == Some('}') {
+                break;
+            }
+            if self.peek_keyword("use") {
+                use_decls.push(self.parse_use_decl()?);
+            } else if self.peek_keyword("enum")
+                || self.peek_keyword("record")
+                || self.peek_keyword("variant")
+                || self.peek_keyword("resource")
+                || self.peek_keyword("flags")
+            {
+                decls.push(self.parse_nominal_decl()?);
+            } else if self.peek_keyword("type") {
+                // Long-form `type Name = …;` — flatten into a record-style decl
+                // by parsing into the type alias, then dropping it into the
+                // RawDecl stream when its body is a nominal shape. For other
+                // shapes (`type X = list<u32>`) the alias is kept as a
+                // type-alias item — but `parse_raw`'s downstream `Schema`
+                // doesn't surface aliases yet, so we just lose them here.
+                // Phase 3 WIT lowering will need them.
+                let _alias = self.parse_type_alias_decl()?;
+            } else if self.peek_keyword("func") {
+                funcs.push(self.parse_func_decl()?);
+            } else {
+                return Err(ParseError::Expected {
+                    at: self.pos,
+                    what: "interface body item".into(),
+                });
+            }
+            // Each sub-decl parser consumes its own trailing `;` (or `}` for
+            // bodies). No extra `;` to eat here.
+        }
+        self.expect_char('}')?;
+        Ok(InterfaceRaw {
+            name,
+            generics,
+            decls,
+            funcs,
+            use_decls,
+        })
+    }
+
+    fn parse_world_decl(&mut self) -> Result<WorldRaw, ParseError> {
+        self.expect_keyword("world")?;
+        let name = self.parse_ident()?;
+        self.expect_char('{')?;
+        // For v0 we capture each world_item line as verbatim text.
+        let mut items: Vec<String> = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.peek_char() == Some('}') {
+                break;
+            }
+            let item = self.parse_balanced_to_semicolon()?;
+            self.expect_char(';')?;
+            if !item.is_empty() {
+                items.push(item);
+            }
+        }
+        self.expect_char('}')?;
+        Ok(WorldRaw { name, items })
+    }
+
+    fn parse_nominal_decl(&mut self) -> Result<RawDecl, ParseError> {
+        if self.peek_keyword("enum") {
+            self.parse_enum_decl()
+        } else if self.peek_keyword("record") {
+            self.parse_record_decl()
+        } else if self.peek_keyword("variant") {
+            self.parse_variant_decl()
+        } else if self.peek_keyword("resource") {
+            self.parse_resource_decl()
+        } else if self.peek_keyword("flags") {
+            self.parse_flags_decl()
+        } else {
+            Err(ParseError::Expected {
+                at: self.pos,
+                what: "nominal decl keyword".into(),
+            })
+        }
+    }
+
+    fn parse_flags_decl(&mut self) -> Result<RawDecl, ParseError> {
+        self.expect_keyword("flags")?;
+        let fqn = self.parse_fqn()?;
+        let _generics = self.parse_optional_generic_params()?;
+        self.expect_char('{')?;
+        let mut cases: Vec<String> = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.peek_char() == Some('}') {
+                break;
+            }
+            cases.push(self.parse_ident()?);
+            self.skip_ws();
+            if self.peek_char() == Some(',') {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        self.expect_char('}')?;
+        self.expect_char(';')?;
+        // We re-use RawDecl::Enum for flags at the parse layer; the
+        // resolver will downgrade. Phase 3 WIT lowering may distinguish
+        // them more precisely (SPEC/canonical-abi.md §11).
+        Ok(RawDecl::Enum { fqn, cases })
+    }
+
+    fn parse_optional_generic_params(&mut self) -> Result<Vec<GenericParamRaw>, ParseError> {
+        self.skip_ws();
+        if self.peek_char() != Some('<') {
+            return Ok(Vec::new());
+        }
+        self.pos += 1;
+        let mut params: Vec<GenericParamRaw> = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.peek_char() == Some('>') {
+                break;
+            }
+            params.push(self.parse_generic_param()?);
+            self.skip_ws();
+            if self.peek_char() == Some(',') {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        self.expect_char('>')?;
+        Ok(params)
+    }
+
+    fn parse_generic_param(&mut self) -> Result<GenericParamRaw, ParseError> {
+        let name = self.parse_ident()?;
+        self.skip_ws();
+        if self.peek_char() != Some(':') {
+            // Bare `T` → defaults to kind `Type`.
+            return Ok(GenericParamRaw::Type {
+                name,
+                kind: Some(RawKind::Type),
+                constraint: None,
+            });
+        }
+        self.pos += 1; // eat `:`
+        self.skip_ws();
+        // kind starts with `Type` or `(`. constraint_expr starts with anything else.
+        if self.peek_keyword("Type") || self.peek_char() == Some('(') {
+            // Could still be `(constraint_expr)`. Disambiguate by trying kind
+            // first; if that yields a non-`->`-extended `(` group whose body
+            // isn't kind-shaped, fall back. For v0 we keep it simple: `Type`
+            // / parenthesised kind is always a kind.
+            let kind = self.parse_kind()?;
+            Ok(GenericParamRaw::Type {
+                name,
+                kind: Some(kind),
+                constraint: None,
+            })
+        } else {
+            // Either a value_param (`n : Nat`) or a type_param with constraint
+            // expression. We can't fully disambiguate without a typing
+            // context. Heuristic: if the annotation parses as a `type` and
+            // that type's *kind* is `Type`, treat it as `value_param`;
+            // anything else (e.g. starting with `scalar`/`ord`/`¬`) is a
+            // `constraint_expr`. For v0 we record both possibilities as a
+            // verbatim string and let downstream sort it out at admit-set
+            // time.
+            let annotation = self.parse_balanced_to_terminator(b',', b'>')?;
+            // Best-effort classification: starts with a known constraint
+            // keyword → constraint; starts with `¬` → constraint; otherwise
+            // treat as a value-param `type` text (rare in monomorphised
+            // schemas; the plugin emits no value-params).
+            let trimmed = annotation.trim();
+            let looks_constraint = matches!(
+                trimmed.split_whitespace().next().unwrap_or(""),
+                "scalar" | "ord" | "eq" | "hash" | "pod" | "marshal" | "resource"
+            ) || trimmed.starts_with('¬');
+            if looks_constraint {
+                Ok(GenericParamRaw::Type {
+                    name,
+                    kind: None,
+                    constraint: Some(trimmed.to_string()),
+                })
+            } else {
+                // Re-parse the captured text as a type expression so the
+                // value-param body is structurally available downstream.
+                let mut sub = Parser::new(trimmed);
+                let ty = sub.parse_type()?;
+                Ok(GenericParamRaw::Value { name, ty })
+            }
+        }
+    }
+
+    fn parse_kind(&mut self) -> Result<RawKind, ParseError> {
+        let head = if self.peek_keyword("Type") {
+            self.expect_keyword("Type")?;
+            RawKind::Type
+        } else if self.peek_char() == Some('(') {
+            self.pos += 1;
+            let inner = self.parse_kind()?;
+            self.expect_char(')')?;
+            inner
+        } else {
+            return Err(ParseError::Expected {
+                at: self.pos,
+                what: "kind (`Type` or `(kind)`)".into(),
+            });
+        };
+        self.skip_ws();
+        if self.peek_str("->") {
+            self.pos += 2;
+            let tail = self.parse_kind()?;
+            Ok(RawKind::Arrow(Box::new(head), Box::new(tail)))
+        } else {
+            Ok(head)
+        }
+    }
+
+    /// Read raw bytes up to (but not consuming) any of `term1`/`term2`,
+    /// respecting `<>`/`()`/`{}` nesting. Used for generic-param
+    /// annotations whose internal shape we don't fully parse yet.
+    fn parse_balanced_to_terminator(&mut self, term1: u8, term2: u8) -> Result<String, ParseError> {
+        self.skip_ws();
+        let start = self.pos;
+        let mut depth_angle = 0i32;
+        let mut depth_paren = 0i32;
+        let mut depth_brace = 0i32;
+        while self.pos < self.input.len() {
+            let c = self.input[self.pos];
+            if depth_angle == 0 && depth_paren == 0 && depth_brace == 0 && (c == term1 || c == term2) {
+                break;
+            }
+            match c {
+                b'<' => depth_angle += 1,
+                b'>' => depth_angle -= 1,
+                b'(' => depth_paren += 1,
+                b')' => depth_paren -= 1,
+                b'{' => depth_brace += 1,
+                b'}' => depth_brace -= 1,
+                _ => {}
+            }
+            self.pos += 1;
+        }
+        let s = std::str::from_utf8(&self.input[start..self.pos])
+            .unwrap()
+            .trim()
+            .to_string();
+        Ok(s)
+    }
+
+    fn peek_str(&self, s: &str) -> bool {
+        let bytes = s.as_bytes();
+        let mut p = self.pos;
+        while p < self.input.len() && self.input[p].is_ascii_whitespace() {
+            p += 1;
+        }
+        self.input.get(p..p + bytes.len()) == Some(bytes)
     }
 
     fn parse_func_decl(&mut self) -> Result<RawFunc, ParseError> {
         self.expect_keyword("func")?;
         let name = self.parse_ident()?;
+        let _generics = self.parse_optional_generic_params()?;
         self.expect_char('(')?;
         let mut params: Vec<(String, RawType)> = Vec::new();
         self.skip_ws();
@@ -673,8 +1192,16 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_char(')')?;
-        self.expect_str("->")?;
-        let ret = self.parse_type()?;
+        // `func name(…) -> ret;` — `-> ret` is grammar-optional. Absent
+        // return value = zero-length on the wire (SPEC/canonical-abi.md §14).
+        self.skip_ws();
+        let ret = if self.peek_str("->") {
+            self.pos += 2;
+            self.parse_type()?
+        } else {
+            RawType::Builtin(IDLType::Tuple(vec![]))
+        };
+        self.expect_char(';')?;
         Ok(RawFunc { name, params, ret })
     }
 }
@@ -848,5 +1375,151 @@ mod tests {
         let err = parse("package p; interface i { func f(_0: p.Missing) -> u32; }").unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("unknown nominal type `p.Missing`"), "got: {msg}");
+    }
+
+    #[test]
+    fn package_with_subnamespace_and_version() {
+        let s = parse("package my:analytics@1.2.3; interface i { }").unwrap();
+        assert_eq!(s.package, "my:analytics");
+    }
+
+    #[test]
+    fn use_decl_at_top_level() {
+        let raw = parse_raw("package p; use a:b/c as x; interface i { }").unwrap();
+        assert_eq!(raw.use_decls.len(), 1);
+        assert_eq!(raw.use_decls[0].path, "a:b/c");
+        assert_eq!(raw.use_decls[0].alias.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn world_decl_skipped_into_items() {
+        let raw = parse_raw(
+            "package p; world w { import iface-a; export iface-b; use a:b; }",
+        )
+        .unwrap();
+        assert_eq!(raw.worlds.len(), 1);
+        assert_eq!(raw.worlds[0].name, "w");
+        assert_eq!(raw.worlds[0].items.len(), 3);
+    }
+
+    #[test]
+    fn top_level_nominal_decl() {
+        // record/enum at document scope, no interface block.
+        let raw = parse_raw(
+            "package p; record p.Pair { a: u32, b: u32 }; enum p.Side { left, right };",
+        )
+        .unwrap();
+        assert_eq!(raw.decls.len(), 2);
+    }
+
+    #[test]
+    fn top_level_constraint_decl_captured_verbatim() {
+        let raw = parse_raw(
+            "package p; constraint marshalScalar = scalar ∧ marshal; interface i { }",
+        )
+        .unwrap();
+        assert_eq!(raw.constraint_decls.len(), 1);
+        assert_eq!(raw.constraint_decls[0].name, "marshalScalar");
+        assert!(raw.constraint_decls[0].body.contains("scalar"));
+    }
+
+    #[test]
+    fn func_optional_return_type() {
+        let s = parse("package p; interface i { func ping(); }").unwrap();
+        // Absent `->` is equivalent to a zero-length tuple in the AST.
+        assert_eq!(s.funcs[0].ret, IDLType::Tuple(vec![]));
+    }
+
+    #[test]
+    fn interface_body_accepts_use() {
+        let raw = parse_raw("package p; interface i { use a:b; func f() -> u32; }").unwrap();
+        assert_eq!(raw.interfaces[0].use_decls.len(), 1);
+        assert_eq!(raw.interfaces[0].funcs.len(), 1);
+    }
+
+    #[test]
+    fn type_param_with_kind_annotation() {
+        // `F : Type -> Type` HK binder, on a func decl.
+        let raw = parse_raw(
+            "package p; interface i { func map<F : Type -> Type, A, B>(_0: u32) -> u32; }",
+        )
+        .unwrap();
+        let f = &raw.interfaces[0].funcs[0];
+        assert_eq!(f.name, "map");
+        // generics are captured in the interface's func generics array via
+        // parse_optional_generic_params; surface via funcs[0]... unused
+        // downstream for v0, but the syntax must parse cleanly.
+    }
+
+    #[test]
+    fn type_param_with_constraint_annotation() {
+        let raw = parse_raw(
+            "package p; interface i { func bucketize<T : scalar>(_0: u32) -> u32; }",
+        )
+        .unwrap();
+        assert_eq!(raw.interfaces[0].funcs[0].name, "bucketize");
+    }
+
+    #[test]
+    fn value_param_in_generic_params() {
+        // `{n : Nat}` value-param binder. The annotation parses as a
+        // type expression (`Nat` → IDL reference to user type or a
+        // primitive, depending on resolution context). For our parser
+        // it lives only as Raw form — resolution doesn't depend on it.
+        let raw = parse_raw(
+            "package p; interface i { func vlen<n : u32>(_0: u32) -> u32; }",
+        )
+        .unwrap();
+        assert_eq!(raw.interfaces[0].funcs[0].name, "vlen");
+    }
+
+    #[test]
+    fn generic_record_with_kinded_param() {
+        let raw = parse_raw(
+            "package p; interface i { record p.Pair<a : Type, b : Type> { fst: a, snd: b }; }",
+        )
+        .unwrap();
+        assert_eq!(raw.decls.len(), 1);
+        if let RawDecl::Record { fqn, fields } = &raw.decls[0] {
+            assert_eq!(fqn, "p.Pair");
+            assert_eq!(fields[0].0, "fst");
+        } else {
+            panic!("expected Record");
+        }
+    }
+
+    #[test]
+    fn self_app_args_preserved() {
+        let s = parse(
+            "package p; interface i { variant p.Tree<a> { leaf, node(Self<a>, Self<a>) }; func f() -> p.Tree<u32>; }",
+        )
+        .unwrap();
+        match &s.user_decls[0] {
+            UserDecl::Variant { cases, .. } => {
+                let node = &cases[1];
+                assert_eq!(node.0, "node");
+                assert_eq!(
+                    node.1,
+                    vec![
+                        IDLType::SelfApp(vec![
+                            IDLType::Record { fqn: "a".into(), args: vec![] }
+                        ]),
+                        IDLType::SelfApp(vec![
+                            IDLType::Record { fqn: "a".into(), args: vec![] }
+                        ]),
+                    ]
+                );
+            }
+            _ => panic!("expected Variant"),
+        }
+    }
+
+    #[test]
+    fn resource_with_methods_body() {
+        let s = parse(
+            "package p; interface i { resource p.Handle { /* method body ignored in v0 */ }; func id(_0: p.Handle) -> p.Handle; }",
+        )
+        .unwrap();
+        assert!(matches!(s.user_decls[0], UserDecl::Resource { .. }));
     }
 }

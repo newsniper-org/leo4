@@ -4,16 +4,40 @@
 (* are leo4-specific extensions that lower to WIT during the lowering pass.   *)
 
 document        = { package_decl | use_decl | interface_decl | world_decl
-                  | type_decl | constraint_decl } ;
+                  | type_decl | constraint_decl | nominal_decl } ;
 
 package_decl    = "package" , ident , [ ":" , ident ] , [ "@" , semver ] , ";" ;  (* [WIT] *)
 
 use_decl        = "use" , path , [ "as" , ident ] , ";" ;                          (* [WIT] *)
 
 interface_decl  = "interface" , ident , [ generic_params ] , "{" ,
-                  { type_decl | func_decl | resource_decl } , "}" ;                (* [leo4] generic_params *)
+                  { type_decl | func_decl | resource_decl | nominal_decl
+                  | use_decl } , "}" ;                                              (* [leo4] generic_params, nominal_decl *)
 
 world_decl      = "world" , ident , "{" , { world_item } , "}" ;                   (* [WIT] *)
+world_item      = "export" , ident , [ "(" , ident , ")" ] , ";"
+                | "import" , ident , [ "(" , ident , ")" ] , ";"
+                | use_decl | type_decl ;                                            (* [WIT, partial] *)
+
+(* leo4 short-form for nominal declarations introduced in an interface          *)
+(* (or top-level): name + body fused into one clause.  The standalone           *)
+(* `type X = …` form is the WIT-compatible long form; both are accepted.        *)
+(*                                                                              *)
+(*   record   Sample.Point<α> { x: α, y: α }                                    *)
+(*   enum     Sample.Color { red, green, blue }                                 *)
+(*   variant  Sample.Tree { leaf, node(Self, Self) }                            *)
+(*   resource Sample.ParserHandle                                               *)
+(*   flags    Sample.Perms { read, write, exec }                                *)
+nominal_decl    = nominal_record_decl
+                | nominal_variant_decl
+                | nominal_enum_decl
+                | nominal_resource_decl
+                | nominal_flags_decl ;                                              (* [leo4] *)
+nominal_record_decl    = "record"   , fqn , [ generic_params ] , "{" , field , { "," , field } , "}" , ";" ;
+nominal_variant_decl   = "variant"  , fqn , [ generic_params ] , "{" , variant_case , { "," , variant_case } , "}" , ";" ;
+nominal_enum_decl      = "enum"     , fqn , [ generic_params ] , "{" , ident , { "," , ident } , "}" , ";" ;
+nominal_resource_decl  = "resource" , fqn , [ generic_params ] , [ resource_body ] , ";" ;
+nominal_flags_decl     = "flags"    , fqn , [ generic_params ] , "{" , ident , { "," , ident } , "}" , ";" ;
 
 generic_params  = "<" , generic_param , { "," , generic_param } , ">" ;            (* [leo4] *)
 generic_param   = type_param | value_param ;                                       (* [leo4] *)

@@ -32,8 +32,12 @@ pub enum IDLType {
     Resource { fqn: String, args: Vec<IDLType> },
     /// `io<T>` — sync today, lowers to `result<T, error>`
     Io(Box<IDLType>),
-    /// `Self` — only valid inside a record/variant/resource body
+    /// `Self` — identity-substitution sugar for `Self<X1, …, Xn>` where
+    /// each `Xi` is the enclosing's own generic parameter.
     Self_,
+    /// `Self<T1, …, Tn>` — explicit substitution at a self-reference.
+    /// Mangles as `self_<…>_x` per SPEC/mangling.md §"Self and Self<…>".
+    SelfApp(Vec<IDLType>),
 }
 
 /// User-defined nominal type declarations the plugin discovers by walking

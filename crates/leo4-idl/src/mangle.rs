@@ -56,6 +56,7 @@ pub fn mangle_type(t: &IDLType) -> String {
         }
         Io(t) => format!("I_{}_i", mangle_type(t)),
         Self_ => "self".into(),
+        SelfApp(args) => format!("self_{}_x", join_underscore(args)),
     }
 }
 
@@ -140,6 +141,13 @@ mod tests {
 
         let self_ = IDLType::Self_;
         assert_eq!(mangle_type(&self_), "self");
+
+        // SPEC §"Self and Self<…>": Self<T1,…,Tn> mangles as
+        // `self_<args>_x`; the head stays the constant `self` token
+        // (no recursive expansion).
+        let self_app =
+            IDLType::SelfApp(vec![IDLType::U32, IDLType::String]);
+        assert_eq!(mangle_type(&self_app), "self_u32_str_x");
     }
 
     #[test]
