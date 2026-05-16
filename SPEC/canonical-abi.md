@@ -213,6 +213,7 @@ leo4 runtime error codes:
 | `0x0000_0006` | Unknown function |
 | `0x0000_0007` | Return buffer too small (caller retries with larger buffer) |
 | `0x0000_0008` | Decode-depth exceeded on a `Self`-recursive type |
+| `0x0000_0064` | Shim instantiation not yet implemented (W7-2a placeholder; removed once W7-2d ships full composite/nominal coverage) |
 
 ## 14. Function Call Convention
 
@@ -226,6 +227,11 @@ int32_t leo4_call_<mangled>(
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len
 );
 ```
+
+`<mangled>` here is the *body* produced by `SPEC/mangling.md §1`; the
+`leo4_call_` prefix is added by the shim (mangling.md §6). The Lean
+helper that the shim ultimately calls into uses the same body under
+the `leo4_lean__` prefix.
 
 - Return value: `0` for success, non-zero for error (see §13).
 - `args_ptr`/`args_len`: encoded argument list (tuple-like concatenation).

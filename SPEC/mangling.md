@@ -48,6 +48,24 @@ For a function with **zero parameters** the type list is empty and the
 mangled name contains the four consecutive underscores `__` `__h` literally,
 e.g. `leo4__pkg__iface__hello____h<hash>`.
 
+### The mangled name is a *body*, not an exported symbol
+
+The string produced by `mangle(f, …)` is the **body** that both ABI
+surfaces (shim entry point + Lean-side helper) wrap around. The actual
+linker symbols are:
+
+| Exported symbol            | Owner          | ABI                                     |
+|----------------------------|----------------|------------------------------------------|
+| `leo4_call_<mangled>`      | C shim         | canonical-buffer ABI (canonical-abi.md §14) |
+| `leo4_lean__<mangled>`     | Lean wrapper   | Lean native ABI (see §6)                  |
+
+Both prefixes are reserved (§7); user IDL cannot collide. The shared
+`<mangled>` body links the two so the shim can resolve its Lean helper
+deterministically. Conformance tests compare *bodies*, not exported
+symbols (the `<pkg>.leo4-mangling` file carries one `mangled` field per
+instantiation, holding the body; downstream consumers re-add whichever
+prefix they need).
+
 ## 2. Type Encoding
 
 ```
@@ -437,7 +455,49 @@ The test in `tests/mangling/` provides:
 
 Adding a new mangling rule REQUIRES adding a case to this test.
 
-## 6. Reserved Symbols
+## 6. Lean-side Native ABI Helper Names
+
+The shim entry point and the Lean-side helper both wrap the §1
+mangled body, under their respective prefixes. Concretely, every
+`<mangled>` body has **two** companion symbols in `<pkg>.leo4-shim.so`:
+
+| Symbol                              | Owner          | ABI                                          | Linkage  |
+|-------------------------------------|----------------|-----------------------------------------------|----------|
+| `leo4_call_<mangled>`               | C shim         | canonical-buffer ABI (canonical-abi.md §14)   | external |
+| `leo4_lean__<mangled>`              | Lean wrapper   | Lean native ABI                               | external |
+
+The shim's `leo4_call_<mangled>` entry point decodes the canonical
+buffer into Lean values via `lean.h`, calls `leo4_lean__<mangled>`
+(the `@[export]`-ed Lean wrapper around the user's `@[leo4_export]`
+definition), then encodes the return value back into the caller's
+output buffer.
+
+Concretely, the Lean side declares:
+
+```lean
+@[export leo4_lean__leo4__pkg__iface__fname__P1_P2__h<hash>]
+def _leo4_export_<safe>_<param-suffix> (p0 : T0) (p1 : T1) ... : Ret := …
+```
+
+Both names live in one `.so`, so there is one link step, not two. The
+`<mangled>` body is shared between the two prefixes so the shim can
+resolve its Lean-side helper purely by string concatenation
+(`"leo4_lean__" ++ mangled`) without consulting any extra mapping.
+
+The `leo4_lean__` prefix is fixed: the prefix never participates in
+the schema hash (it is a build-internal naming convention, not part
+of the ABI surface) and it is reserved (see §7 below).
+
+The `leo4_lean__` prefix starts with an alphabetic character because
+Lean's `@[export ident]` validator (`Lean.isValidCppId`) requires
+identifiers to begin with a letter, not an underscore. A leading-`_`
+form like `_leo4_lean__…` is rejected at attribute-application time.
+The prefix also stays disjoint from the mangled-body namespace:
+mangled bodies begin with `leo4__` (double underscore), shim entry
+points with `leo4_call_<mangled>`, and helper names with
+`leo4_lean__<mangled>`, so no user IDL can collide on any side.
+
+## 7. Reserved Symbols
 
 The following symbols are reserved by leo4 for runtime internals; user IDL
 must not produce mangled names that collide:
@@ -445,6 +505,8 @@ must not produce mangled names that collide:
 - `leo4__rt__*` — runtime API
 - `leo4__shim__*` — shim helpers
 - `leo4__panic_handler` — panic catcher
+- `leo4_call_*` — C shim canonical-buffer entry points (see §6)
+- `leo4_lean__*` — Lean-side native-ABI helper wrappers (see §6)
 
 Collision is impossible by construction (user IDL must have a `pkg` segment),
 but the linker will fail loudly if it ever happens, which is the desired

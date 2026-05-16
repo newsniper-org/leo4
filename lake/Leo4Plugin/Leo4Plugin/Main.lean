@@ -324,10 +324,15 @@ private def joinByUnderscore (xs : Array String) : String :=
 /-- For one `@[leo4_export]` × instantiation, render the wrapper:
 
 ```
-@[export "<mangled>"]
+@[export leo4_lean__<mangled>]
 def _leo4_export_<fname>_<param-suffix> (p0 : T0) (p1 : T1) ... : Ret :=
   <declName> (gname1 := <T1>) ... p0 p1 ...
 ```
+
+The bare `<mangled>` name is reserved for the C shim's canonical-buffer
+entry point (SPEC/mangling.md §6). The Lean wrapper exports the
+*native-ABI* helper that the shim calls into, hence the `leo4_lean__`
+prefix.
 
 `genericArgs` slots whose value is `none` correspond to phantom
 generics — they don't appear in the substitution; Lean's inference
@@ -367,10 +372,13 @@ private def renderOneWrapper
       s!"{a.declName.toString} {paramApp}"
     else
       s!"{a.declName.toString} {gargsApp} {paramApp}"
-  -- Lean's `@[export ident]` parses an *unquoted* identifier; our mangled
-  -- name is already a valid Lean ident after the §1 dash → underscore
-  -- normalisation, so we emit it bare (no surrounding quotes).
-  let header := s!"@[export {mangled}]\n"
+  -- Lean's `@[export ident]` parses an *unquoted* identifier; our
+  -- mangled name is already a valid Lean ident after the §1 dash →
+  -- underscore normalisation. The bare `<mangled>` symbol is reserved
+  -- for the C shim's canonical-buffer entry point (SPEC §6); the Lean
+  -- wrapper carries the `leo4_lean__` prefix so the shim can call into
+  -- a single deterministic native-ABI helper.
+  let header := s!"@[export leo4_lean__{mangled}]\n"
   let sigLine := s!"def {wrapperName} {paramSigsLine} : {idlToLeanType ret} :=\n"
   return header ++ sigLine ++ s!"  {body}\n"
 
@@ -384,7 +392,9 @@ def renderLeanExports
     "-- Do not edit by hand.\n" ++
     "--\n" ++
     "-- Each entry re-exports one `@[leo4_export]` monomorphisation under\n" ++
-    "-- its mangled leo4 symbol, giving the C shim a stable extern target.\n" ++
+    "-- `leo4_lean__<mangled>` — the native-ABI helper symbol that the\n" ++
+    "-- C shim calls into. The bare `<mangled>` name is reserved for the\n" ++
+    "-- shim's canonical-buffer entry point (SPEC/mangling.md §6).\n" ++
     "--\n" ++
     s!"-- Schema hash : {schemaHash.toBase32lc}\n" ++
     s!"-- Package     : {cfg.pkg}\n" ++
@@ -395,6 +405,169 @@ def renderLeanExports
     for (gargs, params, ret) in a.resolved do
       body := body ++ renderOneWrapper cfg a schemaHash gargs params ret ++ "\n"
   return banner ++ imports ++ body
+
+/-! ## C shim source emit (W7-2a) -/
+
+/-- Width and canonical-ABI C-type of an IDL primitive that the shim
+can wire end-to-end in W7-2a (scalars only). Returns `none` for
+non-scalar types — those get the `LEO4_ERR_UNIMPLEMENTED` stub
+treatment until W7-2c/W7-2d. -/
+private structure ScalarCType where
+  c    : String   -- canonical (signed-aware) C type, e.g. `int64_t`
+  size : Nat      -- bytes on the wire (== canonical ABI fixed-width)
+deriving Inhabited
+
+private def scalarCType : IDLType → Option ScalarCType
+  | .u8   => some { c := "uint8_t",  size := 1 }
+  | .u16  => some { c := "uint16_t", size := 2 }
+  | .u32  => some { c := "uint32_t", size := 4 }
+  | .u64  => some { c := "uint64_t", size := 8 }
+  | .i8   => some { c := "int8_t",   size := 1 }
+  | .i16  => some { c := "int16_t",  size := 2 }
+  | .i32  => some { c := "int32_t",  size := 4 }
+  | .i64  => some { c := "int64_t",  size := 8 }
+  | .f32  => some { c := "float",    size := 4 }
+  | .f64  => some { c := "double",   size := 8 }
+  | .bool => some { c := "uint8_t",  size := 1 }
+  | .char => some { c := "uint32_t", size := 4 }
+  | _    => none
+
+/-- C type Lean's code generator picks for a scalar in the native ABI
+(matches what `lean -c` prints for `@[export]` signatures). Signed and
+unsigned widths share the same C type; floats and char map naturally. -/
+private def leanNativeCType : IDLType → Option String
+  | .u8 | .i8 | .bool => some "uint8_t"
+  | .u16 | .i16        => some "uint16_t"
+  | .u32 | .i32 | .char => some "uint32_t"
+  | .u64 | .i64        => some "uint64_t"
+  | .f32               => some "float"
+  | .f64               => some "double"
+  | _                  => none
+
+private def cTypeOfIDL (t : IDLType) : String :=
+  match leanNativeCType t with
+  | some c => c
+  | none   => "lean_object*"
+
+/-- Render one shim entry point. Scalar-only signatures get an actual
+wire-format encode/decode body that hands off to
+`leo4_lean__<mangled>`. Anything that mentions a composite or nominal
+type returns the W7-2a placeholder so the link table stays complete
+while the encoder grows out in subsequent steps. -/
+private def renderOneShim
+    (cfg : Config) (a : ExportAnalysis) (schemaHash : Hash)
+    (params : Array Emit.ParamInfo) (ret : IDLType) : String := Id.run do
+  let mangled := mangle cfg.pkg cfg.iface a.fname
+                  (params.map (·.encoded)) schemaHash
+  let entry  := s!"leo4_call_{mangled}"
+  let helper := s!"leo4_lean__{mangled}"
+  let paramScs := params.map fun p => scalarCType p.encoded
+  let retSc?   := scalarCType ret
+  let allScalar := paramScs.all (·.isSome) && retSc?.isSome
+  let paramTyStr := String.intercalate ", "
+    (params.toList.map (fun p => cTypeOfIDL p.encoded))
+  let retTyStr := cTypeOfIDL ret
+  let banner :=
+    s!"// {a.fname} :: ({paramTyStr}) -> {retTyStr}\n"
+  if !allScalar then
+    return banner ++
+      s!"int32_t {entry}(\n" ++
+      "    leo4_arena_t* arena,\n" ++
+      "    const uint8_t* args_ptr, size_t args_len,\n" ++
+      "    uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)\n" ++
+      "{\n" ++
+      "    (void)arena; (void)args_ptr; (void)args_len;\n" ++
+      "    (void)ret_ptr; (void)ret_cap;\n" ++
+      "    *ret_len = 0;\n" ++
+      "    return LEO4_ERR_UNIMPLEMENTED;  /* W7-2a placeholder */\n" ++
+      "}\n"
+  let scs := paramScs.map (·.get!)
+  let retSc := retSc?.get!
+  let inLen := scs.foldl (fun acc p => acc + p.size) 0
+  let outLen := retSc.size
+  -- Lean native helper extern declaration.
+  let leanRetC := (leanNativeCType ret).get!
+  let leanArgs := (params.toList.map fun p => (leanNativeCType p.encoded).get!)
+  let externArgs :=
+    if leanArgs.isEmpty then "void" else String.intercalate ", " leanArgs
+  let externDecl := s!"extern {leanRetC} {helper}({externArgs});\n"
+  -- Decode args from buffer (memcpy at running offset).
+  let mut decode := ""
+  let mut off : Nat := 0
+  for i in [0 : params.size] do
+    let ty := (leanNativeCType params[i]!.encoded).get!
+    let sz := scs[i]!.size
+    decode := decode ++
+      s!"    {ty} a{i}; memcpy(&a{i}, args_ptr + {off}, {sz});\n"
+    off := off + sz
+  let argApp := String.intercalate ", "
+    ((List.range params.size).map (fun i => s!"a{i}"))
+  let invoke :=
+    if params.isEmpty then s!"{helper}()" else s!"{helper}({argApp})"
+  -- `s!"…{{…}}…"` does not accept the doubled-brace escape; we feed
+  -- single-character literals via plain concatenation instead.
+  let lb : String := "{"
+  let rb : String := "}"
+  let body :=
+    s!"int32_t {entry}(\n" ++
+    "    leo4_arena_t* arena,\n" ++
+    "    const uint8_t* args_ptr, size_t args_len,\n" ++
+    "    uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)\n" ++
+    lb ++ "\n" ++
+    "    (void)arena;\n" ++
+    s!"    if (args_len != {inLen}u) return LEO4_ERR_DECODE;\n" ++
+    decode ++
+    s!"    {leanRetC} r = {invoke};\n" ++
+    s!"    if (ret_cap < {outLen}u) " ++ lb ++ s!" *ret_len = {outLen}u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+    s!"    memcpy(ret_ptr, &r, {outLen});\n" ++
+    s!"    *ret_len = {outLen}u;\n" ++
+    "    return LEO4_OK;\n" ++
+    rb ++ "\n"
+  return banner ++ externDecl ++ body
+
+/-- Render the full `<pkg>.leo4-shim.c` text. One translation unit
+contains every shim entry point for the package; the matching
+`leo4_lean__<mangled>` helpers live in the user's `.olean`-derived
+object files and are resolved at `leanc` link time (W7-2b). -/
+def renderShimSource
+    (cfg : Config) (analyses : Array ExportAnalysis) (schemaHash : Hash) : String := Id.run do
+  let banner : String :=
+    "// Auto-generated by `leo4plugin` (W7-2a). Do not edit by hand.\n" ++
+    "//\n" ++
+    "// One translation unit per package; every `@[leo4_export]` ×\n" ++
+    "// monomorphisation gets one `leo4_call_<mangled>` entry point\n" ++
+    "// (canonical-buffer ABI; SPEC/canonical-abi.md §14). The matching\n" ++
+    "// Lean-side helper is `leo4_lean__<mangled>` (SPEC/mangling.md §6).\n" ++
+    "//\n" ++
+    "// W7-2a scope: scalar-only signatures are wired end-to-end; any\n" ++
+    "// composite or nominal type returns LEO4_ERR_UNIMPLEMENTED so the\n" ++
+    "// link table stays complete while encoder/decoder coverage grows\n" ++
+    "// in W7-2c (composites) and W7-2d (nominal types).\n" ++
+    "//\n" ++
+    s!"// Schema hash : {schemaHash.toBase32lc}\n" ++
+    s!"// Package     : {cfg.pkg}\n" ++
+    s!"// Interface   : {cfg.iface}\n" ++
+    "\n" ++
+    "#include <lean/lean.h>\n" ++
+    "#include <stdint.h>\n" ++
+    "#include <stddef.h>\n" ++
+    "#include <string.h>\n" ++
+    "\n" ++
+    "/* Status codes per SPEC/canonical-abi.md §13. */\n" ++
+    "#define LEO4_OK                        0\n" ++
+    "#define LEO4_ERR_DECODE                0x00000001\n" ++
+    "#define LEO4_ERR_RETURN_BUF_TOO_SMALL  0x00000007\n" ++
+    "#define LEO4_ERR_UNIMPLEMENTED         0x00000064\n" ++
+    "\n" ++
+    "/* Opaque arena pointer; the W7-2a scalar path doesn't touch it,\n" ++
+    "   but the §14 signature reserves the slot. */\n" ++
+    "typedef void leo4_arena_t;\n" ++
+    "\n"
+  let mut body := ""
+  for a in analyses do
+    for (_gargs, params, ret) in a.resolved do
+      body := body ++ renderOneShim cfg a schemaHash params ret ++ "\n"
+  return banner ++ body
 
 def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
   let exports := gatherExports env
@@ -522,16 +695,28 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
 
   -- Emit the Lean-side wrapper source for the C shim. Each
   -- `@[leo4_export]` × monomorphisation produces one
-  --   `@[export "<mangled>"]`
+  --   `@[export leo4_lean__<mangled>]`
   --   `def _leo4_export_<safe-name> (p0 : T0) … : Ret := <fqn> p0 …;`
-  -- so the user package's compiled .olean carries the mangled C
-  -- symbols the shim will extern-link against (W7-1). The user adds
-  -- this file to a `lean_lib` and rebuilds before invoking the shim
-  -- (W7-2+).
+  -- so the user package's compiled .olean carries the native-ABI
+  -- helper symbols the shim will call into (W7-1). The bare
+  -- `<mangled>` symbol is reserved for the shim's canonical-buffer
+  -- entry point (SPEC §6). The user adds this file to a `lean_lib`
+  -- and rebuilds before invoking the shim (W7-2+).
   let leanExportsPath := cfg.outDir / s!"{stem}.leo4-exports.lean"
   let leanExportsText := renderLeanExports cfg analyses schemaHash
   IO.FS.writeFile leanExportsPath leanExportsText
   IO.println s!"wrote {leanExportsPath}"
+
+  -- Emit the C shim source (W7-2a). One translation unit per package
+  -- carrying every `leo4_call_<mangled>` entry point. Scalar-only
+  -- instantiations are wired through to `leo4_lean__<mangled>`; the
+  -- rest get LEO4_ERR_UNIMPLEMENTED placeholders (filled in
+  -- W7-2c/W7-2d). The `leanc`-driven compile of this source into
+  -- `<pkg>.leo4-shim.so` lands in W7-2b.
+  let shimPath := cfg.outDir / s!"{stem}.leo4-shim.c"
+  let shimText := renderShimSource cfg analyses schemaHash
+  IO.FS.writeFile shimPath shimText
+  IO.println s!"wrote {shimPath}"
 
   -- Optional: lower each emitted `.leo4-schema` to `.wit` via the
   -- leo4c CLI. The shell-out is opt-in (`--with-lower`) precisely to
