@@ -1,6 +1,26 @@
 //! leo4-idl
 //!
-//! Placeholder. See `LEO4-DESIGN.md` and `ROADMAP.md` for the work
-//! plan. This crate's first real code lands no earlier than Phase 1.
+//! Rust-side counterpart to `lake/Leo4Plugin/`. Two consumers right now:
+//!   * `leo4c` CLI — `leo4c {parse,canonical,mangle} <file>`
+//!   * `tests/mangling/` — cross-implementation conformance against the
+//!     Lean plugin.
+//!
+//! The on-the-wire artefacts (`<pkg>.leo4-schema`,
+//! `<pkg>.leo4-mangling`, `<pkg>.leo4-handshake`) are the integration
+//! seam. This crate must produce byte-identical output to
+//! `Leo4Plugin.Mangling` for the same canonical IDL bytes.
+//!
+//! Normative references:
+//!   * `SPEC/mangling.md`     — type encoding, hash, name format
+//!   * `SPEC/idl-grammar.ebnf` — syntax
+//!   * `SPEC/handshake.md`    — JSON shapes
+//!   * `LEO4-DESIGN.md`       — admit-set rules, kind discipline
 
-#![cfg_attr(not(test), allow(dead_code))]
+pub mod hash;
+pub mod base32;
+pub mod idl;
+pub mod mangle;
+
+pub use hash::Hash;
+pub use idl::{IDLType, UserDecl};
+pub use mangle::{fqn_seg, mangle, mangle_type};
