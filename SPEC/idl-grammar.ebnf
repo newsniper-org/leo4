@@ -1,0 +1,81 @@
+(* leo4 IDL grammar — strict superset of WIT *)
+(* See LEO4-DESIGN.md §4 for prose explanation. *)
+(* Productions marked [WIT] are inherited from WIT; productions marked [leo4] *)
+(* are leo4-specific extensions that lower to WIT during the lowering pass.   *)
+
+document        = { package_decl | use_decl | interface_decl | world_decl
+                  | type_decl | constraint_decl } ;
+
+package_decl    = "package" , ident , [ ":" , ident ] , [ "@" , semver ] , ";" ;  (* [WIT] *)
+
+use_decl        = "use" , path , [ "as" , ident ] , ";" ;                          (* [WIT] *)
+
+interface_decl  = "interface" , ident , [ generic_params ] , "{" ,
+                  { type_decl | func_decl | resource_decl } , "}" ;                (* [leo4] generic_params *)
+
+world_decl      = "world" , ident , "{" , { world_item } , "}" ;                   (* [WIT] *)
+
+generic_params  = "<" , generic_param , { "," , generic_param } , ">" ;            (* [leo4] *)
+generic_param   = ident , [ ":" , constraint_expr ] ;
+
+constraint_decl = "constraint" , ident , "=" , constraint_body , ";" ;             (* [leo4] *)
+constraint_body = "oneof" , "{" , type , { "," , type } , "}"
+                | "trait" , [ trait_body ]
+                | constraint_expr ;
+trait_body      = "{" , { func_decl } , "}" ;
+
+constraint_expr = constraint_atom , { ( "∧" | "∨" ) , constraint_atom } ;
+constraint_atom = "scalar" | "ord" | "eq" | "hash" | "pod" | "marshal" | "resource"
+                | ident
+                | type , ":" , ident
+                | type , "=" , type
+                | "¬" , constraint_atom
+                | "(" , constraint_expr , ")" ;
+
+type_decl       = "type" , ident , [ generic_params ] , "=" , type , ";" ;         (* [leo4] generic_params *)
+
+func_decl       = "func" , ident , [ generic_params ] , func_sig , ";" ;
+func_sig        = "(" , [ param_list ] , ")" , [ "->" , type ] ;
+param_list      = param , { "," , param } ;
+param           = ident , ":" , type ;
+
+resource_decl   = "resource" , ident , [ generic_params ] , [ resource_body ] , ";" ;
+resource_body   = "{" , { func_decl } , "}" ;
+
+type            = primitive | builtin_generic | named_type | record_type
+                | variant_type | tuple_type | flag_type | enum_type
+                | io_type ;                                                        (* [leo4] io_type *)
+
+primitive       = "u8" | "u16" | "u32" | "u64"
+                | "i8" | "i16" | "i32" | "i64"
+                | "f32" | "f64"
+                | "bool" | "char" | "string"
+                | "bigint" | "bignat" ;                                            (* [leo4] bigint, bignat *)
+
+builtin_generic = "list" , "<" , type , ">"
+                | "option" , "<" , type , ">"
+                | "result" , "<" , type , [ "," , type ] , ">"
+                | "tuple" , "<" , type , { "," , type } , ">"
+                | "future" , "<" , type , ">"                                      (* [WIT, deferred to WASIp3] *)
+                | "stream" , "<" , type , ">" ;                                    (* [WIT, deferred to WASIp3] *)
+
+named_type      = ident , [ "<" , type , { "," , type } , ">" ] ;                  (* [leo4] generic application *)
+
+record_type     = "record" , [ ident ] , "{" , field , { "," , field } , "}" ;
+field           = ident , ":" , type ;
+
+variant_type    = "variant" , [ ident ] , "{" , variant_case , { "," , variant_case } , "}" ;
+variant_case    = ident , [ "(" , type , { "," , type } , ")" ] ;
+
+tuple_type      = "tuple" , "<" , type , { "," , type } , ">" ;
+flag_type       = "flags" , [ ident ] , "{" , ident , { "," , ident } , "}" ;
+enum_type       = "enum" , [ ident ] , "{" , ident , { "," , ident } , "}" ;
+
+io_type         = "io" , "<" , type , ">" ;                                        (* [leo4] *)
+
+(* lowercase identifiers, kebab-case allowed *)
+ident           = letter , { letter | digit | "-" | "_" } ;
+letter          = "a"..."z" | "A"..."Z" ;
+digit           = "0"..."9" ;
+path            = ident , { ":" , ident } , [ "/" , ident ] ;
+semver          = digit , { digit } , "." , digit , { digit } , "." , digit , { digit } ;

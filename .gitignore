@@ -1,0 +1,28 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Lake
+/lake/.lake
+/lake/build
+/lake/**/.lake
+/lake/**/build
+
+# leo4 build outputs
+/target/leo4
+**/.leo4-tmp
+
+# IDE
+/.idea
+/.vscode
+*.swp
+.DS_Store
+
+# Spike scratch — do NOT gitignore SPIKE-*.md findings
+/spike/lake-hook/.lake
+/spike/lake-hook/build
+/spike/**/target
+
+# OS
+Thumbs.db

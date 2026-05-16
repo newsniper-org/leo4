@@ -1,0 +1,21 @@
+[package]
+name        = "leo4c"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "leo4 CLI: parse, lower, and inspect IDL files."
+
+[[bin]]
+name = "leo4c"
+path = "src/main.rs"
+
+[dependencies]
+leo4-idl.workspace   = true
+clap.workspace       = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
