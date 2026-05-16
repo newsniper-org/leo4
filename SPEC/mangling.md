@@ -7,7 +7,7 @@
 ## 1. Overall Shape
 
 ```
-mangle(f, [T₁, …, Tₙ]) =
+mangle(f, [P₁, …, Pₘ]) =
     "leo4__"
   ++ pkg
   ++ "__"
@@ -15,7 +15,7 @@ mangle(f, [T₁, …, Tₙ]) =
   ++ "__"
   ++ fname
   ++ "__"
-  ++ join("_", map(mangle_type, [T₁, …, Tₙ]))
+  ++ join("_", map(mangle_type, [P₁, …, Pₘ]))
   ++ "__h"
   ++ schema_hash_prefix
 ```
@@ -26,12 +26,25 @@ mangle(f, [T₁, …, Tₙ]) =
   are replaced with `_` (e.g., `my:lean` → `my_lean`).
 - `iface`: the `interface` declaration's name.
 - `fname`: the function name as written in IDL.
-- `schema_hash_prefix`: lowercase base32 encoding of the first 8 bytes of
-  the BLAKE3 hash of the normalized IDL form (see §3).
+- `[P₁, …, Pₘ]`: the function's **parameter types**, in declaration order,
+  *after generic substitution*. For a non-generic function these are the
+  literal parameter types from the IDL; for a generic function `f<T₁,…,Tₙ>`
+  invoked at concrete type arguments `(A₁,…,Aₙ)`, every occurrence of `Tᵢ`
+  inside the parameter list is replaced by `Aᵢ` and the result is `[P₁,…,Pₘ]`.
+  The generic vector `[A₁,…,Aₙ]` itself is **not** part of the mangled name —
+  it is carried separately in `<pkg>.leo4-mangling` (see `handshake.md`),
+  because the linker only cares about ABI surface, and the ABI surface is
+  the parameter list.
+- `schema_hash_prefix`: lowercase base32 encoding of the 8 hash bytes
+  produced by `fnv1a64` over the normalized IDL form (see §3).
 
 The `__` separator is two underscores everywhere. Single underscores within
 type encodings are part of the type encoding and do not collide because
 type encodings never start or end with an unbalanced separator.
+
+For a function with **zero parameters** the type list is empty and the
+mangled name contains the four consecutive underscores `__` `__h` literally,
+e.g. `leo4__pkg__iface__hello____h<hash>`.
 
 ## 2. Type Encoding
 
@@ -77,9 +90,9 @@ mangle_type(io<T>)           = "I_" ++ mangle_type(T) ++ "_i"
    AFTER normalization (see §3).
 3. Encoding length is bounded by IDL size. No "shortened" or "smart" forms.
 
-## 3. Normalized IDL Form
+## 3. Normalized IDL Form and Hash
 
-The schema hash is BLAKE3 over the *normalized* form of the IDL file.
+The schema hash is `fnv1a64` over the *normalized* form of the IDL file.
 Normalization steps, applied in order:
 
 1. **Strip comments**: remove `//` to end of line and `/* … */`.
@@ -96,14 +109,35 @@ Normalization steps, applied in order:
 8. **Inline `constraint` aliases**: same.
 9. **Re-emit as UTF-8**: standard ASCII representation, no BOM.
 
-The normalized stream is the input to BLAKE3.
+### Hash construction
+
+`fnv1a64` is the standard FNV-1a 64-bit hash:
 
 ```
-schema_hash_prefix = base32lc( blake3(normalized_idl_bytes)[0..8] )
+fnv1a64(bytes) :
+    h := 0xcbf29ce484222325
+    for b in bytes :
+        h := (h XOR (b as u64)) * 0x100000001b3   -- u64 wraparound
+    return h
 ```
 
-`base32lc` is RFC 4648 base32 with the lowercase alphabet `abcdefghijklmnopqrstuvwxyz234567`,
-no padding. 8 bytes → 13 base32 characters.
+The 8 hash bytes are taken from `h` *big-endian* (MSB first), then
+base32-encoded with the lowercase RFC 4648 alphabet
+`abcdefghijklmnopqrstuvwxyz234567`, no padding. 8 bytes pack into 13
+base32 characters; the 13th character carries only 4 bits of payload
+(low bit zero).
+
+```
+schema_hash_prefix = base32lc( be_bytes( fnv1a64(normalized_idl_bytes) ) )
+```
+
+**Why FNV-1a, not a cryptographic hash**: the digest is a *change detector*
+for ABI invalidation at link time, not a security primitive. Cargo's
+`cargo:rerun-if-changed=` plus the linker between them invalidate every
+stale object when the digest changes; that is the whole job. Both the Lean
+plugin (`Leo4Plugin.Mangling`) and the Rust IDL crate (`leo4-idl`) MUST
+implement this byte-for-byte identically — `tests/mangling/` (Phase 3+)
+pins that contract.
 
 ## 4. Worked Examples
 
@@ -124,19 +158,27 @@ package my:analytics; interface stats { func bucketize<T: scalar>(xs: list<T>, b
 
 Let `schema_hash_prefix = "k3pq9r2htgmxb"` (hypothetical).
 
-Mangled names for the admit-set:
+For the instantiation `T = u8`, the substituted parameter list is
+`(xs: list<u8>, bs: list<u8>)`, so `[P₁, P₂] = [list<u8>, list<u8>]`,
+mangled as `L_u8_l_L_u8_l`. Mangled names for the admit-set:
 ```
-leo4__my_analytics__stats__bucketize__u8__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__u16__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__u32__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__u64__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__i8__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__i16__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__i32__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__i64__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__f32__hk3pq9r2htgmxb
-leo4__my_analytics__stats__bucketize__f64__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_u8_l_L_u8_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_u16_l_L_u16_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_u32_l_L_u32_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_u64_l_L_u64_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_i8_l_L_i8_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_i16_l_L_i16_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_i32_l_L_i32_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_i64_l_L_i64_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_f32_l_L_f32_l__hk3pq9r2htgmxb
+leo4__my_analytics__stats__bucketize__L_f64_l_L_f64_l__hk3pq9r2htgmxb
 ```
+The corresponding `<pkg>.leo4-mangling` rows carry both the generic
+argument vector (e.g. `"generic_args": ["u8"]`) and the substituted
+parameter list with per-slot origin info (e.g. `"param_types": [
+{ "encoded": "L_u8_l", "uses_generics": [0] },
+{ "encoded": "L_u8_l", "uses_generics": [0] }
+]`); see `handshake.md`.
 
 ### Example 2 — non-generic with list
 

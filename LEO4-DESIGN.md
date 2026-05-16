@@ -169,9 +169,36 @@ Input:
 Step 1 — admit-set per parameter:
   for each (f, [c1,…,cn]) in C:
     for i in 1..n:
-      admit(f, i) := evaluate(ci) over current environment
-      // closed-form for `scalar` etc.
-      // type class enumeration via Lean.Meta.SynthInstance.getInstances
+      if the generic Ti is PHANTOM (does not appear in any parameter type
+                                   or in the return type of f's signature):
+        admit(f, i) := PHANTOM     // a single dimensionless slot — see below
+      else if ci is absent (the generic has no constraint at all):
+        admit(f, i) := UNBOUNDED   // every primitive IDL type — see below
+      else:
+        admit(f, i) := evaluate(ci) over current environment
+        // closed-form for `scalar` etc.
+        // type class enumeration via Lean.Meta.SynthInstance.getInstances
+
+  UNBOUNDED := { u8, u16, u32, u64, i8, i16, i32, i64, f32, f64,
+                 bool, char, string, bigint, bignat }
+  // Every leo4 primitive type the plugin can mechanically round-trip.
+  // Composite types (record / variant / resource / ...) are NOT included
+  // because their per-user-package admit-set is open-ended; if the caller
+  // needs those, they must write an explicit constraint or `@[leo4_specialize_when …]`.
+
+  PHANTOM is *not* a set of types; it is a marker that says "this generic
+  has no observable effect on the function's ABI surface, so the plugin
+  does not enumerate it." The generic occupies its slot in the function's
+  `generics` array (the signature still declares it), but in the emitted
+  mangling table its `generic_args` position is rendered as JSON `null` and
+  the cartesian product skips this axis entirely — preventing the
+  duplicate-mangled-name cascade that would otherwise occur, since the
+  mangled name carries only parameter types and is therefore identical
+  across every "instantiation" of a phantom T.
+
+  An untouched class constraint on a phantom generic (e.g. `foo<T : Ord>`
+  where `T` is unused in `foo`'s body) is ignored — phantom-ness takes
+  precedence.
 
 Step 2 — initial frontier:
   F := R ∪ L
@@ -197,10 +224,16 @@ Step 5 — emit:
 ## 6. Mangling Specification
 
 ```
-mangle(f<T1,…,Tn>) =
+mangle(f, [P1,…,Pm]) =
     "leo4__" ++ pkg ++ "__" ++ iface ++ "__" ++ fname ++
-    "__" ++ join("_", map(mangle_type, [T1,…,Tn])) ++
-    "__h" ++ base32lc( first_8_bytes( blake3(normalized_idl) ) )
+    "__" ++ join("_", map(mangle_type, [P1,…,Pm])) ++
+    "__h" ++ base32lc( hash_be_bytes( fnv1a64(normalized_idl) ) )
+
+-- [P1,…,Pm] = parameter types after generic substitution, in declaration
+-- order. Each instantiation is also accompanied by the generic argument
+-- vector [T1,…,Tn] in the emitted `<pkg>.leo4-mangling` table (see
+-- SPEC/handshake.md), but the linker symbol carries only the parameter
+-- types — the ABI surface — because that is what callers actually pass.
 
 mangle_type(u8)              = "u8"
 mangle_type(u16)             = "u16"
@@ -222,7 +255,7 @@ mangle_type(resource R)      = "X_"  ++ R ++ "_x"
 mangle_type(tuple<T1,…,Tn>)  = "T_"  ++ … ++ "_t"
 ```
 
-### Normalized IDL form (input to BLAKE3)
+### Normalized IDL form (input to fnv1a64)
 
 1. Strip comments and doc strings
 2. Strip whitespace down to canonical single spaces
@@ -231,7 +264,21 @@ mangle_type(tuple<T1,…,Tn>)  = "T_"  ++ … ++ "_t"
 5. Order `interface` members canonically (alphabetic by name)
 6. Emit as UTF-8 byte stream
 
-The 8-byte BLAKE3 prefix in the mangled name **acts as the schema handshake**.
+### Hash construction
+
+`fnv1a64` is the standard FNV-1a 64-bit hash (offset basis `0xcbf29ce484222325`,
+prime `0x100000001b3`) over the UTF-8 bytes of the normalized form. The 8 hash
+bytes are taken big-endian (MSB first) and encoded as 13 lowercase base32
+characters using the RFC 4648 alphabet (`abcdefghijklmnopqrstuvwxyz234567`)
+with no padding.
+
+Why FNV-1a rather than a cryptographic hash: the role of this digest is to
+*invalidate stale ABIs at link time*, not to resist adversarial collisions.
+Cargo's `cargo:rerun-if-changed=` and the linker between them notice any
+schema drift. Both the Lean and Rust sides must agree on the algorithm
+byte-for-byte; that is the only normative requirement.
+
+The 8-byte digest prefix in the mangled name **acts as the schema handshake**.
 If the IDL changes, all mangled names change, so a stale Rust binary
 linking against a fresh shim fails at link time, not silently.
 

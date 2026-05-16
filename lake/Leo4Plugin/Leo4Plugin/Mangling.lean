@@ -3,12 +3,9 @@
 -- Implements `SPEC/mangling.md` §§1-3 on the Lean side. The Rust side
 -- (`leo4-idl`) MUST agree byte-for-byte; see `tests/mangling/` (Phase 3+).
 --
--- BLAKE3 is a hard requirement of the spec ("BLAKE3 hash truncations are
--- first_8_bytes then base32lc. No exceptions." — CLAUDE.md). Until we ship
--- a Lean-side BLAKE3 implementation, we use a clearly-labelled FNV-1a-64
--- placeholder; every mangled name produced by Week 2 carries that
--- placeholder hash, and switching to BLAKE3 will rotate every name.
--- This is the *intended* failure mode (LEO4-DESIGN.md "schema handshake").
+-- The schema hash is FNV-1a-64 (LEO4-DESIGN.md §6, SPEC/mangling.md §3) —
+-- a change detector for ABI invalidation at link time, not a cryptographic
+-- primitive. Both sides must implement the algorithm identically.
 
 import Leo4Plugin.AdmitSet
 
@@ -50,9 +47,8 @@ partial def mangleType : IDLType → String
 /-! ## Schema hash (SPEC/mangling.md §3) -/
 
 /--
-An 8-byte digest (first 8 bytes of a 32-byte BLAKE3 output, in the production
-implementation). Stored as a `UInt64` for ergonomics; rendered to either
-13-char base32lc or 16-char hex on demand.
+An 8-byte schema digest, stored big-endian inside a `UInt64`. Rendered to
+either 13-char base32lc or 16-char hex on demand.
 -/
 structure Hash where
   /-- Big-endian view: byte 0 = `(value >>> 56) &&& 0xff`. -/
@@ -61,17 +57,17 @@ structure Hash where
 
 namespace Hash
 
-/-- FNV-1a-64 placeholder. Replace with `blake3(bs)[0..8]` when we ship a Lean
-BLAKE3 implementation. Every mangled name will change on swap — by design. -/
-def placeholder (bs : ByteArray) : Hash := Id.run do
+/-- FNV-1a 64-bit hash of `bs`. Offset basis `0xcbf29ce484222325`,
+prime `0x100000001b3`, `UInt64` wraparound on multiply. -/
+def fnv1a64 (bs : ByteArray) : Hash := Id.run do
   let mut h : UInt64 := 0xcbf29ce484222325
   for i in [0 : bs.size] do
     h := (h ^^^ (bs.get! i).toUInt64) * 0x100000001b3
   return { value := h }
 
-/-- Hash the UTF-8 encoding of `s`. -/
-def placeholderStr (s : String) : Hash :=
-  placeholder s.toUTF8
+/-- FNV-1a-64 over the UTF-8 encoding of `s`. -/
+def ofString (s : String) : Hash :=
+  fnv1a64 s.toUTF8
 
 /-- 16-char lowercase hex of the 8 hash bytes, big-endian. -/
 def toHex (h : Hash) : String := Id.run do
@@ -82,8 +78,8 @@ def toHex (h : Hash) : String := Id.run do
   for i in [0:8] do
     let s : UInt64 := UInt64.ofNat (8 * (7 - i))
     let byte : Nat := ((h.value >>> s).toNat) &&& 0xff
-    out := out.push (hex.get! (byte / 16))
-    out := out.push (hex.get! (byte % 16))
+    out := out.push hex[byte / 16]!
+    out := out.push hex[byte % 16]!
   return out
 
 /-- 13-char lowercase base32 (RFC 4648 alphabet, no padding) of the 8 hash
@@ -98,10 +94,10 @@ def toBase32lc (h : Hash) : String := Id.run do
   for i in [0:12] do
     let s : UInt64 := UInt64.ofNat (59 - 5 * i)
     let idx : Nat := ((h.value >>> s).toNat) &&& 0x1F
-    out := out.push (alph.get! idx)
+    out := out.push alph[idx]!
   -- Final char: the 4 LSB bits of the 64-bit packed value, left-aligned in 5.
   let last4 : Nat := (h.value.toNat) &&& 0x0F
-  out := out.push (alph.get! (last4 * 2))
+  out := out.push alph[last4 * 2]!
   return out
 
 end Hash
@@ -124,10 +120,10 @@ def mangle
 
 /-! ## IDL normalisation (SPEC/mangling.md §3) -/
 
-/-- Collapse runs of ASCII whitespace to single spaces and trim. -/
+/-- Collapse runs of ASCII whitespace to single spaces and trim leading/trailing. -/
 def collapseWhitespace (s : String) : String := Id.run do
   let mut out : String := ""
-  let mut sawSpace : Bool := true
+  let mut sawSpace : Bool := true   -- treat leading whitespace as collapsed
   for c in s.toList do
     if c.isWhitespace then
       unless sawSpace do
@@ -136,7 +132,9 @@ def collapseWhitespace (s : String) : String := Id.run do
     else
       out := out.push c
       sawSpace := false
-  return out.trim
+  -- `out` may still have one trailing space if the input ended with whitespace.
+  if out.endsWith " " then out := (out.dropEnd 1).copy
+  return out
 
 /--
 Render a synthetic *canonical IDL form* for a discovered export set. This is
@@ -163,8 +161,8 @@ def renderCanonical
   s := s ++ "}"
   return collapseWhitespace s
 
-/-- Hash the canonical form. Currently the FNV-1a-64 placeholder. -/
+/-- Hash the canonical form via FNV-1a-64 (SPEC/mangling.md §3). -/
 def schemaHashOf (canonical : String) : Hash :=
-  Hash.placeholderStr canonical
+  Hash.ofString canonical
 
 end Leo4Plugin

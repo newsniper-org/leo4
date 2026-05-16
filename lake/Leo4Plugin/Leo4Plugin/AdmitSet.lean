@@ -45,6 +45,19 @@ inductive IDLType where
 def scalarAdmitSet : Array IDLType :=
   #[.u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .f32, .f64]
 
+/-- The default admit-set used for a generic parameter that carries **no**
+constraint at all. Contains every leo4 primitive we currently round-trip
+mechanically — scalars, `bool`, `char`, `string`, `bigint`, `bignat`.
+
+Justification: LEO4-DESIGN.md §5 treats the admit-set as a finite enumeration
+in lazy mode; "no constraint" therefore means "any IDL primitive". Composite
+types (records, variants, resources, etc.) are excluded because their
+admit-set is open-ended at the user-package level — the plugin can't list
+them without more context. -/
+def unboundedAdmitSet : Array IDLType :=
+  #[.bool, .char, .string, .bigint, .bignat,
+    .u8, .u16, .u32, .u64, .i8, .i16, .i32, .i64, .f32, .f64]
+
 /-- Map a Lean type's head name to a leo4 IDL primitive, when the mapping is
 unambiguous. -/
 def leanNameToIDL : Name → Option IDLType

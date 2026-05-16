@@ -58,7 +58,9 @@ For each work item, "done" means all of:
 
 - Mangled names are derived, not written. Never hand-type a mangled symbol.
   If you find yourself wanting to, fix `mangle()` instead.
-- BLAKE3 hash truncations are `first_8_bytes` then `base32lc`. No exceptions.
+- The schema hash is FNV-1a-64 over the normalized IDL bytes; the 8 hash
+  bytes are emitted big-endian into the mangled name via lowercase base32
+  (no padding). Rationale and exact construction: `SPEC/mangling.md` §3.
 - Endianness for canonical ABI is little-endian per WIT spec.
 
 ## How to Work With Spec Files

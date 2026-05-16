@@ -91,16 +91,20 @@ JSON file. Format:
       "generics": ["T"],
       "instantiations": [
         {
-          "args": ["u32"],
-          "mangled": "leo4__my_analytics__stats__bucketize__u32__hk3pq9r2htgmxb"
+          "generic_args": ["u32"],
+          "param_types":  [
+            { "encoded": "L_u32_l", "uses_generics": [0] },
+            { "encoded": "L_u32_l", "uses_generics": [0] }
+          ],
+          "mangled": "leo4__my_analytics__stats__bucketize__L_u32_l_L_u32_l__hk3pq9r2htgmxb"
         },
         {
-          "args": ["u64"],
-          "mangled": "leo4__my_analytics__stats__bucketize__u64__hk3pq9r2htgmxb"
-        },
-        {
-          "args": ["f64"],
-          "mangled": "leo4__my_analytics__stats__bucketize__f64__hk3pq9r2htgmxb"
+          "generic_args": ["u64"],
+          "param_types":  [
+            { "encoded": "L_u64_l", "uses_generics": [0] },
+            { "encoded": "L_u64_l", "uses_generics": [0] }
+          ],
+          "mangled": "leo4__my_analytics__stats__bucketize__L_u64_l_L_u64_l__hk3pq9r2htgmxb"
         }
         // … rest of admit-set
       ]
@@ -110,8 +114,11 @@ JSON file. Format:
       "generics": [],
       "instantiations": [
         {
-          "args": [],
-          "mangled": "leo4__my_analytics__stats__sum__h<...>"
+          "generic_args": [],
+          "param_types": [
+            { "encoded": "L_u64_l", "uses_generics": [] }
+          ],
+          "mangled": "leo4__my_analytics__stats__sum__L_u64_l__hk3pq9r2htgmxb"
         }
       ]
     }
@@ -122,11 +129,33 @@ JSON file. Format:
 ### Field meanings
 
 - `logical_name`: `<interface>::<function>`. Lexicographic-sortable.
-- `generics`: type-parameter names from the IDL declaration.
+- `generics`: type-parameter names from the IDL declaration. Empty for
+  non-generic functions.
 - `instantiations`: every concrete monomorphization Lake has emitted.
   Lazy mode pre-emits the full admit-set Cartesian product (subject to
   `max_depth`).
-- `args`: the concrete type arguments in IDL form.
+- `generic_args`: the type arguments used for *this* monomorphization, in
+  declaration order, each rendered with `mangle_type` (see `mangling.md` §2).
+  Same length as the outer `generics` array. Empty for non-generic functions.
+  A position holding JSON `null` indicates a **phantom** generic — one that
+  never appears in any parameter type or in the return type, so the plugin
+  has not enumerated it. The corresponding `mangled` symbol does not depend
+  on this generic's value; consumers should not emit a runtime dispatch on
+  it. See LEO4-DESIGN.md §5.
+- `param_types`: an entry per value parameter, in declaration order. Each
+  entry has:
+  - `encoded`: the substituted parameter type rendered with `mangle_type`.
+    The `encoded` strings, joined by `_`, form the tokens between the
+    function name and `__h<hash>` in `mangled` — i.e. the linker symbol's
+    ABI surface.
+  - `uses_generics`: indices (ascending, deduplicated) into the enclosing
+    entry's `generics` array, identifying which type parameters this slot's
+    *template* referenced before substitution. An empty list means the
+    parameter is concrete in the function's signature (`encoded` was the
+    same string before substitution). A non-empty list means the
+    parameter's template was either a generic itself (e.g. `T`) or carried
+    a generic inside a composite (e.g. `list<T>`, `option<T>`); the indices
+    identify which generics participated.
 - `mangled`: the mangled name per `mangling.md`.
 
 The Rust macro:
@@ -135,11 +164,12 @@ The Rust macro:
 2. For each `entry` referenced in a `#[leo4::import]` block, emits an
    `extern "C"` declaration per `instantiation` with `#[link_name = mangled]`.
 3. Emits a generic Rust wrapper that dispatches on the const tag of the
-   type parameter.
+   type parameter; the wrapper picks the right `extern "C"` symbol by
+   matching `generic_args` against the call site's `T`.
 
-If a Rust call site uses a `T` not present in `instantiations`, the macro
-emits a compile error pointing at the IDL constraint that needed to be
-broadened.
+If a Rust call site uses a `T` not present in any `instantiation`'s
+`generic_args`, the macro emits a compile error pointing at the IDL
+constraint that needed to be broadened.
 
 ## Lifetime and Invalidation
 

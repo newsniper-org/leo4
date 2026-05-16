@@ -74,7 +74,7 @@ spec-lint:
 
 # Show the resolved schema hash for the sample package's handshake file.
 schema-hash: smoke-plugin
-    @jq -r '.schema_hash' {{sample_pkg}}/.lake/build/leo4/sample.leo4-handshake
+    @jq -r '.schema_hash' {{sample_pkg}}/.lake/build/leo4/leo4-sample.leo4-handshake
 
 # Nuke build outputs.
 clean:

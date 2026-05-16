@@ -28,6 +28,8 @@ LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listLen(lean_object*, lean_obj
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listLen___boxed(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_maxScalar___redArg(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_maxScalar(lean_object*, lean_object*, lean_object*, lean_object*);
+LEAN_EXPORT uint32_t lp_leo4_x2dsample_Sample_constantFortyTwo(lean_object*, uint32_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_constantFortyTwo___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -124,6 +126,25 @@ _start:
 {
 lean_object* x_5; 
 x_5 = lp_leo4_x2dsample_Sample_maxScalar___redArg(x_2, x_3, x_4);
+return x_5;
+}
+}
+LEAN_EXPORT uint32_t lp_leo4_x2dsample_Sample_constantFortyTwo(lean_object* x_1, uint32_t x_2) {
+_start:
+{
+uint32_t x_3; 
+x_3 = 42;
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_constantFortyTwo___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint32_t x_3; uint32_t x_4; lean_object* x_5; 
+x_3 = lean_unbox_uint32(x_2);
+lean_dec(x_2);
+x_4 = lp_leo4_x2dsample_Sample_constantFortyTwo(x_1, x_3);
+x_5 = lean_box_uint32(x_4);
 return x_5;
 }
 }

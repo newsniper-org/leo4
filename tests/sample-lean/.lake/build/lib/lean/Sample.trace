@@ -1,13 +1,16 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
  "outputs":
- {"o": ["e766167e9e787c03.olean"],
-  "i": "a0f92a90a21196a9.ilean",
-  "c": "1b51b2c48cc51d87.c"},
+ {"o": ["8d45e4e63924033d.olean"],
+  "i": "2b2ca78a7003edbc.ilean",
+  "c": "6b9e1f3c499d1e38.c"},
  "log":
  [{"message":
    ".> LEAN_PATH=/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean:/home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean /opt/lean4/bin/lean /home/ybi/leo4/tests/sample-lean/Sample.lean -o /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.olean -i /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.ilean -c /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c --setup /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.setup.json --json",
-   "level": "trace"}],
+   "level": "trace"},
+  {"message":
+   "Sample.lean:32:22: unused variable `T`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`",
+   "level": "warning"}],
  "inputs":
  [["Sample:deps",
    [["deps",
@@ -23,10 +26,10 @@
       ["module plugins", "00000000000006bb"]]]]],
   ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
    "fa77a35a41db35c0"],
-  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "d535ba3641a5c173"],
+  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "3f5d6029619020bd"],
   ["options", "00000000000006bb"],
   ["isModule: false", "feefd2a0d3a1847e"],
   ["Module.name: Sample", "aa097ba15ee094f1"],
   ["Package.id?: (some leo4-sample)", "553e3cd0f8245097"],
   ["Module.leanArgs: #[]", "00000000000006bb"]],
- "depHash": "24e9ccf2cf05eae1"}
+ "depHash": "3ec38aee65bce2e4"}

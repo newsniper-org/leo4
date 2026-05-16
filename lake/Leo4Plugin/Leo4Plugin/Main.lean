@@ -1,152 +1,356 @@
 -- Leo4Plugin.Main — plugin entry point.
 --
 -- Responsibility (LEO4-DESIGN.md §7, CLAUDE.md "How to Work With the Lake Plugin"):
---   1. importModules on the user package's compiled .olean files
---   2. find every @[leo4_export] definition
---   3. (Phase 2) read its @[leo4_specialize_when] payload and enumerate the admit-set
---   4. (Phase 2) emit IDL, mangling table, handshake, shim source
+--   1. importModules on the user package's compiled .olean files     ✓ Week 1
+--   2. find every @[leo4_export] definition                          ✓ Week 1
+--   3. read its constraints, compute admit-sets per generic          ✓ Week 2 (signature path)
+--   4. emit IDL, mangling table, handshake                           ✓ Week 2 (handshake + mangling)
+--   5. emit C shim + drive cc/leanc                                  Phase 3
 --
--- Steps 3-4 are stubs in this Week 1 cut. Steps 1-2 are functional and replace
--- spike/lake-hook/SpikePlugin.lean.
---
--- The plugin is invoked as `lake exe leo4plugin <user-module>`. We do *not* hook
--- Lake.Module.recBuildLean; see SPIKE-0-FINDINGS.md for why.
+-- The plugin is invoked as `lake exe leo4plugin <user-module> [<out-dir>] [<pkg>] [<iface>]`.
+-- We do *not* hook Lake.Module.recBuildLean; see SPIKE-0-FINDINGS.md.
 
 import Lean
 import Leo4
+import Leo4Plugin.AdmitSet
+import Leo4Plugin.Mangling
+import Leo4Plugin.Emit
 
 open Lean Lean.Meta
 
 namespace Leo4Plugin
 
-/-- Walk a Pi telescope and return the head of the final body. -/
-partial def conclHead : Expr → Expr
-  | .forallE _ _ body _ => conclHead body
-  | e => e.getAppFn
+/-- Plugin version string, surfaced in `<pkg>.leo4-handshake`. -/
+def pluginVersion : String := "0.1.0"
 
-/-- All `@[leo4_export]`-tagged constants visible in `env`.
+/-! ## Reporting helpers -/
 
-Walks each imported module's serialized tag entries; sub-ms for typical packages
-(replaces the spike's O(|env.constants|) fold). -/
-def gatherExports (env : Environment) : Array Name := Id.run do
-  let ext := Leo4.leo4ExportAttr.ext
-  let mut acc : Array Name := #[]
-  for modIdx in [0 : env.allImportedModuleNames.size] do
-    acc := acc ++ ext.getModuleEntries env modIdx
-  -- Plus anything tagged in the *current* module (none, since the plugin
-  -- exe doesn't define exports — but keep the path for correctness).
-  let curMod := ext.getState (asyncDecl := .anonymous) env
-  curMod.foldl (init := acc) fun a n => a.push n
-
-/-- Constants registered as global instances whose conclusion head is `cls`.
-
-This is the closed-world instance enumeration that the (α′) algorithm consumes;
-for now we expose it on the plugin side so admit-sets for `[ToString T]`-shaped
-constraints can be derived. -/
-def gatherInstancesOf (env : Environment) (cls : Name) : Array Name :=
-  let st := Meta.instanceExtension.getState env
-  st.instanceNames.foldl (init := (#[] : Array Name)) fun acc n _ =>
-    match env.find? n with
-    | none => acc
-    | some info =>
-      if (conclHead info.type).isConstOf cls then acc.push n else acc
-
-/-- Format one tenth-of-a-millisecond nanosecond delta. -/
 def msStr (ns : Nat) : String :=
   let f : Float := ns.toFloat / 1e6
   let i : Nat := (f * 10).toUInt64.toNat
   s!"{i / 10}.{i % 10}ms"
 
-private structure BinderKindReport where
-  kind     : String   -- "[inst]" / "{impl}" / "(expl)" / "⦃sImpl⦄"
-  userName : Name
-  typePP   : Format
+/-! ## Exporter walking -/
 
-/-- Pretty-print the type of `n` and the binder kinds in its signature.
-The instance-implicit binders are the constraint payload the real (α′)
-algorithm enumerates against; for Week 1 we just report them. -/
-def reportExport (n : Name) : MetaM Unit := do
+/-- Per-module ext.getModuleEntries walk; sub-ms even for large envs. -/
+def gatherExports (env : Environment) : Array Name := Id.run do
+  let ext := Leo4.leo4ExportAttr.ext
+  let mut acc : Array Name := #[]
+  for modIdx in [0 : env.allImportedModuleNames.size] do
+    acc := acc ++ ext.getModuleEntries env modIdx
+  let curMod := ext.getState (asyncDecl := .anonymous) env
+  curMod.foldl (init := acc) fun a n => a.push n
+
+/-! ## Type-substituting Expr → IDL converter -/
+
+/-- Convert a Lean `Expr` to `IDLType`, substituting generic FVars per `subst`.
+Returns `none` for types we cannot lower mechanically (free FVars not in
+`subst`, custom records/variants, etc.). Mirrors `AdmitSet.exprToIDL` but
+threads a generic substitution. -/
+partial def exprToIDLSubst (subst : FVarId → Option IDLType) (e : Expr) : Option IDLType :=
+  let head := e.getAppFn
+  let args := e.getAppArgs
+  match head, args.size with
+  | .fvar fv,           0 => subst fv
+  | .const ``List _,    1 => (exprToIDLSubst subst args[0]!).map .list
+  | .const ``Option _,  1 => (exprToIDLSubst subst args[0]!).map .option
+  | .const ``Except _,  2 => do
+      let tIdl ← exprToIDLSubst subst args[1]!
+      let eIdl ← exprToIDLSubst subst args[0]!
+      pure (.result tIdl (some eIdl))
+  | .const ``Prod _,    2 => do
+      let a ← exprToIDLSubst subst args[0]!
+      let b ← exprToIDLSubst subst args[1]!
+      pure (.tuple #[a, b])
+  | .const n _,         0 => leanNameToIDL n
+  | _, _ => none
+
+/-! ## Per-export analysis -/
+
+/-- Result of analysing one `@[leo4_export]` decl. -/
+structure ExportAnalysis where
+  /-- The decl's name (e.g. `Sample.stringify`). -/
+  declName     : Name
+  /-- Last name component (`stringify`). -/
+  fname        : String
+  /-- Generic-parameter user names, in order. -/
+  generics     : Array Name
+  /-- Per-generic admit-set, in the same order as `generics`. -/
+  admitSets    : Array (Array IDLType)
+  /-- Per-class admit-sets we encountered, keyed by class name; used to
+  populate `<pkg>.leo4-handshake.constraint_universe`. -/
+  classAdmits  : Array (Name × Array IDLType)
+  /-- `true` at index `i` ⇔ `generics[i]` is a phantom generic, i.e. it
+  appears nowhere in the value parameter types or the return type. -/
+  phantomMask  : Array Bool
+  /-- Concrete instantiations: each carries
+      (genericArgs, paramInfos, returnAsIDL).
+  `genericArgs` has length = generics.size; phantom positions are `none`.
+  `paramInfos` has length = number of value parameters; each entry pairs
+  the substituted IDL encoding with the generic indices the parameter's
+  template depended on. -/
+  resolved     : Array (Array (Option IDLType) × Array Emit.ParamInfo × IDLType)
+  /-- Diagnostic notes — printed by the plugin to stdout, not emitted to JSON. -/
+  notes        : Array String
+  deriving Inhabited
+
+/-- Analyse one tagged decl. Returns `none` if the decl is missing from `env`. -/
+def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
   let env ← getEnv
-  let some info := env.find? n | return
-  let ppType ← Meta.ppExpr info.type
-  IO.println s!"  • {n}"
-  IO.println s!"      type: {ppType}"
+  let some info := env.find? n | return none
   forallTelescopeReducing info.type fun args body => do
-    if args.size == 0 then
-      IO.println "      binders: (none)"
-      return
-    let mut rows : Array BinderKindReport := #[]
+    -- Classify binders.
+    let mut generics    : Array (FVarId × Name) := #[]
+    let mut classes     : Array (Name × Name) := #[]      -- (genericUserName, className)
+    let mut paramTypes  : Array Expr := #[]
     for a in args do
       let ld ← a.fvarId!.getDecl
-      let ppTy ← Meta.ppExpr ld.type
-      let kind :=
-        if ld.binderInfo.isInstImplicit  then "[inst]"
-        else if ld.binderInfo.isStrictImplicit then "⦃sImpl⦄"
-        else if ld.binderInfo.isImplicit then "{impl}"
-        else "(expl)"
-      rows := rows.push { kind, userName := ld.userName, typePP := ppTy }
-    IO.println "      binders:"
-    for r in rows do
-      IO.println s!"        - {r.kind} {r.userName} : {r.typePP}"
-    let ppBody ← Meta.ppExpr body
-    IO.println s!"      result: {ppBody}"
+      let ty := ld.type
+      if ld.binderInfo.isImplicit && ty.isSort then
+        generics := generics.push (a.fvarId!, ld.userName)
+      else if ld.binderInfo.isInstImplicit then
+        let ch := ty.getAppFn
+        let ca := ty.getAppArgs
+        if let .const clsName _ := ch then
+          if ca.size > 0 then
+            let argHead := ca[0]!.getAppFn
+            if let .fvar fv := argHead then
+              let ld2 ← fv.getDecl
+              classes := classes.push (ld2.userName, clsName)
+      else
+        paramTypes := paramTypes.push ty
+    -- Per-parameter generic dependencies, computed once on the *templates*
+    -- (i.e. before substitution). Same vector applies to every instantiation.
+    let genFvars : Array FVarId := generics.map Prod.fst
+    let mut paramOrigins : Array (Array Nat) := #[]
+    for ty in paramTypes do
+      let st : Lean.CollectFVars.State := {}
+      let st := Lean.collectFVars st ty
+      let mut idxs : Array Nat := #[]
+      for i in [0 : genFvars.size] do
+        if st.fvarSet.contains genFvars[i]! then
+          idxs := idxs.push i
+      paramOrigins := paramOrigins.push idxs
+    -- Phantom detection: a generic is *alive* iff its FVar appears in some
+    -- parameter type OR in the return type. The return type is checked
+    -- separately because `paramOrigins` only covers parameters.
+    let retState : Lean.CollectFVars.State := Lean.collectFVars {} body
+    let mut phantomMask : Array Bool := #[]
+    for i in [0 : genFvars.size] do
+      let usedInParams := paramOrigins.any (fun idxs => idxs.contains i)
+      let usedInRet    := retState.fvarSet.contains genFvars[i]!
+      phantomMask := phantomMask.push (¬ (usedInParams ∨ usedInRet))
+    -- Admit-set computation: only for alive generics. Phantom axes are
+    -- skipped (LEO4-DESIGN.md §5).
+    let mut admitSets     : Array (Array IDLType) := #[]
+    let mut classAdmits   : Array (Name × Array IDLType) := #[]
+    let mut activeIndices : Array Nat := #[]
+    for i in [0 : generics.size] do
+      if phantomMask[i]! then continue
+      let (_, gname) := generics[i]!
+      let clsList := classes.filterMap fun (un, cls) =>
+        if un == gname then some cls else none
+      if clsList.isEmpty then
+        admitSets := admitSets.push unboundedAdmitSet
+      else
+        let mut acc := classAdmitSet env clsList[0]!
+        unless classAdmits.any (·.1 == clsList[0]!) do
+          classAdmits := classAdmits.push (clsList[0]!, acc)
+        for cls in clsList[1:] do
+          let next := classAdmitSet env cls
+          unless classAdmits.any (·.1 == cls) do
+            classAdmits := classAdmits.push (cls, next)
+          acc := acc.filter (next.contains ·)
+        admitSets := admitSets.push acc
+      activeIndices := activeIndices.push i
+    -- If any alive generic has an empty admit-set, emit no instantiations
+    -- (a class constraint with no satisfying instance is a real "no" answer).
+    let combosActive : Array (Array IDLType) :=
+      if admitSets.any (·.isEmpty) then #[]
+      else cartesian admitSets
+    -- Reconstruct full-length generic_args vectors (one slot per declared
+    -- generic). Phantom positions get `none`; alive positions are filled
+    -- from the active combo.
+    let mut resolved : Array (Array (Option IDLType) × Array Emit.ParamInfo × IDLType) := #[]
+    let mut notes    : Array String := #[]
+    let placeholder : IDLType := .bool  -- value never observed: phantom FVars don't appear in any target.
+    for activeCombo in combosActive do
+      -- substMap[i] = type to plug in for generic i; placeholder for phantoms.
+      let mut substMap : Array IDLType := Array.replicate generics.size placeholder
+      for j in [0 : activeIndices.size] do
+        substMap := substMap.set! activeIndices[j]! activeCombo[j]!
+      -- Full generic_args, with `none` at phantom positions.
+      let mut fullGenArgs : Array (Option IDLType) := Array.replicate generics.size none
+      for j in [0 : activeIndices.size] do
+        fullGenArgs := fullGenArgs.set! activeIndices[j]! (some activeCombo[j]!)
+      -- FVar lookup closure used by exprToIDLSubst.
+      let subst : FVarId → Option IDLType := fun fv =>
+        Id.run do
+          for i in [0 : generics.size] do
+            if (generics[i]!).1 == fv then
+              return some substMap[i]!
+          return none
+      let mut ok := true
+      let mut paramInfos : Array Emit.ParamInfo := #[]
+      for i in [0 : paramTypes.size] do
+        let ty := paramTypes[i]!
+        match exprToIDLSubst subst ty with
+        | some idl =>
+            paramInfos := paramInfos.push
+              { encoded := idl, usesGenerics := paramOrigins[i]! }
+        | none =>
+            notes := notes.push s!"param type unsupported: {← Meta.ppExpr ty}"
+            ok := false
+      if !ok then continue
+      match exprToIDLSubst subst body with
+      | some retIDL => resolved := resolved.push (fullGenArgs, paramInfos, retIDL)
+      | none =>
+          notes := notes.push s!"return type unsupported: {← Meta.ppExpr body}"
+    return some {
+      declName    := n
+      fname       := n.toString.splitOn "." |>.getLast!
+      generics    := generics.map Prod.snd
+      admitSets, classAdmits, phantomMask, resolved, notes
+    }
 
-/-- Run the report as one MetaM action so `ppExpr` and `forallTelescopeReducing`
-both work against the freshly imported environment. -/
-def runReport (env : Environment) : IO Unit := do
-  let action : MetaM Unit := do
-    let exports := gatherExports (← getEnv)
-    IO.println s!"-- @[leo4_export] decls: {exports.size} --"
-    for n in exports do
-      reportExport n
-    let cls : Name := `ToString
-    let t0 ← IO.monoNanosNow
-    let insts := gatherInstancesOf (← getEnv) cls
-    let t1 ← IO.monoNanosNow
-    IO.println s!"-- admit-set proxy: instances of `{cls}`: {insts.size} (enum {msStr (t1 - t0)}) --"
-    for n in insts do
-      IO.println s!"  • {n}"
-  let coreCtx : Core.Context := { fileName := "<leo4plugin>", fileMap := FileMap.ofString "" }
-  let coreSt  : Core.State   := { env := env }
-  let core : CoreM Unit := action.run' {} {}
-  let _ ← core.toIO' coreCtx coreSt
+/-! ## Driver -/
 
-/-- Plugin entry point invoked by `lake exe leo4plugin <user-module>`. -/
-def main (args : List String) : IO UInt32 := do
-  let target : Name :=
-    match args with
-    | [] => `Sample
+/-- Read the closest `lean-toolchain` file (looking up from cwd) for the
+informational `lean_toolchain` handshake field. -/
+def findLeanToolchain : IO String := do
+  let candidates : Array System.FilePath := #[
+    "lean-toolchain", "../lean-toolchain", "../../lean-toolchain", "../../../lean-toolchain"
+  ]
+  for p in candidates do
+    if ← System.FilePath.pathExists p then
+      try
+        let s ← IO.FS.readFile p
+        return s.trimAscii.copy
+      catch _ => pure ()
+  return "unknown"
+
+structure Config where
+  target       : Name
+  outDir       : System.FilePath
+  pkg          : String
+  iface        : String
+
+def parseArgs (args : List String) : Config :=
+  let target := match args with
+    | []     => `Sample
     | a :: _ => a.toName
-  IO.println s!"leo4plugin: loading module {target}"
+  let outDir := match args with
+    | _ :: b :: _ => System.FilePath.mk b
+    | _ => System.FilePath.mk ".leo4"
+  let pkg := match args with
+    | _ :: _ :: c :: _ => c
+    | _ => "leo4-sample"
+  let iface := match args with
+    | _ :: _ :: _ :: d :: _ => d
+    | _ => target.toString
+  { target, outDir, pkg, iface }
 
-  -- Lake propagates LEAN_PATH via `lake env`/`lake exe`, but `importModules`
-  -- consults `searchPathRef`. Initialise it from LEAN_PATH (and sysroot).
+def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
+  let exports := gatherExports env
+
+  -- Analyze every export under one MetaM action.
+  let analyses : IO (Array ExportAnalysis) := do
+    let action : MetaM (Array ExportAnalysis) := do
+      let mut out : Array ExportAnalysis := #[]
+      for n in exports do
+        match ← analyzeExport n with
+        | some a => out := out.push a
+        | none   => pure ()
+      return out
+    let coreCtx : Core.Context := { fileName := "<leo4plugin>", fileMap := FileMap.ofString "" }
+    let coreSt  : Core.State   := { env := env }
+    let core    : CoreM (Array ExportAnalysis) := action.run' {} {}
+    let (xs, _) ← core.toIO coreCtx coreSt
+    return xs
+  let analyses ← analyses
+
+  IO.println s!"-- analysis (pkg = {cfg.pkg}, iface = {cfg.iface}) --"
+  for a in analyses do
+    let instCount := a.resolved.size
+    IO.println s!"  • {a.declName}  generics={a.generics.size}  instantiations={instCount}"
+    for note in a.notes do
+      IO.println s!"      note: {note}"
+
+  -- Build the canonical IDL form (one (fname, params, ret) per instantiation).
+  let mut members : Array (String × Array IDLType × IDLType) := #[]
+  for a in analyses do
+    for (_, paramInfos, ret) in a.resolved do
+      members := members.push (a.fname, paramInfos.map (·.encoded), ret)
+  let canonical := renderCanonical cfg.pkg cfg.iface members
+  let schemaHash := schemaHashOf canonical
+  IO.println s!"schema_hash (base32lc): {schemaHash.toBase32lc}"
+  IO.println s!"schema_hash (hex)     : {schemaHash.toHex}"
+
+  -- Build mangling entries. Per SPEC/mangling.md §1 the mangled name carries
+  -- the *parameter types* after generic substitution; the generic argument
+  -- vector and per-parameter origin info are both surfaced in JSON
+  -- (SPEC/handshake.md `instantiations[]`).
+  let manglingEntries : Array Emit.ManglingEntry := analyses.map fun a =>
+    let insts := a.resolved.map fun (gargs, paramInfos, _ret) =>
+      ({ genericArgs := gargs
+         paramTypes  := paramInfos
+         mangled     := mangle cfg.pkg cfg.iface a.fname
+                          (paramInfos.map (·.encoded)) schemaHash
+       } : Emit.Instantiation)
+    { logicalName    := cfg.iface ++ "::" ++ a.fname
+      generics       := a.generics.map toString
+      instantiations := insts }
+
+  -- constraint_universe: scalar + every class we encountered.
+  let mut cu : Array (String × Array IDLType) := #[("scalar", scalarAdmitSet)]
+  for a in analyses do
+    for (cls, ax) in a.classAdmits do
+      unless cu.any (·.1 == cls.toString) do
+        cu := cu.push (cls.toString, ax)
+
+  let ifaceSummary : Emit.InterfaceSummary :=
+    { name := cfg.iface
+      function_count := analyses.size
+      resource_count := 0 }
+
+  let bundle : Emit.EmitBundle := {
+    package            := cfg.pkg
+    schemaHash         := schemaHash
+    leanToolchain      := ← findLeanToolchain
+    pluginVersion      := pluginVersion
+    emittedAt          := ← Emit.isoNow
+    interfaces         := #[ifaceSummary]
+    constraintUniverse := cu
+    entries            := manglingEntries
+  }
+
+  Emit.emit cfg.outDir bundle
+  IO.println s!"wrote {cfg.outDir / s!"{normalizePackageSegment cfg.pkg}.leo4-handshake"}"
+  IO.println s!"wrote {cfg.outDir / s!"{normalizePackageSegment cfg.pkg}.leo4-mangling"}"
+
+def main (args : List String) : IO UInt32 := do
+  let cfg := parseArgs args
+  IO.println s!"leo4plugin: target={cfg.target} outDir={cfg.outDir} pkg={cfg.pkg} iface={cfg.iface}"
+
   Lean.initSearchPath (← Lean.findSysroot)
 
   let t0 ← IO.monoNanosNow
   let env ← Lean.importModules
-    (imports := #[{ module := target }, { module := `Leo4 }])
+    (imports := #[{ module := cfg.target }, { module := `Leo4 }])
     (opts := {}) (trustLevel := 0) (loadExts := true)
   let t1 ← IO.monoNanosNow
 
-  let t2 ← IO.monoNanosNow
-  let exports := gatherExports env
-  let t3 ← IO.monoNanosNow
-
   IO.println s!"env: {env.allImportedModuleNames.size} imported modules"
   IO.println s!"importModules (loadExts=true): {msStr (t1 - t0)}"
-  IO.println s!"gatherExports (per-module ext.getModuleEntries): {msStr (t3 - t2)}"
-  IO.println s!"  ({exports.size} exports found)"
 
-  let t4 ← IO.monoNanosNow
-  runReport env
-  let t5 ← IO.monoNanosNow
+  let t2 ← IO.monoNanosNow
+  runPlugin cfg env
+  let t3 ← IO.monoNanosNow
 
   IO.println "-- timings --"
   IO.println s!"importModules : {msStr (t1 - t0)}"
-  IO.println s!"gatherExports : {msStr (t3 - t2)}"
-  IO.println s!"report (Meta) : {msStr (t5 - t4)}"
-  IO.println s!"total (wall)  : {msStr (t5 - t0)}"
+  IO.println s!"runPlugin     : {msStr (t3 - t2)}"
+  IO.println s!"total (wall)  : {msStr (t3 - t0)}"
   return 0
 
 end Leo4Plugin

@@ -25,4 +25,10 @@ def maxScalar {T : Type} [Ord T] (a b : T) : T :=
   | .lt => b
   | _   => a
 
+-- Phantom-generic smoke fixture: `T` is declared but never used in the
+-- signature, so the plugin should emit a single instantiation with
+-- `generic_args = [null]`.
+@[leo4_export]
+def constantFortyTwo {T : Type} (_x : UInt32) : UInt32 := 42
+
 end Sample
