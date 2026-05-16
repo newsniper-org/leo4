@@ -42,6 +42,16 @@ smoke-plugin: plugin-build sample-build
     LEAN_PATH="{{sample_oleans}}:{{leo4_oleans}}:/opt/lean4/lib/lean" \
       ./{{plugin_bin}} Sample {{sample_pkg}}/.lake/build/leo4
 
+# Like `smoke-plugin`, but also shell out to leo4c to emit <pkg>.wit
+# alongside the canonical artefacts (uses the `--with-lower` plugin flag).
+# Requires leo4c built (PATH-discoverable); this recipe builds it first.
+smoke-plugin-with-wit: plugin-build sample-build cargo-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="$(pwd)/target/debug:$PATH"
+    LEAN_PATH="{{sample_oleans}}:{{leo4_oleans}}:/opt/lean4/lib/lean" \
+      ./{{plugin_bin}} Sample {{sample_pkg}}/.lake/build/leo4 leo4-sample Sample --with-lower
+
 # ─── Cargo side ───────────────────────────────────────────────────────────
 
 cargo-build:
@@ -62,11 +72,15 @@ fmt:
 # Both sides, in order. Lake first per D8.
 build: lake-build cargo-build
 
-test: lake-test cargo-test mangling-test
+test: lake-test cargo-test mangling-test wit-test
 
 # Cross-impl mangling conformance — Lake plugin vs leo4c (Rust).
 mangling-test:
     tests/mangling/run.sh
+
+# WIT lowering golden + validation (wasm-tools / wit-bindgen).
+wit-test:
+    tests/wit/run.sh
 
 # Validate SPEC/*.md consistency (Phase 1+).
 spec-lint:

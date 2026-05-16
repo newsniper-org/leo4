@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use leo4_idl::{mangle, mangle_type, parse, render_canonical, Hash};
+use leo4_idl::{lower_to_wit, mangle, mangle_type, parse, render_canonical, Hash};
 
 #[derive(Parser)]
 #[command(name = "leo4c", version, about = "leo4 IDL toolkit")]
@@ -31,6 +31,10 @@ enum Cmd {
     },
     /// Print the mangling table as JSON matching `<pkg>.leo4-mangling`.
     Mangle {
+        file: PathBuf,
+    },
+    /// Lower the IDL to WIT and print the result.
+    Lower {
         file: PathBuf,
     },
 }
@@ -127,6 +131,11 @@ fn run(cmd: Cmd) -> Result<(), Box<dyn std::error::Error>> {
                 "entries": entries,
             });
             println!("{}", serde_json::to_string_pretty(&table)?);
+        }
+        Cmd::Lower { file } => {
+            let text = std::fs::read_to_string(file)?;
+            let schema = parse(&text)?;
+            print!("{}", lower_to_wit(&schema));
         }
     }
     Ok(())

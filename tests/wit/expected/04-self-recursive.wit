@@ -1,0 +1,11 @@
+package leo4:leo4-wit-case04;
+
+interface cases {
+  resource cases-tree;
+
+  is-leaf: func(p0: cases-tree) -> bool;
+}
+
+world cases-world {
+  export cases;
+}

@@ -96,40 +96,59 @@ consumed by wasmtime, jco, and other WIT tooling.
 
 **Deliverables:**
 
-- `crates/leo4-idl/` (or `crates/leo4-wit-lower/`): pure-function
-  lowering from leo4 IDL AST to a WIT AST. Rules to specify (some
-  already sketched in LEO4-DESIGN.md):
-  - Generic functions → monomorphised over admit-set.
-  - Generic records / variants → monomorphised, lex-stable name
-    suffix derived from type-arg mangling.
-  - `bigint`, `bignat` → WIT `tuple<list<u64>, bool>` (or via a
-    `resource` if simpler; decide per migration cost).
-  - Cyclic ADTs (`Self`) → WIT `resource` wrappers per
-    LEO4-DESIGN.md §4.1.
-  - `io<T>` → `result<T, error>` (D4 sync-only).
-  - 64-bit resource handles (LEO4-DESIGN.md note on
-    `wasm32` vs `wasm64`): gated `feature = "memory64"` for the
-    eventual `wasm64` path.
-- Lake plugin: invoke the WIT lowering and write
-  `<pkg>.wit` alongside the other artefacts.
-- `crates/leo4c/`: `leo4c lower <file.leo4>` prints the lowered WIT.
-- `tests/wit/`: golden tests — pair `.leo4` ↔ `.wit` for every IDL
-  shape we lower; run `wit-bindgen --validate` (or equivalent) on the
-  output to catch syntactic regressions.
+- `crates/leo4-idl::wit` (lives inside the IDL crate, not a separate
+  crate): pure-function lowering from a fully-resolved `Schema` to
+  WIT text. Rules implemented for v0:
+  - leo4 `i{8,16,32,64}` → WIT `s{8,16,32,64}`.
+  - `bignat` → synthetic alias `bignat = list<u64>`.
+  - `bigint` → synthetic alias `bigint = tuple<bool, list<u64>>`.
+  - `io<T>` → `result<T, error>` plus a synthetic `error` record alias.
+  - Cyclic ADTs (record/variant whose body mentions `Self` / `Self<…>`)
+    → WIT opaque `resource <name>;` (LEO4-DESIGN.md §4.1). The wire
+    contract on the Lean side is unchanged; the resource here is only
+    the WASM-side surface.
+  - Generic functions on the Lake-plugin side are already
+    *monomorphised* before they reach WIT lowering; overloaded names
+    are disambiguated with a kebab-cased mangle-type suffix.
+  - Dotted FQN + camelCase identifiers → kebab-case for WIT.
+- `crates/leo4c lower <file>` — CLI subcommand.
+- `tests/wit/`: golden tests + validation via `wasm-tools component
+  wit` (always) and `wit-bindgen markdown` (when on PATH).
+- A default WIT `world` is emitted so wit-bindgen can consume the file
+  end-to-end.
 
-**Exit criteria:**
+**Exit criteria (met):**
 
-- 5 IDL examples lower to `.wit` that passes a recent `wit-bindgen`
+- ≥ 5 IDL cases lower to `.wit` that pass `wasm-tools component wit`
+  and `wit-bindgen markdown`.
+- Lowering is byte-deterministic (sorted decls + sorted side-aliases).
+- Self-recursive types lower to `resource` rather than failing
   validation.
-- The lowering is *deterministic* — running twice produces identical
-  bytes.
-- Cycles in user IDL are correctly wrapped to `resource` with no
-  redundant indirections.
+
+**Lake-side `<pkg>.wit` emit (opt-in):**
+
+`lake exe leo4plugin <module> [<outDir>] [<pkg>] [<iface>] --with-lower`
+shells out to `leo4c lower` after writing the canonical artefacts and
+saves the result as `<pkg>.wit` in the same `outDir`. The flag is
+*opt-in* precisely to preserve D8's Lake-then-Cargo order — without it,
+`lake exe leo4plugin` has no Cargo dependency and works on a fresh
+checkout. With it, the user is expected to have already built leo4c
+(e.g. via `just cargo-build` or `just smoke-plugin-with-wit`). If
+`leo4c` is missing from `PATH`, the plugin writes a stderr warning
+and exits 0 — the schema/mangling/handshake artefacts remain
+authoritative; only the optional `<pkg>.wit` is skipped.
+
+Promote to *always-on* Lake-side emit later if/when the WASM backend
+phase (Phase 7) needs it: at that point either port the lowering to
+Lean (the natural step) or keep the shell-out and document the build
+dependency explicitly.
 
 **Open question deferred to Phase 3 design time:** how to surface
 generic functions in WIT — direct monomorphised names (`bucketize_u8`),
-or a sub-`interface` per type-arg combination. The choice affects the
-mangling↔WIT correspondence; pick before writing the lowering.
+or a sub-`interface` per type-arg combination. Picked the
+*monomorphised-name* path; the plugin's lowering uses
+`func-<param-mangle>` for overloaded names. Revisit if Phase 7
+introduces a use case that prefers grouped interfaces.
 
 **Dependencies:** Phase 2 (`leo4-idl` parser).
 

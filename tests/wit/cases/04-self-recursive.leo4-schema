@@ -1,0 +1,5 @@
+package leo4-wit-case04;
+interface Cases {
+  variant Cases.Tree { leaf, node(Self, Self) };
+  func isLeaf(_0: Cases.Tree) -> bool;
+}

@@ -22,9 +22,11 @@ pub mod idl;
 pub mod mangle;
 pub mod parse;
 pub mod render;
+pub mod wit;
 
 pub use hash::Hash;
 pub use idl::{FuncDecl, IDLType, Schema, UserDecl};
 pub use mangle::{fqn_seg, mangle, mangle_type};
 pub use parse::{parse, parse_raw, resolve, ParseError, RawSchema, ResolveError};
 pub use render::{collapse_whitespace, idl_form, render_canonical, user_decl_to_idl};
+pub use wit::{kebab_case, lower as lower_to_wit};

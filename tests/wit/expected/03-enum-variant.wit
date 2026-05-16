@@ -1,0 +1,16 @@
+package leo4:leo4-wit-case03;
+
+interface cases {
+  enum cases-color { red, green, blue }
+  variant cases-either {
+    left(u32),
+    right(string),
+  }
+
+  name: func(p0: cases-color) -> string;
+  swap: func(p0: cases-either) -> cases-either;
+}
+
+world cases-world {
+  export cases;
+}

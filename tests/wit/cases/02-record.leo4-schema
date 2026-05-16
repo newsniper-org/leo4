@@ -1,0 +1,5 @@
+package leo4-wit-case02;
+interface Cases {
+  record Cases.Point { x: f64, y: f64 };
+  func midpoint(_0: Cases.Point, _1: Cases.Point) -> Cases.Point;
+}

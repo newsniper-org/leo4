@@ -257,21 +257,30 @@ structure Config where
   outDir       : System.FilePath
   pkg          : String
   iface        : String
+  /-- When `true`, after writing the canonical artefacts, shell out to
+  `leo4c lower <schema>` and write the resulting WIT text as
+  `<pkg>.wit` in the same `outDir`. Opt-in because the Lake build
+  precedes the Cargo build (D8) and `leo4c` therefore is not
+  guaranteed to exist; users who want `<pkg>.wit` must already have
+  built leo4c. -/
+  withLower    : Bool := false
 
-def parseArgs (args : List String) : Config :=
-  let target := match args with
+def parseArgs (args : List String) : Config := Id.run do
+  let withLower := args.contains "--with-lower"
+  let pos := args.filter (· != "--with-lower")
+  let target := match pos with
     | []     => `Sample
     | a :: _ => a.toName
-  let outDir := match args with
+  let outDir := match pos with
     | _ :: b :: _ => System.FilePath.mk b
     | _ => System.FilePath.mk ".leo4"
-  let pkg := match args with
+  let pkg := match pos with
     | _ :: _ :: c :: _ => c
     | _ => "leo4-sample"
-  let iface := match args with
+  let iface := match pos with
     | _ :: _ :: _ :: d :: _ => d
     | _ => target.toString
-  { target, outDir, pkg, iface }
+  return { target, outDir, pkg, iface, withLower }
 
 /-- Collect every user-defined nominal type referenced (directly) by an
 analysis's resolved param/return types. Returns the deduplicated FQN
@@ -417,9 +426,33 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
 
   Emit.emit cfg.outDir bundle
   let stem := normalizePackageSegment cfg.pkg
-  IO.println s!"wrote {cfg.outDir / s!"{stem}.leo4-schema"}"
-  IO.println s!"wrote {cfg.outDir / s!"{stem}.leo4-mangling"}"
-  IO.println s!"wrote {cfg.outDir / s!"{stem}.leo4-handshake"}"
+  let schemaPath    := cfg.outDir / s!"{stem}.leo4-schema"
+  let manglingPath  := cfg.outDir / s!"{stem}.leo4-mangling"
+  let handshakePath := cfg.outDir / s!"{stem}.leo4-handshake"
+  IO.println s!"wrote {schemaPath}"
+  IO.println s!"wrote {manglingPath}"
+  IO.println s!"wrote {handshakePath}"
+
+  -- Optional: lower each emitted `.leo4-schema` to `.wit` via the
+  -- leo4c CLI. The shell-out is opt-in (`--with-lower`) precisely to
+  -- preserve D8's Lake-then-Cargo build order: the Lake plugin itself
+  -- has no Cargo dependency, so a plain `lake exe leo4plugin` still
+  -- works on a fresh checkout. When the user wants WIT, they pre-build
+  -- leo4c (or trust their PATH) and add the flag.
+  if cfg.withLower then
+    let schemas : Array System.FilePath := #[schemaPath]
+    for sp in schemas do
+      let witPath := sp.withExtension "wit"
+      try
+        let out ← IO.Process.run {
+          cmd := "leo4c"
+          args := #["lower", sp.toString]
+        }
+        IO.FS.writeFile witPath out
+        IO.println s!"wrote {witPath}"
+      catch e =>
+        IO.eprintln s!"  ⚠  --with-lower: leo4c invocation failed for {sp}: {e}"
+        IO.eprintln "      ensure `cargo build -p leo4c` (or release) and `leo4c` is on PATH"
 
 def main (args : List String) : IO UInt32 := do
   let cfg := parseArgs args

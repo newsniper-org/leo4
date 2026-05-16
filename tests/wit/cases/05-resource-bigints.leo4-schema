@@ -1,0 +1,7 @@
+package leo4-wit-case05;
+interface Cases {
+  resource Cases.Handle;
+  func neg(_0: bigint) -> bigint;
+  func len(_0: list<u32>) -> bignat;
+  func release(_0: Cases.Handle) -> Cases.Handle;
+}

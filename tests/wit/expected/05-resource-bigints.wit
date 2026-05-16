@@ -1,0 +1,16 @@
+package leo4:leo4-wit-case05;
+
+interface cases {
+  type bignat = list<u64>;
+  type bigint = tuple<bool, list<u64>>;
+
+  resource cases-handle;
+
+  len: func(p0: list<u32>) -> bignat;
+  neg: func(p0: bigint) -> bigint;
+  release: func(p0: cases-handle) -> cases-handle;
+}
+
+world cases-world {
+  export cases;
+}

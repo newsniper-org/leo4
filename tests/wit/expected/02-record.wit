@@ -1,0 +1,14 @@
+package leo4:leo4-wit-case02;
+
+interface cases {
+  record cases-point {
+    x: f64,
+    y: f64,
+  }
+
+  midpoint: func(p0: cases-point, p1: cases-point) -> cases-point;
+}
+
+world cases-world {
+  export cases;
+}

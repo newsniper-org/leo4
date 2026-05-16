@@ -1,0 +1,7 @@
+package leo4-wit-case03;
+interface Cases {
+  enum Cases.Color { red, green, blue };
+  variant Cases.Either { left(u32), right(string) };
+  func swap(_0: Cases.Either) -> Cases.Either;
+  func name(_0: Cases.Color) -> string;
+}

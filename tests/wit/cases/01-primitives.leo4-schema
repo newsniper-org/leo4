@@ -1,0 +1,6 @@
+package leo4-wit-case01;
+interface Cases {
+  func add(_0: u64, _1: u64) -> u64;
+  func double(_0: f64) -> f64;
+  func sign(_0: i32) -> bool;
+}

@@ -1,0 +1,11 @@
+package leo4:leo4-wit-case01;
+
+interface cases {
+  add: func(p0: u64, p1: u64) -> u64;
+  double: func(p0: f64) -> f64;
+  sign: func(p0: s32) -> bool;
+}
+
+world cases-world {
+  export cases;
+}
