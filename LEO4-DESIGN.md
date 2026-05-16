@@ -331,7 +331,16 @@ Blanket impls for all scalars; `derive(LeanType)` for user records and variants.
 
 ## 12. Open Questions Deferred to Implementation
 
-- `Lake.Module.recBuildLean` hook stability for the plugin (→ spike 0)
+- ~~`Lake.Module.recBuildLean` hook stability for the plugin (→ spike 0)~~
+  **RESOLVED 2026-05-16** — we do not hook `recBuildLean`. The plugin is a
+  `lean_exe` (`lake/Leo4Plugin/lakefile.lean` → `lean_exe leo4plugin`) that
+  is invoked as `lake exe leo4plugin <user-module>` after Lake has built
+  the user package's `.olean` files. The exe calls `Lean.initSearchPath`
+  then `Lean.importModules (loadExts := true)` and walks the resulting
+  `Environment` using only public Lean/Lake API. `recBuildLean` remained
+  `private` across v4.27.0 → v4.29.1 and is the wrong integration point.
+  See `spike/SPIKE-0-FINDINGS.md` for the full investigation and timing
+  budget.
 - Exact placement of Lake outputs in `target/` vs `build/` (→ Week 1)
 - `cargo:rerun-if-changed=` granularity for Lake outputs (→ Week 3)
 - Whether `bigint` should also be ABI-compatible with Rust's `num-bigint` layout
