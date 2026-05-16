@@ -1,11 +1,11 @@
 {"version": 1,
- "schema_hash_bytes": "af10fe9e4c54e002",
- "schema_hash": "v4ip5hsmktqae",
+ "schema_hash_bytes": "a6296e5e23df375e",
+ "schema_hash": "uyuw4xrd343v4",
  "package": "leo4-sample",
  "leo4_plugin_version": "0.1.0",
  "lean_toolchain": "leanprover/lean4:v4.29.1",
- "interfaces": [{"resource_count": 0, "name": "Sample", "function_count": 6}],
- "emitted_at": "2026-05-16T08:42:59Z",
+ "interfaces": [{"resource_count": 0, "name": "Sample", "function_count": 9}],
+ "emitted_at": "2026-05-16T09:05:41Z",
  "constraint_universe":
  {"scalar":
   ["u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64"],

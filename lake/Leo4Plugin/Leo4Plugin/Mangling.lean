@@ -18,6 +18,9 @@ open Leo4Plugin (IDLType)
 private def joinUnderscore (xs : Array String) : String :=
   String.intercalate "_" xs.toList
 
+/-- FQN → mangling-safe segment: dot-separated module path joined by `_`. -/
+def fqnSeg (fqn : String) : String := fqn.replace "." "_"
+
 partial def mangleType : IDLType → String
   | .u8  => "u8"  | .u16 => "u16" | .u32 => "u32" | .u64 => "u64"
   | .i8  => "i8"  | .i16 => "i16" | .i32 => "i32" | .i64 => "i64"
@@ -33,16 +36,19 @@ partial def mangleType : IDLType → String
   | .result t (some e) => "Rz_" ++ mangleType t ++ "_" ++ mangleType e ++ "_z"
   | .tuple ts =>
       "T_" ++ joinUnderscore (ts.map mangleType) ++ "_t"
-  | .record n args =>
-      if args.isEmpty then "S_" ++ n ++ "_s"
-      else "S_" ++ n ++ "_" ++ joinUnderscore (args.map mangleType) ++ "_s"
-  | .variant n args =>
-      if args.isEmpty then "V_" ++ n ++ "_v"
-      else "V_" ++ n ++ "_" ++ joinUnderscore (args.map mangleType) ++ "_v"
-  | .enumT n    => "E_" ++ n ++ "_e"
-  | .flagsT n   => "F_" ++ n ++ "_f"
-  | .resource n => "X_" ++ n ++ "_x"
+  | .record fqn args =>
+      if args.isEmpty then "S_" ++ fqnSeg fqn ++ "_s"
+      else "S_" ++ fqnSeg fqn ++ "_" ++ joinUnderscore (args.map mangleType) ++ "_s"
+  | .variant fqn args =>
+      if args.isEmpty then "V_" ++ fqnSeg fqn ++ "_v"
+      else "V_" ++ fqnSeg fqn ++ "_" ++ joinUnderscore (args.map mangleType) ++ "_v"
+  | .enumT fqn  => "E_" ++ fqnSeg fqn ++ "_e"
+  | .flagsT fqn => "F_" ++ fqnSeg fqn ++ "_f"
+  | .resource fqn args =>
+      if args.isEmpty then "X_" ++ fqnSeg fqn ++ "_x"
+      else "X_" ++ fqnSeg fqn ++ "_" ++ joinUnderscore (args.map mangleType) ++ "_x"
   | .io t       => "I_" ++ mangleType t ++ "_i"
+  | .self       => "self"
 
 /-! ## Schema hash (SPEC/mangling.md §3) -/
 

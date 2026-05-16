@@ -12,6 +12,8 @@
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Marshal.olean"],
   "Leo4.Export":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Export.olean"],
+  "Leo4.Deriving":
+  ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Deriving.olean"],
   "Leo4.Builtins":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Builtins.olean"],
   "Leo4": ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4.olean"]},

@@ -12,3 +12,4 @@ import Leo4.Export
 import Leo4.Marshal
 import Leo4.Resource
 import Leo4.Builtins
+import Leo4.Deriving

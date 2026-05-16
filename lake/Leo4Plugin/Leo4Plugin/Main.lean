@@ -41,30 +41,6 @@ def gatherExports (env : Environment) : Array Name := Id.run do
   let curMod := ext.getState (asyncDecl := .anonymous) env
   curMod.foldl (init := acc) fun a n => a.push n
 
-/-! ## Type-substituting Expr → IDL converter -/
-
-/-- Convert a Lean `Expr` to `IDLType`, substituting generic FVars per `subst`.
-Returns `none` for types we cannot lower mechanically (free FVars not in
-`subst`, custom records/variants, etc.). Mirrors `AdmitSet.exprToIDL` but
-threads a generic substitution. -/
-partial def exprToIDLSubst (subst : FVarId → Option IDLType) (e : Expr) : Option IDLType :=
-  let head := e.getAppFn
-  let args := e.getAppArgs
-  match head, args.size with
-  | .fvar fv,           0 => subst fv
-  | .const ``List _,    1 => (exprToIDLSubst subst args[0]!).map .list
-  | .const ``Option _,  1 => (exprToIDLSubst subst args[0]!).map .option
-  | .const ``Except _,  2 => do
-      let tIdl ← exprToIDLSubst subst args[1]!
-      let eIdl ← exprToIDLSubst subst args[0]!
-      pure (.result tIdl (some eIdl))
-  | .const ``Prod _,    2 => do
-      let a ← exprToIDLSubst subst args[0]!
-      let b ← exprToIDLSubst subst args[1]!
-      pure (.tuple #[a, b])
-  | .const n _,         0 => leanNameToIDL n
-  | _, _ => none
-
 /-! ## Per-export analysis -/
 
 /-- Result of analysing one `@[leo4_export]` decl. -/
@@ -194,7 +170,7 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
       let mut paramInfos : Array Emit.ParamInfo := #[]
       for i in [0 : paramTypes.size] do
         let ty := paramTypes[i]!
-        match exprToIDLSubst subst ty with
+        match exprToIDLSubst env none subst ty with
         | some idl =>
             paramInfos := paramInfos.push
               { encoded := idl, usesGenerics := paramOrigins[i]! }
@@ -202,7 +178,7 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
             notes := notes.push s!"param type unsupported: {← Meta.ppExpr ty}"
             ok := false
       if !ok then continue
-      match exprToIDLSubst subst body with
+      match exprToIDLSubst env none subst body with
       | some retIDL => resolved := resolved.push (fullGenArgs, paramInfos, retIDL)
       | none =>
           notes := notes.push s!"return type unsupported: {← Meta.ppExpr body}"
@@ -250,6 +226,33 @@ def parseArgs (args : List String) : Config :=
     | _ => target.toString
   { target, outDir, pkg, iface }
 
+/-- Collect every user-defined nominal type referenced (directly) by an
+analysis's resolved param/return types. Returns the deduplicated FQN
+set. Used to drive mutual-exclusion (LeanMarshal ∩ LeanResource) checks
+and (Phase 5) `.leo4-schema` declaration emission. -/
+private def gatherUserTypes (a : ExportAnalysis) : Array String := Id.run do
+  let mut acc : Array String := #[]
+  let rec collect (t : IDLType) (acc : Array String) : Array String :=
+    match t with
+    | .record fqn args | .variant fqn args | .resource fqn args =>
+        args.foldl (init := acc.push fqn) (fun a t => collect t a)
+    | .enumT fqn  => acc.push fqn
+    | .flagsT fqn => acc.push fqn
+    | .list t | .option t | .io t => collect t acc
+    | .result t none => collect t acc
+    | .result t (some e) => collect e (collect t acc)
+    | .tuple ts => ts.foldl (init := acc) (fun a t => collect t a)
+    | _ => acc
+  for (_, paramInfos, ret) in a.resolved do
+    for p in paramInfos do
+      acc := collect p.encoded acc
+    acc := collect ret acc
+  -- Dedup.
+  let mut seen : Array String := #[]
+  for f in acc do
+    unless seen.contains f do seen := seen.push f
+  seen
+
 def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
   let exports := gatherExports env
 
@@ -275,6 +278,19 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
     IO.println s!"  • {a.declName}  generics={a.generics.size}  instantiations={instCount}"
     for note in a.notes do
       IO.println s!"      note: {note}"
+
+  -- Mutual-exclusion check: any user type that has both LeanMarshal and
+  -- LeanResource instances violates LEO4-DESIGN.md §10.1.
+  let mut allUserTypes : Array String := #[]
+  for a in analyses do
+    for t in gatherUserTypes a do
+      unless allUserTypes.contains t do allUserTypes := allUserTypes.push t
+  for fqn in allUserTypes do
+    let nm := fqn.toName
+    if hasLeanMarshalInstance env nm ∧ hasLeanResourceInstance env nm then
+      IO.eprintln s!"  ⚠  {fqn}: declared as both LeanMarshal and LeanResource — \
+        v0 requires them to be disjoint (LEO4-DESIGN.md §10.1). \
+        The plugin keeps the LeanResource interpretation; please remove one."
 
   -- Build the canonical IDL form (one (fname, params, ret) per instantiation).
   let mut members : Array (String × Array IDLType × IDLType) := #[]

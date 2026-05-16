@@ -3,6 +3,8 @@
 
 import Leo4
 
+open Leo4   -- expose @[leo4_export], `deriving LeanMarshal`, etc., short-form.
+
 namespace Sample
 
 @[leo4_export]
@@ -32,5 +34,47 @@ def maxScalar {T : Type} [Ord T] (a b : T) : T :=
 -- (the user name is informational only — phantom detection is FVarId-based).
 @[leo4_export]
 def constantFortyTwo {_T : Type} (_x : UInt32) : UInt32 := 42
+
+-- W3-3 fixtures: deriving LeanMarshal smoke checks.
+
+-- Single-ctor (record) shape.
+structure Point where
+  x : Float
+  y : Float
+  deriving LeanMarshal
+
+-- All-nullary inductive → IDL enum.
+inductive Color where
+  | red
+  | green
+  | blue
+  deriving LeanMarshal
+
+-- Mixed inductive with payload → IDL variant.
+-- Self-recursive: `node` references `Self` (i.e. `Tree`).
+inductive Tree where
+  | leaf
+  | node : Tree → Tree → Tree
+  deriving LeanMarshal
+
+-- W3-4 boundary exports that take user-defined types.
+-- The plugin should mangle these symbols using `S_Sample_Point_s` /
+-- `V_Sample_Tree_v` / `E_Sample_Color_e` per SPEC/mangling.md §2.
+
+@[leo4_export]
+def pointSum (p : Point) : Float := p.x + p.y
+
+@[leo4_export]
+def isLeaf (t : Tree) : Bool :=
+  match t with
+  | .leaf => true
+  | _    => false
+
+@[leo4_export]
+def colorName (c : Color) : String :=
+  match c with
+  | .red   => "red"
+  | .green => "green"
+  | .blue  => "blue"
 
 end Sample
