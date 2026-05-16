@@ -2,54 +2,81 @@
 # Run `just` to list. Run `just <task>` to execute.
 #
 # Conventions:
-#   • Lake builds first, Cargo builds second. Never the reverse.
+#   • Lake builds first, Cargo builds second. Never the reverse (CLAUDE.md, D8).
 #   • `just test` is the canonical "is everything green" command.
 
 default:
     @just --list
 
-# Build both sides, in order.
-build: lake-build cargo-build
+# Repo paths.
+leo4_pkg     := "lake/Leo4"
+plugin_pkg   := "lake/Leo4Plugin"
+sample_pkg   := "tests/sample-lean"
+plugin_bin   := plugin_pkg + "/.lake/build/bin/leo4plugin"
+leo4_oleans  := leo4_pkg   + "/.lake/build/lib/lean"
+sample_oleans := sample_pkg + "/.lake/build/lib/lean"
 
-# Lake side only.
+# ─── Lake side ────────────────────────────────────────────────────────────
+
+# Build the runtime library, the plugin library + exe, and the sample test pkg.
 lake-build:
-    cd lake && lake build
+    cd {{plugin_pkg}} && lake build
+    cd {{sample_pkg}} && lake build
 
-# Cargo side only.
+# Build only the plugin (and its Leo4 dependency).
+plugin-build:
+    cd {{plugin_pkg}} && lake build
+
+# Build only the sample test package.
+sample-build:
+    cd {{sample_pkg}} && lake build
+
+# Lake tests (currently none beyond the smoke run).
+lake-test: smoke-plugin
+
+# Run the plugin against tests/sample-lean and emit handshake + mangling artifacts.
+# OUTPUT_DIR defaults to {{sample_pkg}}/.lake/build/leo4/.
+smoke-plugin: plugin-build sample-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LEAN_PATH="{{sample_oleans}}:{{leo4_oleans}}:/opt/lean4/lib/lean" \
+      ./{{plugin_bin}} Sample {{sample_pkg}}/.lake/build/leo4
+
+# ─── Cargo side ───────────────────────────────────────────────────────────
+
 cargo-build:
     cargo build --workspace
-
-# All tests, both sides.
-test: lake-test cargo-test mangling-test
-
-lake-test:
-    cd lake && lake test
 
 cargo-test:
     cargo test --workspace
 
-# Cross-impl mangling conformance (Phase 2+).
-mangling-test:
-    @echo "TODO(phase-2): mangling conformance"
-
-# Clippy + format checks.
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo fmt --all -- --check
 
-# Format everything.
 fmt:
     cargo fmt --all
+
+# ─── Cross-cutting ────────────────────────────────────────────────────────
+
+# Both sides, in order. Lake first per D8.
+build: lake-build cargo-build
+
+test: lake-test cargo-test mangling-test
+
+# Cross-impl mangling conformance — Lake vs leo4c (Rust). Phase 3+.
+mangling-test:
+    @echo "TODO(phase-3): cross-impl mangling conformance test"
 
 # Validate SPEC/*.md consistency (Phase 1+).
 spec-lint:
     @echo "TODO(phase-1): SPEC consistency checker"
 
+# Show the resolved schema hash for the sample package's handshake file.
+schema-hash: smoke-plugin
+    @jq -r '.schema_hash' {{sample_pkg}}/.lake/build/leo4/sample.leo4-handshake
+
 # Nuke build outputs.
 clean:
     cargo clean
-    rm -rf lake/.lake lake/build
-
-# Show the resolved schema hash for a given IDL file (Phase 2+).
-hash idl:
-    @cargo run --bin leo4c -- mangle {{idl}} | jq -r '.schema_hash'
+    rm -rf {{plugin_pkg}}/.lake {{leo4_pkg}}/.lake {{sample_pkg}}/.lake
