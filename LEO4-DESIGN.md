@@ -165,9 +165,10 @@ constraint ::= "scalar"
 - Recursive constraints (e.g., `T : Marshal` requiring `T → T : Marshal`)
 - Open-ended negation (`¬(T : Marshal)`)
 - **Mutual recursion between two nominal types** (each naming the other
-  via `Self`-or-otherwise). v0 supports only *direct* self-recursion
-  through the `Self` keyword (`SPEC/idl-grammar.ebnf`). Users break a
-  mutual cycle by wrapping one side in a `LeanResource` handle.
+  via `Self`-or-otherwise) — forbidden in v0; lifted in Phase 6
+  (`ROADMAP.md`). v0 supports only *direct* self-recursion through the
+  `Self` keyword (`SPEC/idl-grammar.ebnf`). Until Phase 6 lands, users
+  break a mutual cycle by wrapping one side in a `LeanResource` handle.
 
 The Lake plugin rejects these with diagnostics.
 
@@ -188,6 +189,15 @@ Step 1 — admit-set per parameter:
                                     // the plugin records the param's name
                                     // and erases it from the boundary.
                                     // See SPEC/mangling.md "Value-param erasure".
+      else if Ti has a HIGHER kind (`Type -> Type` or above):
+        if ci is absent:
+          REJECT f with a diagnostic pointing at the binder.
+          // Higher-kind admit-sets require an explicit constraint —
+          // typically `@[leo4_specialize_when F : oneof {List, Option, …}]`.
+          // SPEC/mangling.md "Mandatory checks" (5).
+        else:
+          admit(f, i) := evaluate(ci) over current environment
+          // Normally `oneof { … }`; enumeration just reads that closed set.
       else if Ti is PHANTOM (does not appear in any parameter type or in
                             the return type of f's signature):
         admit(f, i) := PHANTOM     // a single dimensionless slot — see below
@@ -451,11 +461,17 @@ equivalent to a hand-written `instance : LeanResource ParserHandle := ⟨⟩`.
 
 ## 11. Out-of-Scope (v0)
 
-- mathlib usage from Rust (likely never; subset only)
+- mathlib usage from Rust — out of v0; named subset deferred to
+  Phase 8 (`ROADMAP.md`) on an opt-in, type-by-type basis. No
+  general Mathlib reflection at the boundary, ever.
 - Lean macros executing inside Rust process (definitely never)
 - Lean tactic mode from Rust (would require LSP-style backend, separate project)
 - Effect handlers, algebraic effects beyond `IO`
 - Custom calling conventions (`extern "leo4"`)
+- Async surfaces in the public API — out of v0; covered by Phase 7
+  once WASIp3 stabilises (`ROADMAP.md`, D4).
+- Mutual recursion between nominal types — out of v0 (§4.3); see
+  Phase 6.
 
 ## 12. Open Questions Deferred to Implementation
 
@@ -473,3 +489,8 @@ equivalent to a hand-written `instance : LeanResource ParserHandle := ⟨⟩`.
 - `cargo:rerun-if-changed=` granularity for Lake outputs (→ Week 3)
 - Whether `bigint` should also be ABI-compatible with Rust's `num-bigint` layout
   (→ Week 5 or punt)
+- **IDL output grouping in `<pkg>.leo4-schema`** — one `func` line per
+  monomorphisation (current) vs one per generic signature with per-mono
+  detail in `.leo4-mangling` only. Trade-off matrix and rationale in
+  `ROADMAP.md` "Open question — deferred decision". 병익 is reviewing;
+  do not change the emit shape until reopened.

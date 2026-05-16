@@ -208,6 +208,21 @@ For every parsed declaration the plugin verifies:
    value_params (e.g. `Vec n α`), because those types lower to ordinary
    length-prefixed forms (`list<α>`); the value is implicit in the
    wire encoding.
+5. **Higher-kind constraint requirement**: any type_param whose kind
+   is higher than `Type` (i.e. `Type -> Type`, `Type -> Type -> Type`,
+   etc.) MUST carry an explicit constraint that pins its admit-set to
+   a closed `oneof` of named type constructors. A bare HK
+   type_param with no constraint is rejected with a diagnostic
+   pointing at the binder.
+
+   *Rationale*: the unconstrained admit-set for a 1-arity type
+   constructor is "every 1-arity inductive in the user package", which
+   blows up the cartesian product without describing anything the wire
+   contract actually needs. The boundary cross is monomorphic; users
+   who genuinely need HK at the boundary express the closed set
+   directly, e.g. `@[leo4_specialize_when F : oneof {List, Option}]`.
+   General HKT closed-world enumeration is therefore *not* on the
+   phase ladder (ROADMAP.md "Future").
 
 Ill-kinded declarations never reach the admit-set enumerator.
 

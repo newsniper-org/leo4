@@ -41,6 +41,32 @@ def gatherExports (env : Environment) : Array Name := Id.run do
   let curMod := ext.getState (asyncDecl := .anonymous) env
   curMod.foldl (init := acc) fun a n => a.push n
 
+/-! ## Kind detection -/
+
+/--
+True iff `e` is a *kind expression* — `Sort _` or a Pi telescope whose
+every domain and conclusion is itself a kind.
+
+  `Type`            → kind                (`isSort = true`)
+  `Type → Type`     → kind                (Pi from kind to kind)
+  `Nat`             → not a kind          (it's a value type)
+  `{n : Nat} → Type` → not a kind         (value-indexed)
+
+Used to distinguish type binders (`{T : Type}`, `{F : Type → Type}`)
+from value binders (`{n : Nat}`). LEO4-DESIGN.md §5 enumerates the
+admit-set rule for each binder class.
+-/
+partial def isKindExpr : Expr → Bool
+  | .sort _              => true
+  | .forallE _ d b _     => isKindExpr d ∧ isKindExpr b
+  | _                    => false
+
+/-- True iff the binder type denotes a *higher* kind, i.e. anything
+strictly above `Sort _` (`Type → Type`, `Type → Type → Type`, …). -/
+def isHigherKind : Expr → Bool
+  | .forallE _ d b _     => isKindExpr d ∧ isKindExpr b
+  | _                    => false
+
 /-! ## Per-export analysis -/
 
 /-- Result of analysing one `@[leo4_export]` decl. -/
@@ -75,15 +101,21 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
   let env ← getEnv
   let some info := env.find? n | return none
   forallTelescopeReducing info.type fun args body => do
-    -- Classify binders.
+    -- Classify binders. A binder counts as a type-level generic if its
+    -- type is a *kind* (LEO4-DESIGN.md §5). That catches plain
+    -- `{T : Type}` as well as higher-kind binders like
+    -- `{F : Type → Type}`.
     let mut generics    : Array (FVarId × Name) := #[]
-    let mut classes     : Array (Name × Name) := #[]      -- (genericUserName, className)
+    let mut higherKinds : Array (FVarId × Name) := #[]
+    let mut classes     : Array (Name × Name) := #[]
     let mut paramTypes  : Array Expr := #[]
     for a in args do
       let ld ← a.fvarId!.getDecl
       let ty := ld.type
-      if ld.binderInfo.isImplicit && ty.isSort then
+      if ld.binderInfo.isImplicit ∧ isKindExpr ty then
         generics := generics.push (a.fvarId!, ld.userName)
+        if isHigherKind ty then
+          higherKinds := higherKinds.push (a.fvarId!, ld.userName)
       else if ld.binderInfo.isInstImplicit then
         let ch := ty.getAppFn
         let ca := ty.getAppArgs
@@ -95,6 +127,21 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
               classes := classes.push (ld2.userName, clsName)
       else
         paramTypes := paramTypes.push ty
+
+    -- Reject unconstrained higher-kind generics.
+    -- LEO4-DESIGN.md §5 + SPEC/mangling.md "Mandatory check 5".
+    -- (The `@[leo4_specialize_when F : oneof {…}]` constraint isn't
+    -- elaborated by this plugin yet — Phase 2+ — so for the moment we
+    -- reject every HK generic regardless of attribute presence.)
+    for (_, gname) in higherKinds do
+      let msg :=
+        "@[leo4_export] `" ++ n.toString ++
+        "`: generic `" ++ gname.toString ++
+        "` has higher kind, but the plugin rejects unconstrained higher-kind " ++
+        "generics at the boundary (LEO4-DESIGN.md §5). Add an explicit " ++
+        "@[leo4_specialize_when <param> : oneof { ... }] (Phase 2+) " ++
+        "or refactor the export to be monomorphic."
+      throwError msg
     -- Per-parameter generic dependencies, computed once on the *templates*
     -- (i.e. before substitution). Same vector applies to every instantiation.
     let genFvars : Array FVarId := generics.map Prod.fst
