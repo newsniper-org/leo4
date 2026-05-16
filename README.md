@@ -5,42 +5,68 @@ toolchain version.
 
 ## Status
 
-**Phase 1 (Lean side, end-to-end) complete.** Phase 2 (Rust-side
-`leo4-idl` + cross-impl mangling conformance) is the next concrete
-task. See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
+**Phases 1–4 complete; Phase 5 prep (CI matrix infra) in progress.**
+See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
 
 What works today:
 
-- `lake/Leo4/` runtime library exposing `@[leo4_export]`,
+- **Lean side runtime** (`lake/Leo4/`) — `@[leo4_export]`,
   `@[leo4_specialize_when …]`, the `leo4_constraint` syntax category,
   `class LeanMarshal` (`canonicalEncode`/`canonicalDecode` over a
   `ByteArray`), `class LeanResource` + `@[leo4_resource]`, primitive
   blanket `LeanMarshal` instances, and a `deriving LeanMarshal`
   handler for `structure` / `inductive` (including self-recursive
   variants).
-- `lake/Leo4Plugin/` Lake plugin built as a `lean_exe`. Walks the user
-  package via `Lean.importModules (loadExts := true)`, finds every
-  `@[leo4_export]`, computes admit-sets (phantom / unbounded / class /
-  value-erased — see LEO4-DESIGN.md §5), mangles names per
-  [`SPEC/mangling.md`](SPEC/mangling.md), and atomically writes
+- **Lake plugin** (`lake/Leo4Plugin/`, `lean_exe leo4plugin`) — re-loads
+  the user package via `Lean.importModules (loadExts := true)`,
+  computes admit-sets (phantom / unbounded / class / value-erased /
+  higher-kind reject — see `LEO4-DESIGN.md §5`), mangles names per
+  [`SPEC/mangling.md`](SPEC/mangling.md), atomically writes
   `<pkg>.leo4-schema`, `<pkg>.leo4-mangling`, `<pkg>.leo4-handshake`.
-- `tests/sample-lean/` smoke fixture covering primitives, scalar
-  generics, class-constraint generics, phantom generic,
-  value-erased generic, user record / enum / variant / resource,
-  self-recursive variant.
+  Optional `--with-lower` shells out to `leo4c` to also write
+  `<pkg>.wit`.
+- **Rust-side `leo4-idl` crate** — full IDL parser (`SPEC/idl-grammar.ebnf`:
+  `package`/`use`/`interface`/`world`/`type`/`constraint_decl`/
+  `nominal_decl`, kind annotations, `value_param`, `Self<…>`),
+  byte-identical mangling + FNV-1a-64 schema hash, canonical-form
+  renderer, and WIT lowering (records/variants/enums/resources,
+  cyclic ADTs → opaque `resource`, `bigint`/`bignat`/`io<T>` → side
+  aliases).
+- **`leo4c` CLI** — `parse`, `canonical`, `mangle`, `lower`.
+- **`leo4-abi` crate** — Rust mirror of `Leo4.LeanMarshal`. Scalars
+  (`u8`..`i64`, `f32`/`f64`, `bool`, `char`), composites (`String`,
+  `Vec<T>`, `Option<T>`, `Result<T,E>`, tuples), arbitrary-precision
+  `BigNat`/`BigInt`. `LeanError` + the 8 reserved codes from
+  `SPEC/canonical-abi.md` §13. `handshake::check_schema_hash` returns
+  `0x05` on mismatch.
+- **Cross-impl conformance** — three harnesses:
+  - `tests/mangling/` (`just mangling-test`) — schema_hash + 50
+    mangled names byte-identical between Lake plugin and `leo4c`.
+  - `tests/wit/` (`just wit-test`) — 5 IDL cases lower to WIT that
+    passes `wasm-tools component wit` and `wit-bindgen markdown`.
+  - `tests/conformance/` (`just conformance-test`) — 29 fixtures
+    where the Lean encoder bytes are reproduced byte-identical by the
+    Rust encoder.
+- **`tests/sample-lean/`** smoke fixture covering every shape the
+  plugin emits.
+- **Multi-version CI matrix** (`ci/`, `just ci-matrix`) — hermetic
+  Ubuntu container with `elan`, `rustup`, `wasm-tools`, and
+  `wit-bindgen`. Matrix `v4.27.0 / v4.28.0 / v4.29.1 / v4.30.0-rc2`
+  iterates inside a single container; hardlink-shared source mirror
+  in a named volume gives union-FS-style dedup without privileged
+  mounts. GitHub Actions is the planned primary CI; Tart is the
+  fallback path once Apple Silicon hardware is available.
 
 What is **not** built yet:
 
-- Rust side `leo4-idl` parser + mangling, the cross-impl conformance
-  harness (`tests/mangling/`), and the `leo4c` CLI — Phase 2.
-- `<pkg>.wit` lowering — Phase 3.
-- Wire-format round-trip on the Rust side and `LeanError.*` runtime
-  paths — Phase 4.
-- The C shim, `cc`/`leanc` invocation, `crates/leo4-native/`,
-  `#[leo4::import]` macro, end-to-end examples — Phase 5.
-
-The current state ships in `lake/`. The Rust workspace in `crates/` is
-still a scaffold.
+- C shim synthesis from the Lake plugin (`<pkg>.leo4-shim.c`),
+  `leanc`/`cc` driving, `crates/leo4-native/` (`Lean::init`,
+  `Arena<'a>`, `LeanRef<'a, T>`, `libloading`), `crates/leo4-macros/`
+  (`#[leo4::import]`), `crates/leo4-build/` (`build.rs` helper),
+  `examples/01-hello/`, `examples/02-roundtrip/` — Phase 5.
+- Actual triggers for `LeanError` codes `0x02` / `0x03` / `0x04` /
+  `0x06` / `0x08` (require the native shim path; covered as
+  "reachable" stubs in v0). Phase 5 lifts those.
 
 ## Documents to read, in order
 
@@ -56,12 +82,13 @@ still a scaffold.
    `Lake.Module.recBuildLean`.
 5. `SPEC/*.md` — normative specifications:
    - [`SPEC/idl-grammar.ebnf`](SPEC/idl-grammar.ebnf) — IDL grammar
-     (WIT-superset, `kind`, `Self`/`Self<…>`, value-param)
-   - [`SPEC/canonical-abi.md`](SPEC/canonical-abi.md) — wire format
+     (WIT-superset, `kind`, `Self`/`Self<…>`, `value_param`,
+     `nominal_decl` short-form).
+   - [`SPEC/canonical-abi.md`](SPEC/canonical-abi.md) — wire format.
    - [`SPEC/mangling.md`](SPEC/mangling.md) — name mangling, schema
-     hash (FNV-1a-64 → base32lc), kind discipline
-   - [`SPEC/handshake.md`](SPEC/handshake.md) — JSON file formats and
-     atomic-emission contract
+     hash (FNV-1a-64 → base32lc), kind discipline.
+   - [`SPEC/handshake.md`](SPEC/handshake.md) — JSON file formats,
+     atomic-emission contract, `.leo4-schema` canonical-form rules.
 
 ## Why leo4 and not leo3
 
@@ -82,15 +109,30 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 ├── CLAUDE.md               # Claude Code working agreement
 ├── ROADMAP.md              # phased plan
 ├── SPEC/                   # normative specs
-├── crates/                 # Cargo workspace (scaffold; Phase 2+)
-├── lake/                   # Lake workspace (Lean side, Phase 1 complete)
+├── crates/                 # Cargo workspace
+│   ├── leo4-idl/           # IDL parser + mangle + canonical render + WIT lower
+│   ├── leo4c/              # CLI: parse / canonical / mangle / lower
+│   ├── leo4-abi/           # LeanMarshal + LeanError + scalars/composites/bignat/bigint
+│   ├── leo4-native/        # (scaffold) Phase 5 — libloading + Arena/LeanRef
+│   ├── leo4-macros/        # (scaffold) Phase 5 — #[leo4::import]
+│   ├── leo4-macros-backend # (scaffold)
+│   ├── leo4-build/         # (scaffold) Phase 5 — build.rs helper
+│   ├── leo4/               # (scaffold) Phase 5 — top-level user API
+│   └── leo4-wasm/          # (scaffold) Phase 7+
+├── lake/                   # Lake workspace (Lean side)
 │   ├── Leo4/               # runtime library
-│   └── Leo4Plugin/         # Lake plugin exe
+│   └── Leo4Plugin/         # Lake plugin exe (leo4plugin)
+├── ci/                     # Multi-version Lean matrix infra
+│   ├── Dockerfile.lean-test
+│   ├── entrypoint.sh       # hardlink-shared source mirror + per-version work dir
+│   └── matrix.sh           # single docker run wrapper
 ├── shim/                   # C shim for the native backend (Phase 5)
 ├── examples/               # end-to-end demos (Phase 5)
 ├── tests/                  # integration + conformance tests
-│   ├── sample-lean/        # Phase 1 smoke fixture
-│   └── mangling/           # cross-impl conformance harness (Phase 2)
+│   ├── sample-lean/        # smoke fixture (record/enum/variant/resource/self-rec)
+│   ├── mangling/           # cross-impl mangling harness (Phase 2)
+│   ├── wit/                # WIT lowering golden + wasm-tools/wit-bindgen validation (Phase 3)
+│   └── conformance/        # encoder byte-for-byte conformance (Phase 4)
 ├── spike/                  # disposable experiments + findings
 ├── Cargo.toml
 ├── lakefile.lean
@@ -102,29 +144,37 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 ## Build and smoke-test
 
 Lean toolchain pinned to **`leanprover/lean4:v4.29.1`**. The repo does
-not require `elan`; the system-installed Lean of that version works.
+not require `elan` on the host; the system-installed Lean of that
+version works. (The CI matrix container uses `elan` internally so it
+can switch between matrix versions.)
 
-Common tasks (run from repo root):
+Common recipes (run from repo root):
 
 ```bash
-just                    # list available recipes
+just                    # list recipes
 just plugin-build       # build the Lake plugin (and Leo4)
 just sample-build       # build tests/sample-lean
-just smoke-plugin       # run the plugin against the sample, emit
-                        # tests/sample-lean/.lake/build/leo4/leo4-sample.{leo4-schema,leo4-mangling,leo4-handshake}
+just smoke-plugin       # run leo4plugin against the sample, emit
+                        # leo4-sample.{leo4-schema,leo4-mangling,leo4-handshake}
+just smoke-plugin-with-wit  # also emit leo4-sample.wit via `leo4c lower`
 just schema-hash        # print the sample's resolved schema hash
 just clean              # nuke build outputs
 
-just build              # Lake first, Cargo second (CLAUDE.md D8)
-just test               # full test ladder (Phase 4+ will populate it)
+# Cross-impl harnesses:
+just mangling-test      # Lake plugin vs leo4c mangling (Phase 2)
+just wit-test           # WIT golden + wasm-tools/wit-bindgen (Phase 3)
+just conformance-test   # Lean encoder vs Rust encoder bytes (Phase 4)
+just test               # full ladder = lake + cargo + mangling + wit + conformance
+
+# Multi-version Lean matrix (containerised, Phase 5 prep):
+just ci-image           # build the container image once
+just ci-matrix          # run `just test` for v4.27/v4.28/v4.29.1/v4.30.0-rc2
+just ci-version v4.29.1 # one version
+just ci-clean-cache     # drop the matrix cache volume
 ```
 
-The `just build` and `just test` targets run Cargo too, which is
-currently a near-empty workspace; they succeed but do little. Phase 2
-fills `crates/leo4-idl/` and `crates/leo4c/`.
-
 After `just smoke-plugin` the emitted files describe `tests/sample-lean`'s
-IDL in canonical form. Examples of what the plugin produces (cropped):
+IDL in canonical form:
 
 ```
 $ cat tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-schema
@@ -139,17 +189,40 @@ interface Sample {
   func pointSum(_0: Sample.Point) -> f64;
   ...
 }
-```
 
-```
 $ just schema-hash
 7vi56qcxzb3xw
 ```
 
-(Schema hashes rotate every time the canonical IDL form changes — by
+Schema hashes rotate every time the canonical IDL form changes — by
 design, so a stale Rust binary linking against a fresh shim fails at
-link time. The exact value above corresponds to the current sample
-fixture; yours will rotate as soon as you edit `tests/sample-lean`.)
+link time. The exact value above is for the current sample fixture;
+yours will rotate as soon as you edit `tests/sample-lean`.
+
+### Running CI under outage / on a fresh host
+
+`just ci-matrix` is hermetic: only `docker` (or `podman` with the
+`docker` alias) is required on the host. The container image carries
+`elan`, `rustup`, `just`, `wasm-tools`, and `wit-bindgen`; it stamps
+the matrix `LEAN_VERSION` into every `lean-toolchain` file at run time
+and lets `elan` install the matching toolchain on demand.
+
+A single named volume `leo4-matrix-cache` survives between runs and
+contains:
+
+- `/cache/src/` — master source mirror (rsync'd from `/workspace`
+  on each run).
+- `/cache/work-<ver>/` — per-version work tree, populated as a
+  hardlink mirror of `/cache/src/` so unchanged source files are
+  shared on disk. `target/` and `.lake/` live here per-version and
+  persist across matrix runs.
+
+The matrix is a fallback path against GitHub-Actions outages — the
+same `just test` ladder runs locally, and any divergence between
+local-container output and GitHub Actions output is a real bug. Apple
+Silicon coverage via `tart` is pencilled in for when Mac hardware
+becomes available; until then, macOS verification rides on
+GitHub-hosted `macos-26` runners.
 
 ## License
 
