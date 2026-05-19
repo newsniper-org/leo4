@@ -417,15 +417,16 @@ private structure ScalarCType where
   size : Nat      -- bytes on the wire (== canonical ABI fixed-width)
 deriving Inhabited
 
+-- Wire and Lean native ABI agree on bit pattern (signed/unsigned share
+-- a C width), so we represent every scalar's local C variable with the
+-- *unsigned* counterpart. This keeps `boxExpr`/`unboxExpr` and the
+-- Lean wrapper's `extern` declaration aligned on a single C type per
+-- IDL width.
 private def scalarCType : IDLType → Option ScalarCType
-  | .u8   => some { c := "uint8_t",  size := 1 }
-  | .u16  => some { c := "uint16_t", size := 2 }
-  | .u32  => some { c := "uint32_t", size := 4 }
-  | .u64  => some { c := "uint64_t", size := 8 }
-  | .i8   => some { c := "int8_t",   size := 1 }
-  | .i16  => some { c := "int16_t",  size := 2 }
-  | .i32  => some { c := "int32_t",  size := 4 }
-  | .i64  => some { c := "int64_t",  size := 8 }
+  | .u8  | .i8   => some { c := "uint8_t",  size := 1 }
+  | .u16 | .i16  => some { c := "uint16_t", size := 2 }
+  | .u32 | .i32  => some { c := "uint32_t", size := 4 }
+  | .u64 | .i64  => some { c := "uint64_t", size := 8 }
   | .f32  => some { c := "float",    size := 4 }
   | .f64  => some { c := "double",   size := 8 }
   | .bool => some { c := "uint8_t",  size := 1 }
@@ -449,11 +450,560 @@ private def cTypeOfIDL (t : IDLType) : String :=
   | some c => c
   | none   => "lean_object*"
 
-/-- Render one shim entry point. Scalar-only signatures get an actual
-wire-format encode/decode body that hands off to
-`leo4_lean__<mangled>`. Anything that mentions a composite or nominal
-type returns the W7-2a placeholder so the link table stays complete
-while the encoder grows out in subsequent steps. -/
+/-- Per-IDL-type code-emission contract for the shim.
+    See `handlerFor` below for the supported set; types not handled
+    here fall through to the `LEO4_ERR_UNIMPLEMENTED` stub. -/
+private structure TyHandler where
+  /-- C type of the local variable that holds the decoded native value. -/
+  cType        : String
+  /-- C type the Lean wrapper expects for this slot in its extern decl
+      (same as `cType` for the handled scalar+string set; will diverge
+      for future composites that need a boxed Lean object). -/
+  externCType  : String
+  /-- True when the local variable owns a Lean refcount that must be
+      `lean_dec_ref`'d on cleanup. -/
+  ownsRef      : Bool
+  /-- For scalar types, the suffix of the `lean_ctor_{get,set}_<X>`
+      accessor family (`"uint8"`, `"uint16"`, `"uint32"`, `"uint64"`,
+      `"float"`, `"float32"`). `none` when the value is a boxed
+      `lean_object*` that uses `lean_ctor_get` / `lean_ctor_set` (one
+      indexed slot per object field). Used by composite handlers when
+      they store the inner value as a constructor field. -/
+  scalarKind   : Option String
+  /-- Scalar field width contribution to `lean_alloc_ctor`'s
+      `scalar_sz` argument. `0` when the value is a boxed
+      `lean_object*` (it goes into a `num_objs` slot instead). -/
+  ctorScalarSz : Nat
+  /-- Emits a decode block: declares `var` of `cType`, reads from
+      `args_ptr` at `off`, advances `off`. On failure the block runs
+      `cleanup` (which dec_ref's prior owned args), resets
+      `*ret_len = 0`, and returns a status code. -/
+  decodeBlock  : (var : String) → (cleanup : String) → String
+  /-- Emits an encode block for a local variable `var` (typically `r`
+      for the return slot, or a per-ctor-field temporary for
+      composites). On too-small: `*ret_len = out_off + need`, run
+      `cleanup`, return LEO4_ERR_RETURN_BUF_TOO_SMALL. On success:
+      write into `ret_ptr + out_off`, advance `out_off`, run `cleanup`. -/
+  encodeBlock  : (var : String) → (cleanup : String) → String
+  /-- Box a native C value into a `lean_object *`. For scalars: calls
+      the right `lean_box_*` helper. For already-boxed values: the
+      identity. The returned string is a C *expression*. -/
+  boxExpr      : (var : String) → String
+  /-- Inverse of `boxExpr`. The returned string is a C *expression*. -/
+  unboxExpr    : (var : String) → String
+deriving Inhabited
+
+/-- `lean_ctor_{get,set}_<suffix>` family for a scalar's native ABI C
+type. Matches the lean.h naming exactly. -/
+private def scalarCtorKind (c : String) : String :=
+  match c with
+  | "uint8_t"  => "uint8"
+  | "uint16_t" => "uint16"
+  | "uint32_t" => "uint32"
+  | "uint64_t" => "uint64"
+  | "float"    => "float32"   -- lean_ctor_set_float32 / lean_ctor_get_float32
+  | "double"   => "float"     -- lean_ctor_set_float / lean_ctor_get_float
+  | _         => "ptr"
+
+/-- Native-C → boxed `lean_object *` expression. Matches the lean.h
+boxing helpers and the immediate-tag scheme for small ints. -/
+private def scalarBox (c : String) (var : String) : String :=
+  match c with
+  | "uint8_t"  => s!"lean_box((size_t)({var}))"
+  | "uint16_t" => s!"lean_box((size_t)({var}))"
+  | "uint32_t" => s!"lean_box_uint32({var})"
+  | "uint64_t" => s!"lean_box_uint64({var})"
+  | "float"    => s!"lean_box_float32({var})"
+  | "double"   => s!"lean_box_float({var})"
+  | _         => var
+
+/-- Boxed `lean_object *` C expression → native-C value of `c` type. -/
+private def scalarUnbox (c : String) (var : String) : String :=
+  match c with
+  | "uint8_t"  => s!"(uint8_t)lean_unbox({var})"
+  | "uint16_t" => s!"(uint16_t)lean_unbox({var})"
+  | "uint32_t" => s!"lean_unbox_uint32({var})"
+  | "uint64_t" => s!"lean_unbox_uint64({var})"
+  | "float"    => s!"lean_unbox_float32({var})"
+  | "double"   => s!"lean_unbox_float({var})"
+  | _         => var
+
+private def scalarHandler (c : String) (size : Nat) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := c
+    externCType  := c
+    ownsRef      := false
+    scalarKind   := some (scalarCtorKind c)
+    ctorScalarSz := size
+    decodeBlock  := fun var cleanup =>
+      s!"    {c} {var};\n" ++
+      s!"    if (args_len - off < {size}u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"    leo4_memcpy(&{var}, args_ptr + off, {size});\n" ++
+      s!"    off += {size}u;\n"
+    encodeBlock  := fun var cleanup =>
+      s!"    if (ret_cap - out_off < {size}u) " ++ lb ++
+        s!" *ret_len = out_off + {size}u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"    leo4_memcpy(ret_ptr + out_off, &{var}, {size});\n" ++
+      s!"    out_off += {size}u;\n" ++
+      cleanup
+    boxExpr      := scalarBox c
+    unboxExpr    := scalarUnbox c
+  }
+
+private def stringHandler : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      s!"        int32_t st = leo4_decode_string(args_ptr, args_len, &off, &{var});\n" ++
+      "        if (st != LEO4_OK) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return st; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      "    " ++ lb ++ "\n" ++
+      s!"        size_t need = leo4_encoded_size_string({var});\n" ++
+      "        if (ret_cap - out_off < need) " ++ lb ++
+        s!" *ret_len = out_off + need;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"        leo4_write_string({var}, ret_ptr, &out_off);\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-! ## Composite handlers (W7-2c-ii / W7-2c-iii) -/
+
+/-- Generate a fresh local variable suffix from the var name. Composite
+handlers nest into local scopes (their own `{ … }` blocks), so suffix
+collisions only need to avoid the enclosing `aN`/`r` names. We use
+`<var>_inner` for nested locals — single-level nesting is enough
+because each handler opens its own block. -/
+private def innerName (var : String) : String := var ++ "_inner"
+
+/-- `lean_ctor_set_<kind>(o, slot, val)` invocation. For boxed values
+(`scalarKind = none`) the slot is an object index; for scalars it is a
+byte offset within the constructor's scalar area. -/
+private def ctorSetCall
+    (h : TyHandler) (objSlot : Nat) (scalarOff : Nat)
+    (obj : String) (val : String) : String :=
+  match h.scalarKind with
+  | none     => s!"lean_ctor_set({obj}, {objSlot}, {val})"
+  | some "ptr" => s!"lean_ctor_set({obj}, {objSlot}, {val})"
+  | some kind => s!"lean_ctor_set_{kind}({obj}, {scalarOff}, {val})"
+
+private def ctorGetCall
+    (h : TyHandler) (objSlot : Nat) (scalarOff : Nat) (obj : String) : String :=
+  match h.scalarKind with
+  | none     => s!"lean_ctor_get({obj}, {objSlot})"
+  | some "ptr" => s!"lean_ctor_get({obj}, {objSlot})"
+  | some kind => s!"lean_ctor_get_{kind}({obj}, {scalarOff})"
+
+/-- A unary-payload constructor encoding helper used by both
+`optionHandler` (Some) and `resultHandler` (Ok / Err). Generates code
+that, given an inner handler `ih`, takes one wire byte and an inner
+value, allocates the appropriate Lean ctor, and stuffs the inner value
+into it. -/
+private def emitAllocCtorWithField
+    (ih : TyHandler) (tagLean : Nat) (objVar : String) (innerVar : String) : String :=
+  let numObjs   := if ih.ownsRef then 1 else 0
+  let scalarSz  := ih.ctorScalarSz
+  s!"        lean_object *{objVar} = lean_alloc_ctor({tagLean}, {numObjs}, {scalarSz});\n" ++
+  s!"        {ctorSetCall ih 0 0 objVar innerVar};\n"
+
+/-- `option<T>` per SPEC §5: u8 discriminator (0=none, 1=some) + payload.
+    Lean ctor index matches the wire (`Option.none` = 0, `Option.some`
+    = 1), so no remapping is needed. -/
+private def optionHandler (ih : TyHandler) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      let inner := innerName var
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      s!"        if (args_len - off < 1u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint8_t disc = args_ptr[off]; off += 1u;\n" ++
+      "        if (disc == 0u) " ++ lb ++ s!" {var} = lean_box(0); " ++ rb ++ "\n" ++
+      "        else if (disc == 1u) " ++ lb ++ "\n" ++
+      ih.decodeBlock inner cleanup ++
+      emitAllocCtorWithField ih 1 var inner ++
+      "        " ++ rb ++ " else " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      let inner := innerName var
+      "    " ++ lb ++ "\n" ++
+      "        if (ret_cap - out_off < 1u) " ++ lb ++
+        s!" *ret_len = out_off + 1u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"        unsigned _tag = lean_obj_tag({var});\n" ++
+      "        if (_tag == 0u) " ++ lb ++ "\n" ++
+      "            ret_ptr[out_off] = 0u; out_off += 1u;\n" ++
+      "        " ++ rb ++ " else " ++ lb ++ "\n" ++
+      "            ret_ptr[out_off] = 1u; out_off += 1u;\n" ++
+      -- `lean_ctor_get` returns a borrowed reference; the field stays
+      -- owned by the parent constructor. The inner `encodeBlock` only
+      -- reads, so we pass `""` for its cleanup and skip lean_inc/dec
+      -- entirely.
+      s!"            {ih.cType} {inner} = ({ih.cType}){ctorGetCall ih 0 0 var};\n" ++
+      ih.encodeBlock inner "" ++
+      "        " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `result<T, E>` per SPEC §6: u8 discriminator (0=ok, 1=err) + payload.
+    Lean `Except`: ctor 0 = `.error`, ctor 1 = `.ok` — wire and ctor
+    indices are **inverted**, so the decoder allocates ctor 1 for wire
+    0 and ctor 0 for wire 1; the encoder reads `lean_obj_tag` and
+    flips accordingly. -/
+private def resultHandler (ihOk : TyHandler) (ihErr : TyHandler) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      let inner := innerName var
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      s!"        if (args_len - off < 1u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint8_t disc = args_ptr[off]; off += 1u;\n" ++
+      "        if (disc == 0u) " ++ lb ++ "\n" ++
+      ihOk.decodeBlock inner cleanup ++
+      emitAllocCtorWithField ihOk 1 var inner ++
+      "        " ++ rb ++ " else if (disc == 1u) " ++ lb ++ "\n" ++
+      ihErr.decodeBlock inner cleanup ++
+      emitAllocCtorWithField ihErr 0 var inner ++
+      "        " ++ rb ++ " else " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      let inner := innerName var
+      "    " ++ lb ++ "\n" ++
+      "        if (ret_cap - out_off < 1u) " ++ lb ++
+        s!" *ret_len = out_off + 1u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"        unsigned _tag = lean_obj_tag({var});\n" ++
+      -- `lean_ctor_get` returns borrowed references on both branches.
+      -- The inner `encodeBlock` only reads, so we pass `""` for its
+      -- cleanup and skip lean_inc/dec entirely.
+      "        if (_tag == 1u) " ++ lb ++ "\n" ++
+      "            ret_ptr[out_off] = 0u; out_off += 1u;\n" ++
+      s!"            {ihOk.cType} {inner} = ({ihOk.cType}){ctorGetCall ihOk 0 0 var};\n" ++
+      ihOk.encodeBlock inner "" ++
+      "        " ++ rb ++ " else " ++ lb ++ "\n" ++
+      "            ret_ptr[out_off] = 1u; out_off += 1u;\n" ++
+      s!"            {ihErr.cType} {inner} = ({ihErr.cType}){ctorGetCall ihErr 0 0 var};\n" ++
+      ihErr.encodeBlock inner "" ++
+      "        " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `list<T>` per SPEC §4:
+       u32 len + T encodings concatenated.
+    Lean `List α` is a singly-linked chain of `cons` ctors (tag 1, two
+    fields: head as `lean_object *` boxed, tail), terminated by `nil`
+    (tag 0, no fields → `lean_box(0)`). The decoder collects all
+    elements into a fresh `lean_array_object` (each element boxed via
+    `ih.boxExpr`) and converts to a `List` with `lean_array_to_list`.
+    The encoder walks the cons chain, unboxes each head via
+    `ih.unboxExpr`, and delegates to `ih.encodeBlock`. -/
+private def listHandler (ih : TyHandler) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      let inner := innerName var
+      let innerCleanup := s!" lean_dec_ref({var}_arr);" ++ cleanup
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      s!"        if (args_len - off < 4u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint32_t {var}_len;\n" ++
+      s!"        leo4_memcpy(&{var}_len, args_ptr + off, 4);\n" ++
+      s!"        off += 4u;\n" ++
+      s!"        lean_object *{var}_arr = lean_alloc_array((size_t){var}_len, (size_t){var}_len);\n" ++
+      s!"        lean_object **{var}_slots = lean_array_cptr({var}_arr);\n" ++
+      s!"        for (size_t {var}_i = 0; {var}_i < (size_t){var}_len; {var}_i++) {var}_slots[{var}_i] = lean_box(0);\n" ++
+      s!"        for (size_t {var}_i = 0; {var}_i < (size_t){var}_len; {var}_i++) " ++ lb ++ "\n" ++
+      ih.decodeBlock inner innerCleanup ++
+      s!"            {var}_slots[{var}_i] = {ih.boxExpr inner};\n" ++
+      "        " ++ rb ++ "\n" ++
+      s!"        {var} = lean_array_to_list({var}_arr);\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      let inner := innerName var
+      "    " ++ lb ++ "\n" ++
+      "        if (ret_cap - out_off < 4u) " ++ lb ++
+        s!" *ret_len = out_off + 4u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"        size_t {var}_len_off = out_off; out_off += 4u;\n" ++
+      s!"        uint32_t {var}_count = 0;\n" ++
+      s!"        lean_object *{var}_cur = {var};\n" ++
+      s!"        while (lean_obj_tag({var}_cur) == 1u) " ++ lb ++ "\n" ++
+      s!"            lean_object *{var}_head = lean_ctor_get({var}_cur, 0);\n" ++
+      s!"            {ih.cType} {inner} = {ih.unboxExpr s!"{var}_head"};\n" ++
+      ih.encodeBlock inner "" ++
+      s!"            {var}_cur = lean_ctor_get({var}_cur, 1);\n" ++
+      s!"            {var}_count++;\n" ++
+      "        " ++ rb ++ "\n" ++
+      s!"        leo4_memcpy(ret_ptr + {var}_len_off, &{var}_count, 4);\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `tuple<T₁, T₂>` per SPEC §7, restricted to binary tuples (the only
+    arity Leo4 currently marshals: `LeanMarshal (α × β)`). Wire format:
+    `T₁` encoding followed by `T₂` encoding, no padding. Lean
+    representation: `Prod α β` = `lean_alloc_ctor(0, num_objs, scalar_sz)`
+    with `fst` at object slot/scalar offset 0 and `snd` at the next
+    slot/offset, in declaration order. -/
+private def binaryTupleHandler (ih1 : TyHandler) (ih2 : TyHandler) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  -- Lean ctor layout for Prod:
+  --   object fields come first (indexed by appearance order among objects),
+  --   then scalar fields packed in declaration order.
+  let numObjs := (if ih1.ownsRef then 1 else 0) + (if ih2.ownsRef then 1 else 0)
+  let scalarSz := ih1.ctorScalarSz + ih2.ctorScalarSz
+  -- For each component: where it lives in the ctor.
+  let obj1Slot := 0
+  let obj2Slot := if ih1.ownsRef then 1 else 0
+  let scalar1Off := 0
+  let scalar2Off := ih1.ctorScalarSz
+  -- Builders.
+  let setExpr (h : TyHandler) (objSlot scalarOff : Nat) (obj val : String) : String :=
+    ctorSetCall h objSlot scalarOff obj val
+  let getExpr (h : TyHandler) (objSlot scalarOff : Nat) (obj : String) : String :=
+    ctorGetCall h objSlot scalarOff obj
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      let v1 := s!"{var}_fst"
+      let v2 := s!"{var}_snd"
+      let cleanupAfterFirst :=
+        (if ih1.ownsRef then s!" lean_dec_ref({v1});" else "") ++ cleanup
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      ih1.decodeBlock v1 cleanup ++
+      ih2.decodeBlock v2 cleanupAfterFirst ++
+      s!"        {var} = lean_alloc_ctor(0, {numObjs}, {scalarSz});\n" ++
+      s!"        {setExpr ih1 obj1Slot scalar1Off var v1};\n" ++
+      s!"        {setExpr ih2 obj2Slot scalar2Off var v2};\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      let v1 := s!"{var}_fst"
+      let v2 := s!"{var}_snd"
+      "    " ++ lb ++ "\n" ++
+      s!"        {ih1.cType} {v1} = ({ih1.cType}){getExpr ih1 obj1Slot scalar1Off var};\n" ++
+      ih1.encodeBlock v1 "" ++
+      s!"        {ih2.cType} {v2} = ({ih2.cType}){getExpr ih2 obj2Slot scalar2Off var};\n" ++
+      ih2.encodeBlock v2 "" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `bignat` per SPEC §2: `u32 len | LE u64 limbs`. v0 shim supports
+    single-limb (`len ∈ {0, 1}`) only — multi-limb encode/decode
+    require mpz-level limb extraction that `lean.h` does not expose,
+    so we return `LEO4_ERR_UNIMPLEMENTED` in that path until the
+    post-v0 follow-up. -/
+private def bignatHandler : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      "        if (args_len - off < 4u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint32_t {var}_len;\n" ++
+      s!"        leo4_memcpy(&{var}_len, args_ptr + off, 4);\n" ++
+      "        off += 4u;\n" ++
+      s!"        if ({var}_len == 0u) " ++ lb ++ s!" {var} = lean_box(0); " ++ rb ++ "\n" ++
+      s!"        else if ({var}_len == 1u) " ++ lb ++ "\n" ++
+      "            if (args_len - off < 8u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"            uint64_t {var}_limb;\n" ++
+      s!"            leo4_memcpy(&{var}_limb, args_ptr + off, 8);\n" ++
+      "            off += 8u;\n" ++
+      s!"            {var} = lean_uint64_to_nat({var}_limb);\n" ++
+      "        " ++ rb ++ " else " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_UNIMPLEMENTED; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      "    " ++ lb ++ "\n" ++
+      s!"        if (!lean_is_scalar({var})) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_UNIMPLEMENTED; " ++ rb ++ "\n" ++
+      s!"        size_t {var}_v = lean_unbox({var});\n" ++
+      s!"        if ({var}_v == 0u) " ++ lb ++ "\n" ++
+      "            if (ret_cap - out_off < 4u) " ++ lb ++
+        s!" *ret_len = out_off + 4u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      "            uint32_t _len = 0u;\n" ++
+      "            leo4_memcpy(ret_ptr + out_off, &_len, 4);\n" ++
+      "            out_off += 4u;\n" ++
+      "        " ++ rb ++ " else " ++ lb ++ "\n" ++
+      "            if (ret_cap - out_off < 12u) " ++ lb ++
+        s!" *ret_len = out_off + 12u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      "            uint32_t _len = 1u;\n" ++
+      "            leo4_memcpy(ret_ptr + out_off, &_len, 4);\n" ++
+      "            out_off += 4u;\n" ++
+      s!"            uint64_t _limb = (uint64_t){var}_v;\n" ++
+      "            leo4_memcpy(ret_ptr + out_off, &_limb, 8);\n" ++
+      "            out_off += 8u;\n" ++
+      "        " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `bigint` per SPEC §2: `u8 sign | u32 len | LE u64 limbs`. v0 shim
+    handles single-limb only (`len ∈ {0, 1}`); multi-limb signals
+    `LEO4_ERR_UNIMPLEMENTED`. Lean's small Int range is roughly
+    `[-2³¹, 2³¹)`, well inside a single limb. Larger magnitudes route
+    through `lean_int_big_*` (mpz) — same limitation as `bignat`. -/
+private def bigintHandler : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      "        if (args_len - off < 5u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint8_t {var}_sign = args_ptr[off];\n" ++
+      "        off += 1u;\n" ++
+      s!"        if ({var}_sign > 1u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint32_t {var}_len;\n" ++
+      s!"        leo4_memcpy(&{var}_len, args_ptr + off, 4);\n" ++
+      "        off += 4u;\n" ++
+      s!"        if ({var}_len == 0u) " ++ lb ++ "\n" ++
+      s!"            if ({var}_sign != 0u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"            {var} = lean_int_to_int(0);\n" ++
+      s!"        " ++ rb ++ s!" else if ({var}_len == 1u) " ++ lb ++ "\n" ++
+      "            if (args_len - off < 8u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"            uint64_t {var}_limb;\n" ++
+      s!"            leo4_memcpy(&{var}_limb, args_ptr + off, 8);\n" ++
+      "            off += 8u;\n" ++
+      s!"            if ({var}_sign == 0u) " ++ lb ++ "\n" ++
+      s!"                lean_object *_n = lean_uint64_to_nat({var}_limb);\n" ++
+      s!"                {var} = lean_nat_to_int(_n);\n" ++
+      "            " ++ rb ++ " else " ++ lb ++ "\n" ++
+      s!"                if ({var}_limb > 9223372036854775808ULL) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_UNIMPLEMENTED; " ++ rb ++ "\n" ++
+      s!"                int64_t _v = ({var}_limb == 9223372036854775808ULL)\n" ++
+      s!"                              ? (-9223372036854775807LL - 1LL)\n" ++
+      s!"                              : -((int64_t){var}_limb);\n" ++
+      s!"                {var} = lean_int64_to_int(_v);\n" ++
+      "            " ++ rb ++ "\n" ++
+      "        " ++ rb ++ " else " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_UNIMPLEMENTED; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      "    " ++ lb ++ "\n" ++
+      s!"        if (!lean_is_scalar({var})) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_UNIMPLEMENTED; " ++ rb ++ "\n" ++
+      s!"        int64_t {var}_v = lean_scalar_to_int64({var});\n" ++
+      s!"        if ({var}_v == 0) " ++ lb ++ "\n" ++
+      "            if (ret_cap - out_off < 5u) " ++ lb ++
+        s!" *ret_len = out_off + 5u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      "            ret_ptr[out_off] = 0u; out_off += 1u;\n" ++
+      "            uint32_t _len = 0u;\n" ++
+      "            leo4_memcpy(ret_ptr + out_off, &_len, 4); out_off += 4u;\n" ++
+      "        " ++ rb ++ " else " ++ lb ++ "\n" ++
+      "            if (ret_cap - out_off < 13u) " ++ lb ++
+        s!" *ret_len = out_off + 13u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"            uint8_t _sign; uint64_t _limb;\n" ++
+      s!"            if ({var}_v > 0) " ++ lb ++
+        s!" _sign = 0u; _limb = (uint64_t){var}_v; " ++ rb ++ "\n" ++
+      s!"            else " ++ lb ++
+        s!" _sign = 1u; _limb = ({var}_v == (-9223372036854775807LL - 1LL))\n" ++
+        s!"                       ? 9223372036854775808ULL\n" ++
+        s!"                       : (uint64_t)(-{var}_v); " ++ rb ++ "\n" ++
+      "            ret_ptr[out_off] = _sign; out_off += 1u;\n" ++
+      "            uint32_t _len = 1u;\n" ++
+      "            leo4_memcpy(ret_ptr + out_off, &_len, 4); out_off += 4u;\n" ++
+      "            leo4_memcpy(ret_ptr + out_off, &_limb, 8); out_off += 8u;\n" ++
+      "        " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+private partial def handlerFor : IDLType → Option TyHandler
+  | t =>
+    match scalarCType t with
+    | some sc => some (scalarHandler sc.c sc.size)
+    | none    =>
+      match t with
+      | .string => some stringHandler
+      | .option inner => do
+        let ih ← handlerFor inner
+        return optionHandler ih
+      | .result tOk (some tErr) => do
+        let iho ← handlerFor tOk
+        let ihe ← handlerFor tErr
+        return resultHandler iho ihe
+      | .list inner => do
+        let ih ← handlerFor inner
+        return listHandler ih
+      | .tuple ts => do
+        if h : ts.size = 2 then
+          let ih1 ← handlerFor ts[0]
+          let ih2 ← handlerFor ts[1]
+          return binaryTupleHandler ih1 ih2
+        else
+          none
+      | .bignat => some bignatHandler
+      | .bigint => some bigintHandler
+      | _      => none
+
+/-- Render one shim entry point. Signatures whose every slot has a
+`TyHandler` get a real wire-format body; the rest fall back to the
+`LEO4_ERR_UNIMPLEMENTED` placeholder so the link table is complete. -/
 private def renderOneShim
     (cfg : Config) (a : ExportAnalysis) (schemaHash : Hash)
     (params : Array Emit.ParamInfo) (ret : IDLType) : String := Id.run do
@@ -461,66 +1011,72 @@ private def renderOneShim
                   (params.map (·.encoded)) schemaHash
   let entry  := s!"leo4_call_{mangled}"
   let helper := s!"leo4_lean__{mangled}"
-  let paramScs := params.map fun p => scalarCType p.encoded
-  let retSc?   := scalarCType ret
-  let allScalar := paramScs.all (·.isSome) && retSc?.isSome
+  let paramHs := params.map fun p => handlerFor p.encoded
+  let retH?   := handlerFor ret
+  let allHandled := paramHs.all (·.isSome) && retH?.isSome
   let paramTyStr := String.intercalate ", "
     (params.toList.map (fun p => cTypeOfIDL p.encoded))
   let retTyStr := cTypeOfIDL ret
-  let banner :=
-    s!"// {a.fname} :: ({paramTyStr}) -> {retTyStr}\n"
-  if !allScalar then
+  let banner := s!"// {a.fname} :: ({paramTyStr}) -> {retTyStr}\n"
+  let lb := "{"
+  let rb := "}"
+  if !allHandled then
     return banner ++
-      s!"int32_t {entry}(\n" ++
+      s!"LEO4_EXPORT int32_t {entry}(\n" ++
       "    leo4_arena_t* arena,\n" ++
       "    const uint8_t* args_ptr, size_t args_len,\n" ++
       "    uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)\n" ++
-      "{\n" ++
+      lb ++ "\n" ++
       "    (void)arena; (void)args_ptr; (void)args_len;\n" ++
       "    (void)ret_ptr; (void)ret_cap;\n" ++
       "    *ret_len = 0;\n" ++
-      "    return LEO4_ERR_UNIMPLEMENTED;  /* W7-2a placeholder */\n" ++
-      "}\n"
-  let scs := paramScs.map (·.get!)
-  let retSc := retSc?.get!
-  let inLen := scs.foldl (fun acc p => acc + p.size) 0
-  let outLen := retSc.size
-  -- Lean native helper extern declaration.
-  let leanRetC := (leanNativeCType ret).get!
-  let leanArgs := (params.toList.map fun p => (leanNativeCType p.encoded).get!)
-  let externArgs :=
-    if leanArgs.isEmpty then "void" else String.intercalate ", " leanArgs
-  let externDecl := s!"extern {leanRetC} {helper}({externArgs});\n"
-  -- Decode args from buffer (memcpy at running offset).
+      "    return LEO4_ERR_UNIMPLEMENTED;\n" ++
+      rb ++ "\n"
+  let phs := paramHs.map (·.get!)
+  let retH := retH?.get!
+  -- Lean helper extern declaration.
+  let externArgsList :=
+    if phs.isEmpty then ["void"] else phs.toList.map (·.externCType)
+  let externDecl :=
+    s!"extern {retH.externCType} {helper}(" ++
+    String.intercalate ", " externArgsList ++ ");\n"
+  -- Decode each param; carry an LIFO cleanup string of dec_refs for
+  -- already-decoded owned args, threaded into each subsequent
+  -- failure path.
   let mut decode := ""
-  let mut off : Nat := 0
-  for i in [0 : params.size] do
-    let ty := (leanNativeCType params[i]!.encoded).get!
-    let sz := scs[i]!.size
-    decode := decode ++
-      s!"    {ty} a{i}; memcpy(&a{i}, args_ptr + {off}, {sz});\n"
-    off := off + sz
+  let mut cleanup := ""
+  for i in [0 : phs.size] do
+    let h := phs[i]!
+    decode := decode ++ h.decodeBlock s!"a{i}" cleanup
+    if h.ownsRef then
+      cleanup := s!" lean_dec_ref(a{i});" ++ cleanup
+  -- After all decodes, the buffer must be fully consumed.
+  let lenCheck :=
+    "    if (off != args_len) " ++ lb ++
+      s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n"
+  -- Invocation: ownership of decoded `lean_object *` args transfers to
+  -- the Lean wrapper, so the decode-time `cleanup` is *not* run after a
+  -- successful call.
   let argApp := String.intercalate ", "
-    ((List.range params.size).map (fun i => s!"a{i}"))
+    ((List.range phs.size).map (fun i => s!"a{i}"))
   let invoke :=
-    if params.isEmpty then s!"{helper}()" else s!"{helper}({argApp})"
-  -- `s!"…{{…}}…"` does not accept the doubled-brace escape; we feed
-  -- single-character literals via plain concatenation instead.
-  let lb : String := "{"
-  let rb : String := "}"
+    if phs.isEmpty then s!"{helper}()" else s!"{helper}({argApp})"
+  -- Post-call cleanup for the return value (only owned types need it).
+  let retCleanup := if retH.ownsRef then " lean_dec_ref(r);" else ""
   let body :=
-    s!"int32_t {entry}(\n" ++
+    s!"LEO4_EXPORT int32_t {entry}(\n" ++
     "    leo4_arena_t* arena,\n" ++
     "    const uint8_t* args_ptr, size_t args_len,\n" ++
     "    uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)\n" ++
     lb ++ "\n" ++
     "    (void)arena;\n" ++
-    s!"    if (args_len != {inLen}u) return LEO4_ERR_DECODE;\n" ++
+    "    size_t off = 0;\n" ++
     decode ++
-    s!"    {leanRetC} r = {invoke};\n" ++
-    s!"    if (ret_cap < {outLen}u) " ++ lb ++ s!" *ret_len = {outLen}u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
-    s!"    memcpy(ret_ptr, &r, {outLen});\n" ++
-    s!"    *ret_len = {outLen}u;\n" ++
+    lenCheck ++
+    s!"    {retH.externCType} r = {invoke};\n" ++
+    "    size_t out_off = 0;\n" ++
+    retH.encodeBlock "r" retCleanup ++
+    "    *ret_len = out_off;\n" ++
     "    return LEO4_OK;\n" ++
     rb ++ "\n"
   return banner ++ externDecl ++ body
@@ -539,10 +1095,10 @@ def renderShimSource
     "// (canonical-buffer ABI; SPEC/canonical-abi.md §14). The matching\n" ++
     "// Lean-side helper is `leo4_lean__<mangled>` (SPEC/mangling.md §6).\n" ++
     "//\n" ++
-    "// W7-2a scope: scalar-only signatures are wired end-to-end; any\n" ++
-    "// composite or nominal type returns LEO4_ERR_UNIMPLEMENTED so the\n" ++
-    "// link table stays complete while encoder/decoder coverage grows\n" ++
-    "// in W7-2c (composites) and W7-2d (nominal types).\n" ++
+    "// Coverage: scalar primitives and `string` are wired end-to-end\n" ++
+    "// (W7-2a + W7-2c-i). Other composites and nominal types still\n" ++
+    "// return LEO4_ERR_UNIMPLEMENTED; coverage grows in W7-2c-ii..iv\n" ++
+    "// (composites) and W7-2d (nominal types).\n" ++
     "//\n" ++
     s!"// Schema hash : {schemaHash.toBase32lc}\n" ++
     s!"// Package     : {cfg.pkg}\n" ++
@@ -551,7 +1107,22 @@ def renderShimSource
     "#include <lean/lean.h>\n" ++
     "#include <stdint.h>\n" ++
     "#include <stddef.h>\n" ++
-    "#include <string.h>\n" ++
+    "\n" ++
+    "/* `memcpy` via the compiler builtin so the translation unit\n" ++
+    "   compiles under leanc's bundled clang without depending on\n" ++
+    "   the host's system <string.h> search path. */\n" ++
+    "#define leo4_memcpy __builtin_memcpy\n" ++
+    "\n" ++
+    "/* leanc compiles with `-fvisibility=hidden` (see `leanc --print-cflags`),\n" ++
+    "   so the shim's entry points need an explicit default-visibility\n" ++
+    "   attribute to land in the .so's dynamic symbol table. */\n" ++
+    "#if defined(_WIN32) || defined(__CYGWIN__)\n" ++
+    "#define LEO4_EXPORT __declspec(dllexport)\n" ++
+    "#elif defined(__GNUC__) || defined(__clang__)\n" ++
+    "#define LEO4_EXPORT __attribute__((visibility(\"default\")))\n" ++
+    "#else\n" ++
+    "#define LEO4_EXPORT\n" ++
+    "#endif\n" ++
     "\n" ++
     "/* Status codes per SPEC/canonical-abi.md §13. */\n" ++
     "#define LEO4_OK                        0\n" ++
@@ -562,6 +1133,42 @@ def renderShimSource
     "/* Opaque arena pointer; the W7-2a scalar path doesn't touch it,\n" ++
     "   but the §14 signature reserves the slot. */\n" ++
     "typedef void leo4_arena_t;\n" ++
+    "\n" ++
+    "/* ---------- decode/encode helpers (W7-2c+) ---------- */\n" ++
+    "\n" ++
+    "/* `string` per SPEC/canonical-abi.md §3:\n" ++
+    "       len:u32 | utf8 bytes\n" ++
+    "   `lean_mk_string_from_bytes` validates UTF-8 and returns a\n" ++
+    "   fresh, owned `lean_object*`. The wire byte count equals\n" ++
+    "   `lean_string_size(o) - 1` because lean_string_object's m_size\n" ++
+    "   includes the trailing NUL terminator. */\n" ++
+    "static inline int32_t leo4_decode_string(\n" ++
+    "    const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out)\n" ++
+    "{\n" ++
+    "    if (buf_len - *off < 4u) return LEO4_ERR_DECODE;\n" ++
+    "    uint32_t slen;\n" ++
+    "    leo4_memcpy(&slen, buf + *off, 4);\n" ++
+    "    *off += 4u;\n" ++
+    "    if (buf_len - *off < (size_t)slen) return LEO4_ERR_DECODE;\n" ++
+    "    *out = lean_mk_string_from_bytes((char const *)(buf + *off), (size_t)slen);\n" ++
+    "    *off += (size_t)slen;\n" ++
+    "    return LEO4_OK;\n" ++
+    "}\n" ++
+    "\n" ++
+    "static inline size_t leo4_encoded_size_string(lean_object *s) {\n" ++
+    "    return 4u + (size_t)(lean_string_size(s) - 1u);\n" ++
+    "}\n" ++
+    "\n" ++
+    "static inline void leo4_write_string(\n" ++
+    "    lean_object *s, uint8_t *buf, size_t *off)\n" ++
+    "{\n" ++
+    "    size_t plen = lean_string_size(s) - 1u;\n" ++
+    "    uint32_t slen32 = (uint32_t)plen;\n" ++
+    "    leo4_memcpy(buf + *off, &slen32, 4);\n" ++
+    "    *off += 4u;\n" ++
+    "    leo4_memcpy(buf + *off, lean_string_cstr(s), plen);\n" ++
+    "    *off += plen;\n" ++
+    "}\n" ++
     "\n"
   let mut body := ""
   for a in analyses do
@@ -717,6 +1324,96 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
   let shimText := renderShimSource cfg analyses schemaHash
   IO.FS.writeFile shimPath shimText
   IO.println s!"wrote {shimPath}"
+
+  -- W7-2b: shim build orchestration. Hand `Leo4.Build.BuildCfg` to
+  -- either the user's `Build.lean` (override path) or this process's
+  -- in-place `Leo4.Build.defaultLink` (default path). The plugin's
+  -- default path uses exactly the same helpers a user's `Build.lean`
+  -- would call into, so the two paths are coherent by construction
+  -- (M ⊂ L).
+  let sysroot ← Lean.findSysroot
+  let leancPath : System.FilePath := sysroot / "bin" / "leanc"
+  let mangledBodies : Array String :=
+    manglingEntries.foldl (init := #[]) fun acc e =>
+      acc ++ e.instantiations.map (·.mangled)
+  -- Paths in the cfg JSON are absolute so that user `Build.lean`
+  -- scripts (and `checkExports`, etc.) work regardless of the cwd
+  -- they're invoked from.
+  let outDirAbs       ← IO.FS.realPath cfg.outDir
+  let shimPathAbs     ← IO.FS.realPath shimPath
+  let leanExportsAbs  ← IO.FS.realPath leanExportsPath
+  let manglingPathAbs ← IO.FS.realPath manglingPath
+  -- Infer the user package root by walking up from `outDir` until a
+  -- `.lake` directory turns up; the root is its parent. Falls back to
+  -- cwd when no `.lake` is anywhere on the path (shouldn't happen in
+  -- a normal Lake invocation).
+  let pkgRoot : System.FilePath ← Id.run do
+    let mut p := outDirAbs
+    for _ in [0 : 10] do
+      if p.fileName == some ".lake" then
+        match p.parent with
+        | some parent => return pure parent
+        | none        => break
+      match p.parent with
+      | some parent => p := parent
+      | none        => break
+    return IO.currentDir
+  let buildCfg : Leo4.Build.BuildCfg := {
+    pkg            := cfg.pkg
+    iface          := cfg.iface
+    schemaHash     := schemaHash.toBase32lc
+    pkgRoot        := pkgRoot
+    outDir         := outDirAbs
+    outName        := s!"{stem}.leo4-shim"
+    shimSrc        := shimPathAbs
+    wrapperSrc     := leanExportsAbs
+    manglingPath   := manglingPathAbs
+    mangledBodies  := mangledBodies
+    leancPath      := leancPath
+  }
+  let cfgJsonPath := cfg.outDir / s!"{stem}.leo4-build-cfg.json"
+  Leo4.Build.BuildCfg.save cfgJsonPath buildCfg
+  IO.println s!"wrote {cfgJsonPath}"
+
+  -- Build-script discovery order:
+  --   1. <cwd>/Build.lean                              (project override)
+  --   2. ${HOME}/.local/leo4/DefaultBuild.lean         (per-user default)
+  --   3. /etc/leo4/DefaultBuild.lean                   (system default)
+  --   4. in-process `Leo4.Build.defaultLink` fallback  (fresh checkout)
+  --
+  -- All four go through the same `BuildCfg` JSON, so the user can move
+  -- a `Build.lean` between scopes without changing its `main`.
+  let mut candidates : Array (String × System.FilePath) :=
+    #[("project Build.lean", pkgRoot / "Build.lean")]
+  if let some home ← IO.getEnv "HOME" then
+    let userDef : System.FilePath :=
+      (System.FilePath.mk home) / ".local" / "leo4" / "DefaultBuild.lean"
+    candidates := candidates.push ("user DefaultBuild.lean", userDef)
+  candidates := candidates.push
+    ("system DefaultBuild.lean", ("/etc/leo4/DefaultBuild.lean" : System.FilePath))
+  let mut chosen : Option (String × System.FilePath) := none
+  for (label, path) in candidates do
+    if chosen.isNone && (← path.pathExists) then
+      chosen := some (label, path)
+  match chosen with
+  | some (label, path) =>
+    IO.println s!"using {label}: {path}"
+    -- `lean --run` forwards every positional argument after the script
+    -- path verbatim — including a literal `--`. We omit the separator
+    -- so `Build.lean`'s `main args` sees `cfgJsonPath` at `args[0]!`,
+    -- matching the unix tradition `main` user code typically expects.
+    let res ← IO.Process.output {
+      cmd := "lake"
+      args := #["env", "lean", "--run", path.toString, cfgJsonPath.toString]
+    }
+    IO.print res.stdout
+    IO.eprint res.stderr
+    if res.exitCode != 0 then
+      throw <| IO.userError s!"{label} exited with code {res.exitCode}"
+  | none =>
+    IO.println "no Build.lean found in project/user/system scopes; running in-process Leo4.Build.defaultLink"
+    Leo4.Build.defaultLink buildCfg
+    IO.println s!"linked → {buildCfg.defaultSoPath}"
 
   -- Optional: lower each emitted `.leo4-schema` to `.wit` via the
   -- leo4c CLI. The shell-out is opt-in (`--with-lower`) precisely to

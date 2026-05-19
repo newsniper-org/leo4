@@ -1,0 +1,17 @@
+[package]
+name        = "schema-idl"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Domain-neutral core of the leo4 IDL: grammar, IDLType, parser, canonical renderer, FNV-1a-64 schema hash, and the mangling rules from `SPEC/mangling.md`. Reusable as the type-system layer of other interface description projects (see `for-general-interface-descriptions.md`)."
+
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

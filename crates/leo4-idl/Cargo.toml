@@ -6,9 +6,10 @@ rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
+description = "WIT lowering pass and leo4-specific façade over the domain-neutral `schema-idl` crate. See LEO4-DESIGN.md and `/for-general-interface-descriptions.md`."
 
 [dependencies]
+schema-idl.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

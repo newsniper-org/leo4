@@ -126,6 +126,27 @@ LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_colorName(uint8_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_colorName___boxed(lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_parserId(uint64_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_parserId___boxed(lean_object*);
+uint8_t lean_uint64_dec_eq(uint64_t, uint64_t);
+uint64_t lean_uint64_div(uint64_t, uint64_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_safeDiv(uint64_t, uint64_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_safeDiv___boxed(lean_object*, lean_object*);
+static const lean_string_object lp_leo4_x2dsample_Sample_parseU64___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 13, .m_capacity = 13, .m_length = 12, .m_data = "bad number: "};
+static const lean_object* lp_leo4_x2dsample_Sample_parseU64___closed__0 = (const lean_object*)&lp_leo4_x2dsample_Sample_parseU64___closed__0_value;
+lean_object* lean_string_utf8_byte_size(lean_object*);
+lean_object* l_String_Slice_toNat_x3f(lean_object*);
+uint64_t lean_uint64_of_nat(lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_parseU64(lean_object*);
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_List_foldl___at___00Sample_listSumU64_spec__0(uint64_t, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_List_foldl___at___00Sample_listSumU64_spec__0___boxed(lean_object*, lean_object*);
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_listSumU64(lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listSumU64___boxed(lean_object*);
+static const lean_string_object lp_leo4_x2dsample_Sample_listConcat___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 1, .m_capacity = 1, .m_length = 0, .m_data = ""};
+static const lean_object* lp_leo4_x2dsample_Sample_listConcat___closed__0 = (const lean_object*)&lp_leo4_x2dsample_Sample_listConcat___closed__0_value;
+lean_object* l_List_foldl___at___00Lean_Elab_Command_elabVersion_spec__0(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listConcat(lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listConcat___boxed(lean_object*);
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_pairAdd(lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_pairAdd___boxed(lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -1689,6 +1710,187 @@ lean_dec_ref(x_1);
 x_3 = lp_leo4_x2dsample_Sample_parserId(x_2);
 x_4 = lean_box_uint64(x_3);
 return x_4;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_safeDiv(uint64_t x_1, uint64_t x_2) {
+_start:
+{
+uint64_t x_3; uint8_t x_4; 
+x_3 = 0;
+x_4 = lean_uint64_dec_eq(x_2, x_3);
+if (x_4 == 0)
+{
+uint64_t x_5; lean_object* x_6; lean_object* x_7; 
+x_5 = lean_uint64_div(x_1, x_2);
+x_6 = lean_box_uint64(x_5);
+x_7 = lean_alloc_ctor(1, 1, 0);
+lean_ctor_set(x_7, 0, x_6);
+return x_7;
+}
+else
+{
+lean_object* x_8; 
+x_8 = lean_box(0);
+return x_8;
+}
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_safeDiv___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint64_t x_3; uint64_t x_4; lean_object* x_5; 
+x_3 = lean_unbox_uint64(x_1);
+lean_dec_ref(x_1);
+x_4 = lean_unbox_uint64(x_2);
+lean_dec_ref(x_2);
+x_5 = lp_leo4_x2dsample_Sample_safeDiv(x_3, x_4);
+return x_5;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_parseU64(lean_object* x_1) {
+_start:
+{
+lean_object* x_2; lean_object* x_3; lean_object* x_4; lean_object* x_5; 
+x_2 = lean_unsigned_to_nat(0u);
+x_3 = lean_string_utf8_byte_size(x_1);
+lean_inc_ref(x_1);
+x_4 = lean_alloc_ctor(0, 3, 0);
+lean_ctor_set(x_4, 0, x_1);
+lean_ctor_set(x_4, 1, x_2);
+lean_ctor_set(x_4, 2, x_3);
+x_5 = l_String_Slice_toNat_x3f(x_4);
+lean_dec_ref(x_4);
+if (lean_obj_tag(x_5) == 0)
+{
+lean_object* x_6; lean_object* x_7; lean_object* x_8; 
+x_6 = ((lean_object*)(lp_leo4_x2dsample_Sample_parseU64___closed__0));
+x_7 = lean_string_append(x_6, x_1);
+lean_dec_ref(x_1);
+x_8 = lean_alloc_ctor(0, 1, 0);
+lean_ctor_set(x_8, 0, x_7);
+return x_8;
+}
+else
+{
+uint8_t x_9; 
+lean_dec_ref(x_1);
+x_9 = !lean_is_exclusive(x_5);
+if (x_9 == 0)
+{
+lean_object* x_10; uint64_t x_11; lean_object* x_12; 
+x_10 = lean_ctor_get(x_5, 0);
+x_11 = lean_uint64_of_nat(x_10);
+lean_dec(x_10);
+x_12 = lean_box_uint64(x_11);
+lean_ctor_set(x_5, 0, x_12);
+return x_5;
+}
+else
+{
+lean_object* x_13; uint64_t x_14; lean_object* x_15; lean_object* x_16; 
+x_13 = lean_ctor_get(x_5, 0);
+lean_inc(x_13);
+lean_dec(x_5);
+x_14 = lean_uint64_of_nat(x_13);
+lean_dec(x_13);
+x_15 = lean_box_uint64(x_14);
+x_16 = lean_alloc_ctor(1, 1, 0);
+lean_ctor_set(x_16, 0, x_15);
+return x_16;
+}
+}
+}
+}
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_List_foldl___at___00Sample_listSumU64_spec__0(uint64_t x_1, lean_object* x_2) {
+_start:
+{
+if (lean_obj_tag(x_2) == 0)
+{
+return x_1;
+}
+else
+{
+lean_object* x_3; lean_object* x_4; uint64_t x_5; uint64_t x_6; 
+x_3 = lean_ctor_get(x_2, 0);
+x_4 = lean_ctor_get(x_2, 1);
+x_5 = lean_unbox_uint64(x_3);
+x_6 = lean_uint64_add(x_1, x_5);
+x_1 = x_6;
+x_2 = x_4;
+goto _start;
+}
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_List_foldl___at___00Sample_listSumU64_spec__0___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint64_t x_3; uint64_t x_4; lean_object* x_5; 
+x_3 = lean_unbox_uint64(x_1);
+lean_dec_ref(x_1);
+x_4 = lp_leo4_x2dsample_List_foldl___at___00Sample_listSumU64_spec__0(x_3, x_2);
+lean_dec(x_2);
+x_5 = lean_box_uint64(x_4);
+return x_5;
+}
+}
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_listSumU64(lean_object* x_1) {
+_start:
+{
+uint64_t x_2; uint64_t x_3; 
+x_2 = 0;
+x_3 = lp_leo4_x2dsample_List_foldl___at___00Sample_listSumU64_spec__0(x_2, x_1);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listSumU64___boxed(lean_object* x_1) {
+_start:
+{
+uint64_t x_2; lean_object* x_3; 
+x_2 = lp_leo4_x2dsample_Sample_listSumU64(x_1);
+lean_dec(x_1);
+x_3 = lean_box_uint64(x_2);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listConcat(lean_object* x_1) {
+_start:
+{
+lean_object* x_2; lean_object* x_3; 
+x_2 = ((lean_object*)(lp_leo4_x2dsample_Sample_listConcat___closed__0));
+x_3 = l_List_foldl___at___00Lean_Elab_Command_elabVersion_spec__0(x_2, x_1);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listConcat___boxed(lean_object* x_1) {
+_start:
+{
+lean_object* x_2; 
+x_2 = lp_leo4_x2dsample_Sample_listConcat(x_1);
+lean_dec(x_1);
+return x_2;
+}
+}
+LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_pairAdd(lean_object* x_1) {
+_start:
+{
+lean_object* x_2; lean_object* x_3; uint32_t x_4; uint64_t x_5; uint64_t x_6; uint64_t x_7; 
+x_2 = lean_ctor_get(x_1, 0);
+x_3 = lean_ctor_get(x_1, 1);
+x_4 = lean_unbox_uint32(x_3);
+x_5 = lean_uint32_to_uint64(x_4);
+x_6 = lean_unbox_uint64(x_2);
+x_7 = lean_uint64_add(x_6, x_5);
+return x_7;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_pairAdd___boxed(lean_object* x_1) {
+_start:
+{
+uint64_t x_2; lean_object* x_3; 
+x_2 = lp_leo4_x2dsample_Sample_pairAdd(x_1);
+lean_dec_ref(x_1);
+x_3 = lean_box_uint64(x_2);
+return x_3;
 }
 }
 lean_object* initialize_Init(uint8_t builtin);

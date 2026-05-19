@@ -6,6 +6,7 @@
 --   • Leo4.Marshal   — `LeanMarshal` typeclass + `LeanError`
 --   • Leo4.Resource  — `LeanResource` marker + @[leo4_resource]
 --   • Leo4.Builtins  — `LeanMarshal` instances for built-in primitives
+--   • Leo4.Build     — user-facing `Build.lean` helpers (M + L surfaces)
 
 import Leo4.Syntax
 import Leo4.Export
@@ -13,3 +14,4 @@ import Leo4.Marshal
 import Leo4.Resource
 import Leo4.Builtins
 import Leo4.Deriving
+import Leo4.Build

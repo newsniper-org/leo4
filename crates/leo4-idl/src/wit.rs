@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::idl::*;
+use schema_idl::idl::*;
 
 /// Convert any identifier-like string to a WIT-friendly kebab-case form.
 ///
@@ -325,7 +325,7 @@ pub fn lower(schema: &Schema) -> String {
             let suffix = f
                 .params
                 .iter()
-                .map(|(_, t)| crate::mangle::mangle_type(t))
+                .map(|(_, t)| schema_idl::mangle::mangle_type(t))
                 .collect::<Vec<_>>()
                 .join("-");
             *count += 1;

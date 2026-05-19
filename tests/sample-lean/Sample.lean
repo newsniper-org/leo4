@@ -86,4 +86,30 @@ structure ParserHandle where
 @[leo4_export]
 def parserId (h : ParserHandle) : ParserHandle := h
 
+-- W7-2c-ii fixtures: option / result wire formats.
+
+@[leo4_export]
+def safeDiv (a b : UInt64) : Option UInt64 :=
+  if b == 0 then none else some (a / b)
+
+@[leo4_export]
+def parseU64 (s : String) : Except String UInt64 :=
+  match s.toNat? with
+  | some n => .ok n.toUInt64
+  | none   => .error s!"bad number: {s}"
+
+-- W7-2c-iii fixtures: list / tuple wire formats.
+
+@[leo4_export]
+def listSumU64 (xs : List UInt64) : UInt64 :=
+  xs.foldl (· + ·) 0
+
+@[leo4_export]
+def listConcat (xs : List String) : String :=
+  xs.foldl (· ++ ·) ""
+
+@[leo4_export]
+def pairAdd (p : UInt64 × UInt32) : UInt64 :=
+  p.1 + p.2.toUInt64
+
 end Sample

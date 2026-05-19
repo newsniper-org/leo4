@@ -16,5 +16,7 @@
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Deriving.olean"],
   "Leo4.Builtins":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Builtins.olean"],
+  "Leo4.Build":
+  ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Build.olean"],
   "Leo4": ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4.olean"]},
  "dynlibs": []}
