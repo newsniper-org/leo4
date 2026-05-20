@@ -10,7 +10,7 @@
 // return LEO4_ERR_UNIMPLEMENTED; coverage grows in W7-2c-ii..iv
 // (composites) and W7-2d (nominal types).
 //
-// Schema hash : gj6daa3oelheu
+// Schema hash : 5wlbxlzagwuyy
 // Package     : leo4-sample
 // Interface   : Sample
 
@@ -92,7 +92,7 @@ static inline void leo4_write_string(
    is reserved for human-readable explanation; for now we leave
    it untouched (loader formats its own error message). */
 static const uint8_t leo4_schema_hash_be[8] = {
-    0x32, 0x7c, 0x30, 0x03, 0x6e, 0x22, 0xce, 0x4a
+    0xed, 0x96, 0x1b, 0xaf, 0x20, 0x35, 0xa9, 0x8c
 };
 
 LEO4_EXPORT int32_t leo4_handshake(
@@ -291,8 +291,8 @@ static int32_t leo4_enc_Sample_Either_u64_str(lean_object *v, uint8_t *buf, size
 }
 
 // stringify :: (uint8_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__b__hgj6daa3oelheu(uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__b__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__b__h5wlbxlzagwuyy(uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__b__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -304,7 +304,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__b__hgj6daa3o
     leo4_memcpy(&a0, args_ptr + off, 1);
     off += 1u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__b__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__b__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -316,8 +316,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__b__hgj6daa3o
 }
 
 // stringify :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__bN__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bN__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__bN__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bN__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -340,7 +340,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bN__hgj6daa3
         } else { *ret_len = 0; return LEO4_ERR_UNIMPLEMENTED; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__bN__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__bN__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -352,8 +352,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bN__hgj6daa3
 }
 
 // stringify :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__str__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__str__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__str__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__str__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -366,7 +366,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__str__hgj6daa
         if (st != LEO4_OK) { *ret_len = 0; return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__str__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__str__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -378,8 +378,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__str__hgj6daa
 }
 
 // stringify :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__bI__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bI__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__bI__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bI__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -416,7 +416,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bI__hgj6daa3
         } else { *ret_len = 0; return LEO4_ERR_UNIMPLEMENTED; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__bI__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__bI__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -428,8 +428,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__bI__hgj6daa3
 }
 
 // stringify :: (uint8_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u8__hgj6daa3oelheu(uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u8__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u8__h5wlbxlzagwuyy(uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u8__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -441,7 +441,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u8__hgj6daa3
     leo4_memcpy(&a0, args_ptr + off, 1);
     off += 1u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u8__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u8__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -453,8 +453,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u8__hgj6daa3
 }
 
 // stringify :: (float) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__f32__hgj6daa3oelheu(float);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f32__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__f32__h5wlbxlzagwuyy(float);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f32__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -466,7 +466,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f32__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__f32__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__f32__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -478,8 +478,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f32__hgj6daa
 }
 
 // stringify :: (uint32_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i32__hgj6daa3oelheu(uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i32__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i32__h5wlbxlzagwuyy(uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i32__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -491,7 +491,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i32__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i32__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i32__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -503,8 +503,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i32__hgj6daa
 }
 
 // stringify :: (uint16_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u16__hgj6daa3oelheu(uint16_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u16__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u16__h5wlbxlzagwuyy(uint16_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u16__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -516,7 +516,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u16__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 2);
     off += 2u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u16__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u16__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -528,8 +528,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u16__hgj6daa
 }
 
 // stringify :: (uint64_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i64__hgj6daa3oelheu(uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i64__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i64__h5wlbxlzagwuyy(uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -541,7 +541,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i64__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i64__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i64__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -553,8 +553,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i64__hgj6daa
 }
 
 // stringify :: (uint64_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u64__hgj6daa3oelheu(uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u64__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u64__h5wlbxlzagwuyy(uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -566,7 +566,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u64__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u64__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u64__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -578,8 +578,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u64__hgj6daa
 }
 
 // stringify :: (double) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__f64__hgj6daa3oelheu(double);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f64__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__f64__h5wlbxlzagwuyy(double);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -591,7 +591,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f64__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__f64__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__f64__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -603,8 +603,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__f64__hgj6daa
 }
 
 // stringify :: (uint8_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i8__hgj6daa3oelheu(uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i8__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i8__h5wlbxlzagwuyy(uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i8__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -616,7 +616,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i8__hgj6daa3
     leo4_memcpy(&a0, args_ptr + off, 1);
     off += 1u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i8__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i8__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -628,8 +628,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i8__hgj6daa3
 }
 
 // stringify :: (uint16_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i16__hgj6daa3oelheu(uint16_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i16__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__i16__h5wlbxlzagwuyy(uint16_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i16__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -641,7 +641,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i16__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 2);
     off += 2u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i16__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__i16__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -653,8 +653,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__i16__hgj6daa
 }
 
 // stringify :: (uint32_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u32__hgj6daa3oelheu(uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u32__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__u32__h5wlbxlzagwuyy(uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u32__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -666,7 +666,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u32__hgj6daa
     leo4_memcpy(&a0, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u32__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__u32__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -678,8 +678,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__u32__hgj6daa
 }
 
 // stringify :: (uint32_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__c__hgj6daa3oelheu(uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__c__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__stringify__c__h5wlbxlzagwuyy(uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__c__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -691,7 +691,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__c__hgj6daa3o
     leo4_memcpy(&a0, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__c__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__stringify__c__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -703,8 +703,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stringify__c__hgj6daa3o
 }
 
 // pairSndU64U32 :: (lean_object*) -> uint32_t
-extern uint32_t leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__hgj6daa3oelheu(
+extern uint32_t leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -726,7 +726,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairSndU64U32__S_Sample
         lean_ctor_set_uint32(a0, 8, a0_f1);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__hgj6daa3oelheu(a0);
+    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 4);
@@ -736,8 +736,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairSndU64U32__S_Sample
 }
 
 // safeDiv :: (uint64_t, uint64_t) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__hgj6daa3oelheu(uint64_t, uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__safeDiv__u64_u64__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__h5wlbxlzagwuyy(uint64_t, uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__safeDiv__u64_u64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -753,7 +753,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__safeDiv__u64_u64__hgj6d
     leo4_memcpy(&a1, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__hgj6daa3oelheu(a0, a1);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     {
         if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; lean_dec(r); return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
@@ -773,8 +773,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__safeDiv__u64_u64__hgj6d
 }
 
 // exprIsLit :: (lean_object*) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -787,7 +787,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__exprIsLit__V_Sample_Exp
         if (st != LEO4_OK) { *ret_len = 0; return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__hgj6daa3oelheu(a0);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -797,8 +797,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__exprIsLit__V_Sample_Exp
 }
 
 // stmtIsNop :: (lean_object*) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -811,7 +811,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stm
         if (st != LEO4_OK) { *ret_len = 0; return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__hgj6daa3oelheu(a0);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -821,8 +821,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stm
 }
 
 // pairFstU64U32 :: (lean_object*) -> uint64_t
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -844,7 +844,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairFstU64U32__S_Sample
         lean_ctor_set_uint32(a0, 8, a0_f1);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__hgj6daa3oelheu(a0);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -854,8 +854,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairFstU64U32__S_Sample
 }
 
 // pointSum :: (lean_object*) -> double
-extern double leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__hgj6daa3oelheu(
+extern double leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -877,7 +877,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pointSum__S_Sample_Poin
         lean_ctor_set_float(a0, 8, a0_f1);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    double r = leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__hgj6daa3oelheu(a0);
+    double r = leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -887,8 +887,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pointSum__S_Sample_Poin
 }
 
 // pairAdd :: (lean_object*) -> uint64_t
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -910,7 +910,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__h
         lean_ctor_set_uint32(a0, 8, a0_snd);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__hgj6daa3oelheu(a0);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -920,8 +920,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__h
 }
 
 // maxScalar :: (uint64_t, uint64_t) -> uint64_t
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__hgj6daa3oelheu(uint64_t, uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i64_i64__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__h5wlbxlzagwuyy(uint64_t, uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i64_i64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -937,7 +937,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i64_i64__hgj
     leo4_memcpy(&a1, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__hgj6daa3oelheu(a0, a1);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -947,8 +947,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i64_i64__hgj
 }
 
 // maxScalar :: (uint8_t, uint8_t) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__hgj6daa3oelheu(uint8_t, uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__b_b__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__h5wlbxlzagwuyy(uint8_t, uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__b_b__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -964,7 +964,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__b_b__hgj6daa
     leo4_memcpy(&a1, args_ptr + off, 1);
     off += 1u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__hgj6daa3oelheu(a0, a1);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -974,8 +974,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__b_b__hgj6daa
 }
 
 // maxScalar :: (uint16_t, uint16_t) -> uint16_t
-extern uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__hgj6daa3oelheu(uint16_t, uint16_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u16_u16__hgj6daa3oelheu(
+extern uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__h5wlbxlzagwuyy(uint16_t, uint16_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u16_u16__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -991,7 +991,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u16_u16__hgj
     leo4_memcpy(&a1, args_ptr + off, 2);
     off += 2u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint16_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__hgj6daa3oelheu(a0, a1);
+    uint16_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 2u) { *ret_len = out_off + 2u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 2);
@@ -1001,8 +1001,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u16_u16__hgj
 }
 
 // maxScalar :: (lean_object*, lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__hgj6daa3oelheu(lean_object *, lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__str_str__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__h5wlbxlzagwuyy(lean_object *, lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__str_str__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1020,7 +1020,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__str_str__hgj
         if (st != LEO4_OK) { *ret_len = 0; lean_dec(a0); return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a1); lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__hgj6daa3oelheu(a0, a1);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -1032,8 +1032,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__str_str__hgj
 }
 
 // maxScalar :: (uint64_t, uint64_t) -> uint64_t
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__hgj6daa3oelheu(uint64_t, uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u64_u64__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__h5wlbxlzagwuyy(uint64_t, uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u64_u64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1049,7 +1049,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u64_u64__hgj
     leo4_memcpy(&a1, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__hgj6daa3oelheu(a0, a1);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -1059,8 +1059,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u64_u64__hgj
 }
 
 // maxScalar :: (uint8_t, uint8_t) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__hgj6daa3oelheu(uint8_t, uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u8_u8__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__h5wlbxlzagwuyy(uint8_t, uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u8_u8__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1076,7 +1076,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u8_u8__hgj6d
     leo4_memcpy(&a1, args_ptr + off, 1);
     off += 1u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__hgj6daa3oelheu(a0, a1);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -1086,8 +1086,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u8_u8__hgj6d
 }
 
 // maxScalar :: (uint32_t, uint32_t) -> uint32_t
-extern uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__hgj6daa3oelheu(uint32_t, uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u32_u32__hgj6daa3oelheu(
+extern uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__h5wlbxlzagwuyy(uint32_t, uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u32_u32__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1103,7 +1103,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u32_u32__hgj
     leo4_memcpy(&a1, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__hgj6daa3oelheu(a0, a1);
+    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 4);
@@ -1113,8 +1113,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__u32_u32__hgj
 }
 
 // maxScalar :: (uint16_t, uint16_t) -> uint16_t
-extern uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__hgj6daa3oelheu(uint16_t, uint16_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i16_i16__hgj6daa3oelheu(
+extern uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__h5wlbxlzagwuyy(uint16_t, uint16_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i16_i16__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1130,7 +1130,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i16_i16__hgj
     leo4_memcpy(&a1, args_ptr + off, 2);
     off += 2u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint16_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__hgj6daa3oelheu(a0, a1);
+    uint16_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 2u) { *ret_len = out_off + 2u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 2);
@@ -1140,8 +1140,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i16_i16__hgj
 }
 
 // maxScalar :: (lean_object*, lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__hgj6daa3oelheu(lean_object *, lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bI_bI__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__h5wlbxlzagwuyy(lean_object *, lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bI_bI__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1207,7 +1207,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bI_bI__hgj6d
         } else { *ret_len = 0; lean_dec(a0); return LEO4_ERR_UNIMPLEMENTED; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a1); lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__hgj6daa3oelheu(a0, a1);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1235,8 +1235,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bI_bI__hgj6d
 }
 
 // maxScalar :: (lean_object*, lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__hgj6daa3oelheu(lean_object *, lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bN_bN__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__h5wlbxlzagwuyy(lean_object *, lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bN_bN__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1274,7 +1274,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bN_bN__hgj6d
         } else { *ret_len = 0; lean_dec(a0); return LEO4_ERR_UNIMPLEMENTED; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a1); lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__hgj6daa3oelheu(a0, a1);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1299,8 +1299,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__bN_bN__hgj6d
 }
 
 // maxScalar :: (uint8_t, uint8_t) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__hgj6daa3oelheu(uint8_t, uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i8_i8__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__h5wlbxlzagwuyy(uint8_t, uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i8_i8__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1316,7 +1316,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i8_i8__hgj6d
     leo4_memcpy(&a1, args_ptr + off, 1);
     off += 1u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__hgj6daa3oelheu(a0, a1);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -1326,8 +1326,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i8_i8__hgj6d
 }
 
 // maxScalar :: (uint32_t, uint32_t) -> uint32_t
-extern uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__hgj6daa3oelheu(uint32_t, uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i32_i32__hgj6daa3oelheu(
+extern uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__h5wlbxlzagwuyy(uint32_t, uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i32_i32__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1343,7 +1343,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i32_i32__hgj
     leo4_memcpy(&a1, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__hgj6daa3oelheu(a0, a1);
+    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 4);
@@ -1353,8 +1353,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__i32_i32__hgj
 }
 
 // maxScalar :: (uint32_t, uint32_t) -> uint32_t
-extern uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__hgj6daa3oelheu(uint32_t, uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__c_c__hgj6daa3oelheu(
+extern uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__h5wlbxlzagwuyy(uint32_t, uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__c_c__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1370,7 +1370,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__c_c__hgj6daa
     leo4_memcpy(&a1, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__hgj6daa3oelheu(a0, a1);
+    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 4);
@@ -1380,8 +1380,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__maxScalar__c_c__hgj6daa
 }
 
 // add :: (uint64_t, uint64_t) -> uint64_t
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__hgj6daa3oelheu(uint64_t, uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__add__u64_u64__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__h5wlbxlzagwuyy(uint64_t, uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__add__u64_u64__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1397,7 +1397,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__add__u64_u64__hgj6daa3o
     leo4_memcpy(&a1, args_ptr + off, 8);
     off += 8u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__hgj6daa3oelheu(a0, a1);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -1407,8 +1407,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__add__u64_u64__hgj6daa3o
 }
 
 // listSumU64 :: (lean_object*) -> uint64_t
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listSumU64__L_u64_l__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listSumU64__L_u64_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1434,7 +1434,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listSumU64__L_u64_l__hg
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__hgj6daa3oelheu(a0);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 8);
@@ -1444,8 +1444,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listSumU64__L_u64_l__hg
 }
 
 // hello :: () -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__hello____hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__hello____hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__hello____h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__hello____h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1453,7 +1453,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__hello____hgj6daa3oelheu
     (void)arena;
     size_t off = 0;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__hello____hgj6daa3oelheu(lean_box(0));
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__hello____h5wlbxlzagwuyy(lean_box(0));
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -1465,8 +1465,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__hello____hgj6daa3oelheu
 }
 
 // isLeaf :: (lean_object*) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1479,7 +1479,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v
         if (st != LEO4_OK) { *ret_len = 0; return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__hgj6daa3oelheu(a0);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -1489,8 +1489,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v
 }
 
 // parseU64 :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__parseU64__str__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parseU64__str__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__parseU64__str__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parseU64__str__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1503,7 +1503,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parseU64__str__hgj6daa3
         if (st != LEO4_OK) { *ret_len = 0; return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__parseU64__str__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__parseU64__str__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; lean_dec(r); return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
@@ -1529,8 +1529,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parseU64__str__hgj6daa3
 }
 
 // listConcat :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listConcat__L_str_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listConcat__L_str_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1557,7 +1557,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listConcat__L_str_l__hg
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -1569,8 +1569,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listConcat__L_str_l__hg
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_b_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_b_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1596,7 +1596,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_b_l__hgj6daa
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1621,8 +1621,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_b_l__hgj6daa
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_c_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_c_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1648,7 +1648,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_c_l__hgj6daa
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1673,8 +1673,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_c_l__hgj6daa
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_str_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_str_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1701,7 +1701,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_str_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1726,8 +1726,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_str_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bI_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bI_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1778,7 +1778,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bI_l__hgj6da
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1803,8 +1803,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bI_l__hgj6da
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bN_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bN_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1841,7 +1841,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bN_l__hgj6da
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1866,8 +1866,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_bN_l__hgj6da
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u8_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u8_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1893,7 +1893,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u8_l__hgj6da
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1918,8 +1918,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u8_l__hgj6da
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u16_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u16_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1945,7 +1945,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u16_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -1970,8 +1970,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u16_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u32_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u32_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -1997,7 +1997,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u32_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2022,8 +2022,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u32_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u64_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u64_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2049,7 +2049,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u64_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2074,8 +2074,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_u64_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i8_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i8_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2101,7 +2101,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i8_l__hgj6da
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2126,8 +2126,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i8_l__hgj6da
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i16_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i16_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2153,7 +2153,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i16_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2178,8 +2178,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i16_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i32_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i32_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2205,7 +2205,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i32_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2230,8 +2230,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i32_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i64_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i64_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2257,7 +2257,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i64_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2282,8 +2282,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_i64_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f32_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f32_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2309,7 +2309,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f32_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2334,8 +2334,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f32_l__hgj6d
 }
 
 // listLen :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f64_l__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f64_l__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2361,7 +2361,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f64_l__hgj6d
         a0 = lean_array_to_list(a0_arr);
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (!lean_is_scalar(r)) { *ret_len = 0; lean_dec(r); return LEO4_ERR_UNIMPLEMENTED; }
@@ -2386,8 +2386,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listLen__L_f64_l__hgj6d
 }
 
 // colorName :: (lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__hgj6daa3oelheu(uint8_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__h5wlbxlzagwuyy(uint8_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2404,7 +2404,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__colorName__E_Sample_Col
         a0 = (uint8_t)a0_tag;
     }
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__hgj6daa3oelheu(a0);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);
@@ -2415,9 +2415,32 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__colorName__E_Sample_Col
     return LEO4_OK;
 }
 
+// doubleVal :: (uint32_t) -> uint32_t
+extern uint32_t leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__h5wlbxlzagwuyy(uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__doubleVal__u32__h5wlbxlzagwuyy(
+    leo4_arena_t* arena,
+    const uint8_t* args_ptr, size_t args_len,
+    uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
+{
+    (void)arena;
+    size_t off = 0;
+    uint32_t a0;
+    if (args_len - off < 4u) { *ret_len = 0; return LEO4_ERR_DECODE; }
+    leo4_memcpy(&a0, args_ptr + off, 4);
+    off += 4u;
+    if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
+    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__h5wlbxlzagwuyy(a0);
+    size_t out_off = 0;
+    if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
+    leo4_memcpy(ret_ptr + out_off, &r, 4);
+    out_off += 4u;
+    *ret_len = out_off;
+    return LEO4_OK;
+}
+
 // eitherTaggedU64String :: (lean_object*) -> uint8_t
-extern uint8_t leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__hgj6daa3oelheu(lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__hgj6daa3oelheu(
+extern uint8_t leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__h5wlbxlzagwuyy(lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2430,7 +2453,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__eitherTaggedU64String__
         if (st != LEO4_OK) { *ret_len = 0; return st; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a0); return LEO4_ERR_DECODE; }
-    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__hgj6daa3oelheu(a0);
+    uint8_t r = leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 1u) { *ret_len = out_off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 1);
@@ -2440,8 +2463,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__eitherTaggedU64String__
 }
 
 // parserId :: (lean_object*) -> lean_object*
-extern uint64_t leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__hgj6daa3oelheu(uint64_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__hgj6daa3oelheu(
+extern uint64_t leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__h5wlbxlzagwuyy(uint64_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2455,7 +2478,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parserId__X_Sample_Pars
         off += 8u;
     }
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__hgj6daa3oelheu(a0);
+    uint64_t r = leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     {
         if (ret_cap - out_off < 8u) { *ret_len = out_off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
@@ -2467,8 +2490,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__parserId__X_Sample_Pars
 }
 
 // constantFortyTwo :: (uint32_t) -> uint32_t
-extern uint32_t leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__hgj6daa3oelheu(uint32_t);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__constantFortyTwo__u32__hgj6daa3oelheu(
+extern uint32_t leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__h5wlbxlzagwuyy(uint32_t);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__constantFortyTwo__u32__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2480,7 +2503,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__constantFortyTwo__u32__
     leo4_memcpy(&a0, args_ptr + off, 4);
     off += 4u;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__hgj6daa3oelheu(a0);
+    uint32_t r = leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__h5wlbxlzagwuyy(a0);
     size_t out_off = 0;
     if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
     leo4_memcpy(ret_ptr + out_off, &r, 4);
@@ -2490,8 +2513,8 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__constantFortyTwo__u32__
 }
 
 // echoes :: (lean_object*, lean_object*) -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__hgj6daa3oelheu(lean_object *, lean_object *);
-LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__echoes__L_u32_l_bN__hgj6daa3oelheu(
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__h5wlbxlzagwuyy(lean_object *, lean_object *);
+LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__echoes__L_u32_l_bN__h5wlbxlzagwuyy(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
     uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
@@ -2532,7 +2555,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__echoes__L_u32_l_bN__hgj
         } else { *ret_len = 0; lean_dec(a0); return LEO4_ERR_UNIMPLEMENTED; }
     }
     if (off != args_len) { *ret_len = 0; lean_dec(a1); lean_dec(a0); return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__hgj6daa3oelheu(a0, a1);
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__h5wlbxlzagwuyy(a0, a1);
     size_t out_off = 0;
     {
         if (ret_cap - out_off < 4u) { *ret_len = out_off + 4u; lean_dec(r); return LEO4_ERR_RETURN_BUF_TOO_SMALL; }

@@ -80,6 +80,17 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — Plugin value-param erasure (2026-05-20)
+
+- `analyzeExport` recognises implicit value-typed binders
+  (`{N : Nat}` and friends) and erases them from the boundary
+  signature per SPEC/mangling.md §"Value-param erasure". The
+  wrapper renderer fills each erased binder with `default` at the
+  Lean call site so elaboration succeeds (binder type must be
+  `Inhabited`). `Sample.doubleVal {_N : Nat} (x : UInt32) : UInt32`
+  fixture round-trips through `examples/01-hello` as a plain
+  `(u32) -> u32` export.
+
 ### Added — Phase 6 (2026-05-20)
 
 - **`SPEC/phase-6-mutual.md`** locks the four mutual-recursion
@@ -114,12 +125,6 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   byte-identical between the Lake plugin and `leo4c`.
 
 ### Pending
-
-- Plugin-side value-param erasure for implicit `{N : Nat}` binders
-  (the SPEC §"Value-param erasure" rule). `examples/02-roundtrip/`
-  works around this by passing `n : Nat` as an explicit runtime
-  argument; the implicit-binder path will be picked up alongside
-  Phase 6 / Phase 7 plugin work.
 - Phase 6 (mutual recursion), Phase 7 (async), Phase 8 (Mathlib
   subset).
 - schema-idl items G (`ConstraintExpr<Atom>` typed AST) and H

@@ -38,6 +38,11 @@ mod sample {
         // `#[leo4(args = "u64")]` hint nails the u64 instantiation.
         #[leo4(args = "u64")]
         fn stringify(x: Wrapped) -> String;
+        // Value-param erasure: `Sample.doubleVal {_N : Nat} (x : UInt32)`
+        // — the `{_N}` implicit is erased at the boundary by the plugin,
+        // so the boundary signature is just `(u32) -> u32`. The Lean
+        // wrapper fills `_N := default` so elaboration succeeds.
+        fn doubleVal(x: u32) -> u32;
     }
 }
 
@@ -158,6 +163,14 @@ fn main() -> Result<(), leo4::LeanError> {
     let s = sample::stringify(&lean, Wrapped(42))?;
     assert_eq!(s, "42");
     println!("stringify(Wrapped(42)) = {s:?}");
+
+    // Value-param erasure: `Sample.doubleVal` has a phantom
+    // `{_N : Nat}` implicit that the plugin erases at the boundary.
+    // The boundary signature is just `(u32) -> u32`, identical to
+    // any other monomorphic export.
+    let d = sample::doubleVal(&lean, 21)?;
+    assert_eq!(d, 42);
+    println!("doubleVal(21) = {d}");
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

@@ -1,9 +1,9 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
  "outputs":
- {"o": ["4026759f388b7e49.olean"],
-  "i": "ca9cf8e88c6d6cc3.ilean",
-  "c": "2486957742b3b508.c"},
+ {"o": ["2e8baf266c940418.olean"],
+  "i": "0f344f2516b1e438.ilean",
+  "c": "4e91b758aab92c12.c"},
  "log":
  [{"message":
    ".> LEAN_PATH=/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean:/home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean /opt/lean4/bin/lean /home/ybi/leo4/tests/sample-lean/Sample.lean -o /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.olean -i /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.ilean -c /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c --setup /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.setup.json --json",
@@ -25,10 +25,10 @@
       ["module plugins", "00000000000006bb"]]]]],
   ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
    "fa77a35a41db35c0"],
-  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "5c6c956ec81a5a31"],
+  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "0fc148c15f5cbcf7"],
   ["options", "00000000000006bb"],
   ["isModule: false", "feefd2a0d3a1847e"],
   ["Module.name: Sample", "aa097ba15ee094f1"],
   ["Package.id?: (some leo4-sample)", "553e3cd0f8245097"],
   ["Module.leanArgs: #[]", "00000000000006bb"]],
- "depHash": "238c73c1f9a04cd6"}
+ "depHash": "dca2638360981ecd"}

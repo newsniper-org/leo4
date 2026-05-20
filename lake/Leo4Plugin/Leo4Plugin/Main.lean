@@ -94,6 +94,12 @@ structure ExportAnalysis where
   resolved     : Array (Array (Option IDLType) × Array Emit.ParamInfo × IDLType)
   /-- Diagnostic notes — printed by the plugin to stdout, not emitted to JSON. -/
   notes        : Array String
+  /-- Implicit value-typed binders erased from the boundary signature
+  (SPEC/mangling.md §"Value-param erasure"). The wrapper fills these
+  with `default` at the call site — the binder's type must be
+  `Inhabited`. Truly phantom (no inference from value params), so the
+  wrapper must spell every erased name explicitly. -/
+  erasedImplicits : Array Name
   deriving Inhabited
 
 /-- Analyse one tagged decl. Returns `none` if the decl is missing from `env`. -/
@@ -109,6 +115,7 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
     let mut higherKinds : Array (FVarId × Name) := #[]
     let mut classes     : Array (Name × Name) := #[]
     let mut paramTypes  : Array Expr := #[]
+    let mut erasedImplicits : Array Name := #[]
     for a in args do
       let ld ← a.fvarId!.getDecl
       let ty := ld.type
@@ -116,6 +123,16 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
         generics := generics.push (a.fvarId!, ld.userName)
         if isHigherKind ty then
           higherKinds := higherKinds.push (a.fvarId!, ld.userName)
+      else if ld.binderInfo.isImplicit then
+        -- Implicit value-typed binder (e.g., `{N : Nat}`):
+        -- erased at the boundary per SPEC/mangling.md §"Value-param erasure".
+        -- The value never crosses the wire; the wrapper renderer fills
+        -- the implicit at the wrapper's call site via `(name := default)`
+        -- so Lean's elaborator can pin it (the binder's type must be
+        -- `Inhabited`). For binders that Lean *can* infer from a later
+        -- parameter (e.g., `{n : Nat} (xs : Vec α n)`), `default` is
+        -- overridden by inference — the explicit fill is harmless.
+        erasedImplicits := erasedImplicits.push ld.userName
       else if ld.binderInfo.isInstImplicit then
         let ch := ty.getAppFn
         let ca := ty.getAppArgs
@@ -234,6 +251,7 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
       fname       := n.toString.splitOn "." |>.getLast!
       generics    := generics.map Prod.snd
       admitSets, classAdmits, phantomMask, resolved, notes
+      erasedImplicits
     }
 
 /-! ## Driver -/
@@ -380,9 +398,19 @@ private def renderOneWrapper
         | none     => "Unit"
         | some idl => idlToLeanType idl
       namedGargs := namedGargs.push s!"({a.generics[i]!} := {rhs})"
-  let gargsApp := String.intercalate " " namedGargs.toList
+  -- Erased implicit value-typed binders (SPEC §"Value-param erasure"):
+  -- the boundary signature drops them, but Lean's elaborator still needs
+  -- a value at the wrapper's call site. We fill with `default` —
+  -- requires the binder's type to be `Inhabited`. For binders Lean can
+  -- infer from later parameters (Vec n α-style), `default` is shadowed
+  -- by inference and harmless.
+  let mut namedErased : Array String := #[]
+  for name in a.erasedImplicits do
+    namedErased := namedErased.push s!"({name} := default)"
+  let allNamed := namedGargs ++ namedErased
+  let gargsApp := String.intercalate " " allNamed.toList
   let body :=
-    if namedGargs.isEmpty then
+    if allNamed.isEmpty then
       s!"{a.declName.toString} {paramApp}"
     else
       s!"{a.declName.toString} {gargsApp} {paramApp}"

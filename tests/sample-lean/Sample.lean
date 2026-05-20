@@ -188,4 +188,13 @@ def stmtIsNop (s : Stmt) : Bool :=
   | .nop     => true
   | .block _ => false
 
+-- Value-param erasure fixture (SPEC/mangling.md §"Value-param erasure").
+-- `{_N : Nat}` is a phantom implicit value-typed binder; the plugin
+-- omits it from the boundary signature so the wrapper exports
+-- `(x : UInt32) -> UInt32`. Lean fills the implicit at the wrapper's
+-- call site via instance synthesis on `Inhabited Nat` (default = 0).
+@[leo4_export]
+def doubleVal {_N : Nat} (x : UInt32) : UInt32 := 2 * x
+
+
 end Sample
