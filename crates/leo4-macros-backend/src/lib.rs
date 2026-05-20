@@ -444,3 +444,343 @@ mod tests {
         assert!(err.contains("no instantiation"), "{err}");
     }
 }
+
+// ─── #[derive(LeanMarshal)] backend ────────────────────────────────
+
+/// Expand `#[derive(LeanMarshal)]` over a struct or enum. Four
+/// shapes:
+///
+/// - struct with `#[leo4(resource)]`: u64-handle wire (SPEC §12).
+///   Body must be a single `raw: u64` field — encoder writes 8 LE
+///   bytes, decoder reads them back.
+/// - struct (no attr): record (SPEC §8) — each field encoded in
+///   declaration order.
+/// - enum where every variant is unit: IDL enum (SPEC §10) — u32 LE
+///   tag in declaration order.
+/// - enum with mixed-payload variants: IDL variant (SPEC §9) — u8 LE
+///   discriminator + per-case payload.
+///
+/// Generic parameters carry through; each generic gets a
+/// `: ::leo4::LeanMarshal` bound on the synthesised impl.
+pub fn expand_derive_lean_marshal(input: TokenStream) -> TokenStream {
+    let derive_input: syn::DeriveInput = match syn::parse2(input) {
+        Ok(d) => d,
+        Err(e) => return e.to_compile_error(),
+    };
+
+    let is_resource = derive_input.attrs.iter().any(|a| is_leo4_resource(a));
+
+    match (&derive_input.data, is_resource) {
+        (syn::Data::Struct(s), true)  => expand_derive_resource(&derive_input, s),
+        (syn::Data::Struct(s), false) => expand_derive_record(&derive_input, s),
+        (syn::Data::Enum(e), _) => {
+            let all_unit = e.variants.iter().all(|v| matches!(v.fields, syn::Fields::Unit));
+            if all_unit {
+                expand_derive_enum(&derive_input, e)
+            } else {
+                expand_derive_variant(&derive_input, e)
+            }
+        }
+        (syn::Data::Union(_), _) => syn::Error::new_spanned(
+            &derive_input.ident,
+            "leo4 LeanMarshal cannot be derived for unions",
+        )
+        .to_compile_error(),
+    }
+}
+
+fn is_leo4_resource(attr: &syn::Attribute) -> bool {
+    if !attr.path().is_ident("leo4") {
+        return false;
+    }
+    let mut hit = false;
+    let _ = attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("resource") {
+            hit = true;
+        }
+        Ok(())
+    });
+    hit
+}
+
+fn add_lean_marshal_bound(generics: &syn::Generics) -> syn::Generics {
+    let mut g = generics.clone();
+    for param in &mut g.params {
+        if let syn::GenericParam::Type(tp) = param {
+            tp.bounds
+                .push(syn::parse_quote!(::leo4::LeanMarshal));
+        }
+    }
+    g
+}
+
+fn expand_derive_record(input: &syn::DeriveInput, s: &syn::DataStruct) -> TokenStream {
+    let name = &input.ident;
+    let bounded = add_lean_marshal_bound(&input.generics);
+    let (impl_g, ty_g, where_g) = bounded.split_for_impl();
+    let (encode_block, decode_block) = match &s.fields {
+        syn::Fields::Named(named) => {
+            let names: Vec<_> = named.named.iter().map(|f| f.ident.clone().unwrap()).collect();
+            let types: Vec<_> = named.named.iter().map(|f| f.ty.clone()).collect();
+            let enc = names.iter().zip(types.iter()).map(|(n, t)| {
+                quote! { <#t as ::leo4::LeanMarshal>::canonical_encode(&self.#n, buf); }
+            });
+            let dec_idents: Vec<_> = names.clone();
+            let dec_steps = names.iter().zip(types.iter()).map(|(n, t)| {
+                quote! {
+                    let (#n, __off) = <#t as ::leo4::LeanMarshal>::canonical_decode(buf, __off)?;
+                }
+            });
+            (
+                quote! { #(#enc)* },
+                quote! {
+                    let mut __off = off;
+                    #(#dec_steps)*
+                    Ok((Self { #(#dec_idents),* }, __off))
+                },
+            )
+        }
+        syn::Fields::Unnamed(unnamed) => {
+            let count = unnamed.unnamed.len();
+            let types: Vec<_> = unnamed.unnamed.iter().map(|f| f.ty.clone()).collect();
+            let indices: Vec<syn::Index> = (0..count).map(syn::Index::from).collect();
+            let temps: Vec<syn::Ident> = (0..count)
+                .map(|i| format_ident!("__f{}", i))
+                .collect();
+            let enc = indices.iter().zip(types.iter()).map(|(i, t)| {
+                quote! { <#t as ::leo4::LeanMarshal>::canonical_encode(&self.#i, buf); }
+            });
+            let dec_steps = temps.iter().zip(types.iter()).map(|(temp, t)| {
+                quote! {
+                    let (#temp, __off) = <#t as ::leo4::LeanMarshal>::canonical_decode(buf, __off)?;
+                }
+            });
+            (
+                quote! { #(#enc)* },
+                quote! {
+                    let mut __off = off;
+                    #(#dec_steps)*
+                    Ok((Self(#(#temps),*), __off))
+                },
+            )
+        }
+        syn::Fields::Unit => (
+            quote! {},
+            quote! { Ok((Self, off)) },
+        ),
+    };
+    quote! {
+        impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
+            fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
+                #encode_block
+            }
+            fn canonical_decode(buf: &[u8], off: usize)
+                -> ::core::result::Result<(Self, usize), ::leo4::AbiError>
+            {
+                #decode_block
+            }
+        }
+    }
+}
+
+fn expand_derive_resource(input: &syn::DeriveInput, s: &syn::DataStruct) -> TokenStream {
+    let name = &input.ident;
+    // Single `raw: u64` (or unnamed u64) field required.
+    let raw_acc: TokenStream = match &s.fields {
+        syn::Fields::Named(named) if named.named.len() == 1 => {
+            let f = named.named.first().unwrap();
+            let n = f.ident.clone().unwrap();
+            quote! { self.#n }
+        }
+        syn::Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => quote! { self.0 },
+        _ => {
+            return syn::Error::new_spanned(
+                &input.ident,
+                "leo4 LeanMarshal `#[leo4(resource)]` expects a single field of type u64",
+            )
+            .to_compile_error();
+        }
+    };
+    let ctor: TokenStream = match &s.fields {
+        syn::Fields::Named(named) => {
+            let n = named.named.first().unwrap().ident.clone().unwrap();
+            quote! { Self { #n: handle } }
+        }
+        syn::Fields::Unnamed(_) => quote! { Self(handle) },
+        _ => unreachable!(),
+    };
+    let bounded = add_lean_marshal_bound(&input.generics);
+    let (impl_g, ty_g, where_g) = bounded.split_for_impl();
+    quote! {
+        impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
+            fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
+                buf.extend_from_slice(&(#raw_acc).to_le_bytes());
+            }
+            fn canonical_decode(buf: &[u8], off: usize)
+                -> ::core::result::Result<(Self, usize), ::leo4::AbiError>
+            {
+                if buf.len() < off + 8 {
+                    return ::core::result::Result::Err(::leo4::AbiError::new(
+                        ::leo4::error_codes::DECODE_ERROR,
+                        "leo4 resource: not enough bytes for u64 handle",
+                    ));
+                }
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&buf[off..off + 8]);
+                let handle = u64::from_le_bytes(bytes);
+                ::core::result::Result::Ok((#ctor, off + 8))
+            }
+        }
+    }
+}
+
+fn expand_derive_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenStream {
+    let name = &input.ident;
+    let bounded = add_lean_marshal_bound(&input.generics);
+    let (impl_g, ty_g, where_g) = bounded.split_for_impl();
+    let enc_arms = e.variants.iter().enumerate().map(|(i, v)| {
+        let vn = &v.ident;
+        let tag = i as u32;
+        quote! { Self::#vn => #tag, }
+    });
+    let dec_arms = e.variants.iter().enumerate().map(|(i, v)| {
+        let vn = &v.ident;
+        let tag = i as u32;
+        quote! { #tag => Self::#vn, }
+    });
+    quote! {
+        impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
+            fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
+                let tag: u32 = match self {
+                    #(#enc_arms)*
+                };
+                buf.extend_from_slice(&tag.to_le_bytes());
+            }
+            fn canonical_decode(buf: &[u8], off: usize)
+                -> ::core::result::Result<(Self, usize), ::leo4::AbiError>
+            {
+                if buf.len() < off + 4 {
+                    return ::core::result::Result::Err(::leo4::AbiError::new(
+                        ::leo4::error_codes::DECODE_ERROR,
+                        "leo4 enum: not enough bytes for u32 tag",
+                    ));
+                }
+                let mut bytes = [0u8; 4];
+                bytes.copy_from_slice(&buf[off..off + 4]);
+                let tag = u32::from_le_bytes(bytes);
+                let value = match tag {
+                    #(#dec_arms)*
+                    _ => return ::core::result::Result::Err(::leo4::AbiError::new(
+                        ::leo4::error_codes::DECODE_ERROR,
+                        format!("leo4 enum: invalid tag {tag}"),
+                    )),
+                };
+                ::core::result::Result::Ok((value, off + 4))
+            }
+        }
+    }
+}
+
+fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenStream {
+    let name = &input.ident;
+    let bounded = add_lean_marshal_bound(&input.generics);
+    let (impl_g, ty_g, where_g) = bounded.split_for_impl();
+    let mut enc_arms = TokenStream::new();
+    let mut dec_arms = TokenStream::new();
+    for (i, v) in e.variants.iter().enumerate() {
+        let vn = &v.ident;
+        let disc = i as u8;
+        match &v.fields {
+            syn::Fields::Unit => {
+                enc_arms.extend(quote! {
+                    Self::#vn => { buf.push(#disc); }
+                });
+                dec_arms.extend(quote! {
+                    #disc => ::core::result::Result::Ok((Self::#vn, off + 1)),
+                });
+            }
+            syn::Fields::Unnamed(unnamed) => {
+                let temps: Vec<syn::Ident> = (0..unnamed.unnamed.len())
+                    .map(|j| format_ident!("__f{}", j))
+                    .collect();
+                let types: Vec<_> =
+                    unnamed.unnamed.iter().map(|f| f.ty.clone()).collect();
+                let enc_steps = temps.iter().zip(types.iter()).map(|(t, ty)| {
+                    quote! { <#ty as ::leo4::LeanMarshal>::canonical_encode(#t, buf); }
+                });
+                enc_arms.extend(quote! {
+                    Self::#vn(#(#temps),*) => {
+                        buf.push(#disc);
+                        #(#enc_steps)*
+                    }
+                });
+                let dec_steps = temps.iter().zip(types.iter()).map(|(t, ty)| {
+                    quote! {
+                        let (#t, __off) =
+                            <#ty as ::leo4::LeanMarshal>::canonical_decode(buf, __off)?;
+                    }
+                });
+                dec_arms.extend(quote! {
+                    #disc => {
+                        let mut __off = off + 1;
+                        #(#dec_steps)*
+                        ::core::result::Result::Ok((Self::#vn(#(#temps),*), __off))
+                    }
+                });
+            }
+            syn::Fields::Named(named) => {
+                let names: Vec<_> = named.named.iter().map(|f| f.ident.clone().unwrap()).collect();
+                let types: Vec<_> = named.named.iter().map(|f| f.ty.clone()).collect();
+                let enc_steps = names.iter().zip(types.iter()).map(|(n, ty)| {
+                    quote! { <#ty as ::leo4::LeanMarshal>::canonical_encode(#n, buf); }
+                });
+                enc_arms.extend(quote! {
+                    Self::#vn { #(#names),* } => {
+                        buf.push(#disc);
+                        #(#enc_steps)*
+                    }
+                });
+                let dec_steps = names.iter().zip(types.iter()).map(|(n, ty)| {
+                    quote! {
+                        let (#n, __off) =
+                            <#ty as ::leo4::LeanMarshal>::canonical_decode(buf, __off)?;
+                    }
+                });
+                dec_arms.extend(quote! {
+                    #disc => {
+                        let mut __off = off + 1;
+                        #(#dec_steps)*
+                        ::core::result::Result::Ok((Self::#vn { #(#names),* }, __off))
+                    }
+                });
+            }
+        }
+    }
+    quote! {
+        impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
+            fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
+                match self {
+                    #enc_arms
+                }
+            }
+            fn canonical_decode(buf: &[u8], off: usize)
+                -> ::core::result::Result<(Self, usize), ::leo4::AbiError>
+            {
+                if buf.len() < off + 1 {
+                    return ::core::result::Result::Err(::leo4::AbiError::new(
+                        ::leo4::error_codes::DECODE_ERROR,
+                        "leo4 variant: not enough bytes for u8 discriminator",
+                    ));
+                }
+                let disc = buf[off];
+                match disc {
+                    #dec_arms
+                    _ => ::core::result::Result::Err(::leo4::AbiError::new(
+                        ::leo4::error_codes::DECODE_ERROR,
+                        format!("leo4 variant: invalid disc {disc}"),
+                    )),
+                }
+            }
+        }
+    }
+}

@@ -28,13 +28,27 @@
 
 pub use leo4_native::{Arena, Lean, LeanError, LeanRef, LeanResult};
 
-pub use leo4_abi::{composites, scalars, LeanMarshal};
+pub use leo4_abi::{composites, error_codes, scalars, LeanMarshal};
+
+/// Canonical-ABI error type raised by encode / decode (distinct
+/// from the loader's [`LeanError`], which carries dispatch /
+/// handshake failures). `#[derive(LeanMarshal)]` returns this; the
+/// `From<leo4_abi::LeanError> for leo4::LeanError` impl in
+/// `leo4_native` lets `?` propagate across both.
+pub use leo4_abi::LeanError as AbiError;
 
 /// `leo4::import! { fn add(a: u64, b: u64) -> u64; }` — generate
 /// Rust wrappers for `@[leo4_export]` definitions on the Lean side.
-/// P5-b₂ minimum: scalar-only, single-instantiation. P5-b₃ adds
-/// composite / nominal payloads + generic exports.
+/// Supports scalar / composite / multi-instantiation; nominal types
+/// arrive in P5-b₃-ii once their `LeanMarshal` is derived.
 pub use leo4_macros::import;
+
+/// `#[derive(LeanMarshal)]` — synthesise the canonical-ABI
+/// `LeanMarshal` impl for user records / enums / variants /
+/// resources. Mirrors `lake/Leo4/Leo4/Deriving.lean` on the Rust
+/// side so the same `struct` defined in both languages encodes /
+/// decodes byte-identical bytes.
+pub use leo4_macros::LeanMarshal;
 
 /// Convenience: encode any `LeanMarshal` value to a `Vec<u8>` in
 /// canonical-ABI form. Mirrors `leo4_abi::marshal::encode_to_vec` so

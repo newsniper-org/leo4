@@ -158,6 +158,21 @@ tuple_impl!(A, B, C);
 tuple_impl!(A, B, C, D);
 tuple_impl!(A, B, C, D, E);
 
+/// Pass-through impl for `Box<T>`. Self-recursive variants (e.g.
+/// `enum Tree { Leaf, Node(Box<Tree>, Box<Tree>) }`) need this to
+/// satisfy the per-payload `LeanMarshal` bound that derived variant
+/// impls emit. The wire form is exactly the inner value's — `Box`
+/// only adds heap indirection on the Rust side.
+impl<T: LeanMarshal> LeanMarshal for Box<T> {
+    fn canonical_encode(&self, buf: &mut Vec<u8>) {
+        <T as LeanMarshal>::canonical_encode(self.as_ref(), buf);
+    }
+    fn canonical_decode(buf: &[u8], off: usize) -> Result<(Self, usize), LeanError> {
+        let (v, off) = <T as LeanMarshal>::canonical_decode(buf, off)?;
+        Ok((Box::new(v), off))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

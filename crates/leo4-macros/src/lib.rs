@@ -24,3 +24,14 @@ use proc_macro::TokenStream;
 pub fn import(input: TokenStream) -> TokenStream {
     leo4_macros_backend::expand_import(input.into()).into()
 }
+
+/// `#[derive(LeanMarshal)]` — synthesise canonical-ABI encode /
+/// decode for a struct or enum. Supports records (struct), enums of
+/// unit variants (IDL enum), enums with mixed payloads (IDL
+/// variant), and `#[leo4(resource)]`-tagged single-`u64`-field
+/// structs (IDL resource). Generic params get a
+/// `T: LeanMarshal` bound on the generated impl.
+#[proc_macro_derive(LeanMarshal, attributes(leo4))]
+pub fn derive_lean_marshal(input: TokenStream) -> TokenStream {
+    leo4_macros_backend::expand_derive_lean_marshal(input.into()).into()
+}

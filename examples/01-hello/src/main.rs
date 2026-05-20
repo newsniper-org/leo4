@@ -25,6 +25,41 @@ mod sample {
     }
 }
 
+// P5-b₃-ii: derived LeanMarshal instances mirroring the Sample
+// package's user-defined nominal types. Round-trip is checked
+// against the wire-format the Lean-side `deriving LeanMarshal`
+// handler emits.
+#[derive(leo4::LeanMarshal, Debug, PartialEq, Clone)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+#[derive(leo4::LeanMarshal, Debug, PartialEq, Clone)]
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+#[derive(leo4::LeanMarshal, Debug, PartialEq, Clone)]
+enum Tree {
+    Leaf,
+    Node(Box<Tree>, Box<Tree>),
+}
+
+#[derive(leo4::LeanMarshal, Debug, PartialEq, Clone)]
+#[leo4(resource)]
+struct ParserHandle {
+    raw: u64,
+}
+
+#[derive(leo4::LeanMarshal, Debug, PartialEq, Clone)]
+struct Pair<A, B> {
+    fst: A,
+    snd: B,
+}
+
 fn main() -> Result<(), leo4::LeanError> {
     // env! values come from leo4_build::wire in build.rs.
     let lean = leo4::Lean::open(
@@ -46,12 +81,59 @@ fn main() -> Result<(), leo4::LeanError> {
     assert_eq!(greeting, "hello, leo4");
     println!("hello() = {greeting:?}");
 
+    // P5-b₃-ii: derive macro round-trip across the four shapes.
+    nominal_derive_check();
+
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same
     // shim; the loader must refuse with code 5 instead of running.
     handshake_mismatch_check()?;
 
     Ok(())
+}
+
+/// Pure-Rust derive round-trip across record / enum / variant /
+/// resource / generic-record shapes. Uses
+/// `leo4::encode`/`leo4::decode` to drive each instance back and
+/// forth through the canonical-ABI wire format.
+fn nominal_derive_check() {
+    // record
+    let p = Point { x: 1.0, y: 2.5 };
+    let bytes = leo4::encode(&p);
+    let p2: Point = leo4::decode(&bytes).expect("Point decode");
+    assert_eq!(p, p2);
+
+    // enum (all-unit)
+    for c in [Color::Red, Color::Green, Color::Blue] {
+        let bytes = leo4::encode(&c);
+        let c2: Color = leo4::decode(&bytes).expect("Color decode");
+        assert_eq!(c, c2);
+    }
+
+    // variant (self-recursive)
+    let t = Tree::Node(
+        Box::new(Tree::Leaf),
+        Box::new(Tree::Node(Box::new(Tree::Leaf), Box::new(Tree::Leaf))),
+    );
+    let bytes = leo4::encode(&t);
+    let t2: Tree = leo4::decode(&bytes).expect("Tree decode");
+    assert_eq!(t, t2);
+
+    // resource (opaque u64)
+    let h = ParserHandle { raw: 0xdead_beef_cafe_babe };
+    let bytes = leo4::encode(&h);
+    let h2: ParserHandle = leo4::decode(&bytes).expect("ParserHandle decode");
+    assert_eq!(h, h2);
+
+    // generic record
+    let pair: Pair<u32, String> = Pair { fst: 7, snd: "leo4".into() };
+    let bytes = leo4::encode(&pair);
+    let pair2: Pair<u32, String> = leo4::decode(&bytes).expect("Pair decode");
+    assert_eq!(pair, pair2);
+
+    println!(
+        "derive(LeanMarshal) round-trip: record / enum / variant / resource / generic-record all green"
+    );
 }
 
 /// Verifies that `Lean::open` rejects a shim whose schema_hash_bytes
