@@ -227,7 +227,23 @@ pub fn render_canonical(
             s.push_str(&format!("_{i}: {}", idl_form(t)));
         }
         s.push_str(") -> ");
-        s.push_str(&idl_form(&f.ret));
+        // Phase 7 (D-i): re-render the effect marker. `Sync` stays
+        // unmarked (today's form); `Async` / `Stream` wrap the ret
+        // type in `future<…>` / `stream<…>` so the canonical IDL
+        // round-trips through `parse → resolve → render`.
+        match f.effect {
+            crate::Effect::Sync => s.push_str(&idl_form(&f.ret)),
+            crate::Effect::Async => {
+                s.push_str("future<");
+                s.push_str(&idl_form(&f.ret));
+                s.push('>');
+            }
+            crate::Effect::Stream => {
+                s.push_str("stream<");
+                s.push_str(&idl_form(&f.ret));
+                s.push('>');
+            }
+        }
         s.push(';');
         s.push_str(nl);
     }

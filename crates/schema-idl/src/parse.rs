@@ -171,6 +171,14 @@ pub struct RawFunc {
     pub name: String,
     pub params: Vec<(String, RawType)>,
     pub ret: RawType,
+    /// Function-level effect (D-i 2026-05-19). Set by
+    /// `parse_func_decl` when the return position is wrapped in
+    /// `future<…>` (`Async`) or `stream<…>` (`Stream`); `Sync`
+    /// otherwise. The inner `T` is unwrapped into `ret`. Effects
+    /// are NOT allowed inside payload types — `parse_type` rejects
+    /// `future` / `stream` keywords anywhere except a func's
+    /// immediate return position.
+    pub effect: Effect,
 }
 
 /// A `use path [as ident];` declaration.
@@ -388,12 +396,10 @@ pub fn resolve(raw: &RawSchema) -> Result<Schema, ResolveError> {
                 name: f.name.clone(),
                 params,
                 ret,
-                // D-i 2026-05-19: effect is a function-level flag,
-                // not an IDLType variant. v0 parser doesn't yet
-                // desugar `future<T>` / `stream<T>` — those route
-                // through the unknown-nominal path. Phase 7 entry
-                // wires this slot to the desugarer.
-                effect: Effect::Sync,
+                // D-i 2026-05-19: function-level effect. Phase 7
+                // step 1 (2026-05-20) wires the parser-side
+                // `future<T>` / `stream<T>` desugar into this slot.
+                effect: f.effect,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -815,6 +821,22 @@ impl<'a> Parser<'a> {
             let t = self.parse_type()?;
             self.expect_char('>')?;
             return Ok(RawType::Builtin(IDLType::Io(Box::new(raw_to_builtin(t)?))));
+        }
+        // D-i 2026-05-19: `future<T>` and `stream<T>` are effect
+        // markers, valid only at a func's immediate return position
+        // (handled in `parse_func_decl`). Anywhere else — inside a
+        // payload type — is a parse error.
+        if self.peek_keyword("future") {
+            return Err(ParseError::Expected {
+                at: self.pos,
+                what: "type (`future<T>` is only valid at a func's return position, not inside a payload)".into(),
+            });
+        }
+        if self.peek_keyword("stream") {
+            return Err(ParseError::Expected {
+                at: self.pos,
+                what: "type (`stream<T>` is only valid at a func's return position, not inside a payload)".into(),
+            });
         }
         if self.peek_keyword("Self") {
             self.expect_keyword("Self")?;
@@ -1466,15 +1488,33 @@ impl<'a> Parser<'a> {
         self.expect_char(')')?;
         // `func name(…) -> ret;` — `-> ret` is grammar-optional. Absent
         // return value = zero-length on the wire (SPEC/canonical-abi.md §14).
+        // D-i 2026-05-19: `future<T>` / `stream<T>` at the return
+        // position are *effect markers*, not type wrappers. Desugar
+        // them here into `FuncDecl.effect` + inner-`T` ret.
         self.skip_ws();
-        let ret = if self.peek_str("->") {
+        let (ret, effect) = if self.peek_str("->") {
             self.pos += 2;
-            self.parse_type()?
+            self.skip_ws();
+            if self.peek_keyword("future") {
+                self.expect_keyword("future")?;
+                self.expect_char('<')?;
+                let inner = self.parse_type()?;
+                self.expect_char('>')?;
+                (inner, Effect::Async)
+            } else if self.peek_keyword("stream") {
+                self.expect_keyword("stream")?;
+                self.expect_char('<')?;
+                let inner = self.parse_type()?;
+                self.expect_char('>')?;
+                (inner, Effect::Stream)
+            } else {
+                (self.parse_type()?, Effect::Sync)
+            }
         } else {
-            RawType::Builtin(IDLType::Tuple(vec![]))
+            (RawType::Builtin(IDLType::Tuple(vec![])), Effect::Sync)
         };
         self.expect_char(';')?;
-        Ok(RawFunc { name, params, ret })
+        Ok(RawFunc { name, params, ret, effect })
     }
 }
 
@@ -1844,6 +1884,51 @@ mod tests {
         .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("outside any `mutual"), "{msg}");
+    }
+
+    // ─── Phase 7 step 1: future / stream effect desugar ────────────
+
+    #[test]
+    fn func_future_return_desugars_to_async_effect() {
+        let s = parse(
+            "package p; interface i { func tick(_0: u32) -> future<u64>; }",
+        )
+        .unwrap();
+        assert_eq!(s.funcs.len(), 1);
+        let f = &s.funcs[0];
+        assert_eq!(f.effect, Effect::Async);
+        assert_eq!(f.ret, IDLType::U64);
+    }
+
+    #[test]
+    fn func_stream_return_desugars_to_stream_effect() {
+        let s = parse(
+            "package p; interface i { func ticks(_0: u32) -> stream<u8>; }",
+        )
+        .unwrap();
+        let f = &s.funcs[0];
+        assert_eq!(f.effect, Effect::Stream);
+        assert_eq!(f.ret, IDLType::U8);
+    }
+
+    #[test]
+    fn future_in_payload_position_rejected() {
+        let err = parse(
+            "package p; interface i { func f(_0: list<future<u32>>) -> u32; }",
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("future<T>"), "{msg}");
+    }
+
+    #[test]
+    fn stream_in_record_field_rejected() {
+        let err = parse(
+            "package p; interface i { record p.X { y: stream<u32> }; }",
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("stream<T>"), "{msg}");
     }
 
     #[test]

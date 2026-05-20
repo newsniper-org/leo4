@@ -8,10 +8,10 @@ fn parses_lake_plugin_sample_schema() {
     let schema = parse(&text).expect("parse should succeed");
     assert_eq!(schema.package, "leo4-sample");
     assert_eq!(schema.interface, "Sample");
-    // Sample now declares: Point (record), Color (enum), Tree (variant),
+    // Sample declares: Point (record), Color (enum), Tree (variant),
     // ParserHandle (resource), Pair (generic record), Either (generic
-    // variant) — six user types since the 2026-05-20 generic-fixture
-    // re-introduction.
-    assert_eq!(schema.user_decls.len(), 6, "expected 6 user decls");
+    // variant), plus a mutual { Expr; Stmt } cluster — seven entries
+    // total after the Phase 6 mutual-recursion fixture (2026-05-20).
+    assert_eq!(schema.user_decls.len(), 7, "expected 7 user decls");
     assert!(schema.funcs.len() >= 9, "expected at least 9 funcs, got {}", schema.funcs.len());
 }

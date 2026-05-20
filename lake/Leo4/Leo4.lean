@@ -7,8 +7,17 @@
 --   • Leo4.Resource       — `LeanResource` marker + @[leo4_resource]
 --   • Leo4.Builtins       — `LeanMarshal` instances for built-in primitives
 --   • Leo4.Build          — user-facing `Build.lean` helpers (M + L surfaces)
+--
+-- Opt-in modules (not auto-imported by `import Leo4`):
 --   • Leo4.MathlibSubset  — Phase 8 marshal contracts for named
---                            Mathlib-compatible types (Rat, …)
+--                            Mathlib-compatible types (`Rat`, …). User
+--                            packages `import Leo4.MathlibSubset`
+--                            explicitly when they need these instances.
+--                            Kept opt-in so the auto-discovered class
+--                            admit-sets (`@[leo4_export] def f {T}
+--                            [ToString T] ...`) don't pull these types
+--                            in by accident before the shim emitter
+--                            can route their wire format (Phase 8 step 2).
 
 import Leo4.Syntax
 import Leo4.Export
@@ -17,4 +26,3 @@ import Leo4.Resource
 import Leo4.Builtins
 import Leo4.Deriving
 import Leo4.Build
-import Leo4.MathlibSubset

@@ -80,6 +80,37 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — Phase 7 step 1: future / stream effect desugar (2026-05-20)
+
+ROADMAP Phase 7 first landing (parser-side, stable Rust, no
+WASIp3 dep). `crates/schema-idl/src/parse.rs::parse_func_decl`
+recognises `future<T>` / `stream<T>` at the immediate return
+position of a `func_decl` and desugars them into
+`FuncDecl { effect: Async / Stream, ret: T }`. The effect slot was
+already in the AST (`FuncDecl.effect`, D-i 2026-05-19); this
+landing wires the parser to populate it.
+
+Rejection: `future<T>` / `stream<T>` anywhere *except* a func's
+return position (inside `list<…>`, record fields, variant
+payloads, etc.) raises a `ParseError::Expected` with a clear
+message. `parse_type` checks the keyword and bails before
+attempting to treat it as a nominal.
+
+Renderer (`render::render_canonical`) re-wraps `effect = Async`
+ret types in `future<…>` and `effect = Stream` in `stream<…>` so
+`parse → resolve → render` round-trips. Schema-hash is unaffected
+for existing (Sync-effect) funcs.
+
+Four unit tests pin the desugar happy path (`future<u64>`,
+`stream<u8>`), the in-payload rejection (`list<future<u32>>`),
+and the in-record-field rejection (`record { y: stream<u32> }`).
+schema-idl test count: 53 → 57.
+
+The Lean-side mirror (plugin recognises `future<T>` / `stream<T>`
+patterns in user exports — e.g., wrapping `IO T` exports as Async
+effect) and the matching shim emit / macro expansion path are
+Phase 7 step 2 (next).
+
 ### Added — WASIp3 sibling project skeleton (2026-05-20)
 
 `sibling/leo4-wasip3/` — Cargo project **outside** the main leo4
