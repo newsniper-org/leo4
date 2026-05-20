@@ -164,11 +164,14 @@ constraint ::= "scalar"
   `Type 0`.
 - Recursive constraints (e.g., `T : Marshal` requiring `T → T : Marshal`)
 - Open-ended negation (`¬(T : Marshal)`)
-- **Mutual recursion between two nominal types** (each naming the other
-  via `Self`-or-otherwise) — forbidden in v0; lifted in Phase 6
-  (`ROADMAP.md`). v0 supports only *direct* self-recursion through the
-  `Self` keyword (`SPEC/idl-grammar.ebnf`). Until Phase 6 lands, users
-  break a mutual cycle by wrapping one side in a `LeanResource` handle.
+- **Mutual recursion between two nominal types** — forbidden in v0
+  until Phase 6 lands. The four design questions ROADMAP enumerated
+  are resolved in **`SPEC/phase-6-mutual.md`** (explicit `mutual { … }`
+  block, `Cyc<i>` cycle-breaker token, group-shared decode-depth
+  counter, one `mutual … end` deriving block per group). v0 still
+  supports only *direct* self-recursion through `Self`; users who
+  need a cross-decl cycle before the Phase 6 landings ship may
+  break one side with a `LeanResource` handle.
 
 The Lake plugin rejects these with diagnostics.
 
