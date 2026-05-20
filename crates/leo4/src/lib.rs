@@ -34,6 +34,16 @@ pub use leo4_abi::bigint::BigInt;
 pub use leo4_abi::rat::LeanRat;
 pub use leo4_abi::complex::{LeanComplexF32x2, LeanComplexF64x2};
 
+/// Nightly-only float carriers. Re-exports the `leo4-abi`
+/// `floats_nightly` module gated by the `nightly-floats` feature.
+/// Enable via `leo4 = { features = ["nightly-floats"] }` on nightly Rust.
+#[cfg(feature = "nightly-floats")]
+pub use leo4_abi::floats_nightly;
+#[cfg(feature = "nightly-floats")]
+pub use leo4_abi::floats_nightly::{
+    LeanBF16, LeanComplexBF16x2, LeanComplexF128x2, LeanComplexF16x2,
+};
+
 /// Canonical-ABI error type raised by encode / decode (distinct
 /// from the loader's [`LeanError`], which carries dispatch /
 /// handshake failures). `#[derive(LeanMarshal)]` returns this; the

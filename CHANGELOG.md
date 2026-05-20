@@ -7,6 +7,44 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 8 #57: nightly-only float carriers (`nightly-floats` feature) (2026-05-20)
+
+Six new carrier types behind the `nightly-floats` cargo feature on
+`leo4-abi` (passed through by `leo4`). Stable workspace builds
+unchanged.
+
+- `crates/leo4-abi/Cargo.toml`: new feature `nightly-floats = []`.
+  `crates/leo4/Cargo.toml`: pass-through
+  `nightly-floats = ["leo4-abi/nightly-floats"]`.
+- `crates/leo4-abi/src/lib.rs` gates the nightly module with
+  `#![cfg_attr(feature = "nightly-floats", feature(f16, f128))]`
+  and `#[cfg(feature = "nightly-floats")] pub mod floats_nightly;`.
+- `crates/leo4-abi/src/floats_nightly.rs`:
+  - `impl LeanMarshal for f16` (2 B LE, IEEE-754 binary16).
+  - `impl LeanMarshal for f128` (16 B LE, IEEE-754 binary128).
+  - `pub struct LeanBF16 { bits: u16 }` — brain-float16 bit
+    pattern (no native Rust primitive yet); wire 2 B LE.
+  - `LeanComplexF16x2 { re: f16, im: f16 }` — 4 B LE.
+  - `LeanComplexBF16x2 { re: LeanBF16, im: LeanBF16 }` — 4 B LE.
+  - `LeanComplexF128x2 { re: f128, im: f128 }` — 32 B LE.
+  - Round-trip unit tests for each (run under nightly only).
+- `lake/Leo4/Leo4/NightlyFloats.lean` — opt-in Lean module (NOT
+  auto-imported from `Leo4`). Mirrors every Rust type via
+  bit-pattern structures:
+  - `LeanF16 { bits : UInt16 }`, `LeanBF16 { bits : UInt16 }`.
+  - `LeanF128 { lo, hi : UInt64 }` (matches `f128::to_le_bytes()`).
+  - Complex variants pairing the singles.
+
+Build verified: `cargo check --workspace` (stable, feature off) and
+`lake build` (Lean side, module opt-in) both green. The
+`cargo test --features nightly-floats` path lands when the
+maintainer's local rustup has a nightly with `feature(f16, f128)`
+enabled — until then the feature is documented but not CI-verified.
+
+Cross-impl mangling stays at 66 names byte-identical — no sample
+fixture uses the nightly types, deliberately, so schema_hash
+doesn't rotate (`fbla3xr3fsp6g`).
+
 ### Added — Phase 8 #56: machine-complex carriers `LeanComplexF{32,64}x2` (2026-05-20)
 
 Wire-pair `(re, im)` machine complex on stable Rust. `xN` suffix

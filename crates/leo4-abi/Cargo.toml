@@ -8,6 +8,17 @@ authors.workspace      = true
 repository.workspace   = true
 description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
 
+[features]
+# Opt-in nightly-only floats: f16, f128 (Rust nightly primitives via
+# `feature(f16)` / `feature(f128)`), plus bf16 (no native Rust
+# primitive; carried as a u16 bit pattern). Enabling this feature
+# requires nightly Rust — the `#![cfg_attr(... feature(f16, f128))]`
+# attribute at the crate root errors on stable. Stable users leave
+# the feature off; nightly users opt in via
+# `cargo build --features nightly-floats` and the main workspace's
+# `rust-toolchain.toml` must override to nightly at that point.
+nightly-floats = []
+
 [dependencies]
 
 [lints]

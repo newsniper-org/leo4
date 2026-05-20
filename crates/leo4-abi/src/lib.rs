@@ -7,6 +7,8 @@
 //! Normative wire format: `SPEC/canonical-abi.md`.
 //! Reserved error codes: `SPEC/canonical-abi.md` §13.
 
+#![cfg_attr(feature = "nightly-floats", feature(f16, f128))]
+
 pub mod error;
 pub mod marshal;
 pub mod scalars;
@@ -15,6 +17,8 @@ pub mod bignat;
 pub mod bigint;
 pub mod rat;
 pub mod complex;
+#[cfg(feature = "nightly-floats")]
+pub mod floats_nightly;
 pub mod handshake;
 
 pub use error::{error_codes, LeanError};

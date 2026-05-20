@@ -8,6 +8,11 @@ authors.workspace      = true
 repository.workspace   = true
 description = "Top-level façade re-exporting `leo4-native` (loader / dispatch) and `leo4-abi` (canonical-ABI marshalling). Downstream Rust crates depend on this one. See LEO4-DESIGN.md §9."
 
+[features]
+# Pass-through to `leo4-abi`'s `nightly-floats` feature. Nightly
+# Rust required when enabled (`feature(f16, f128)` at crate roots).
+nightly-floats = ["leo4-abi/nightly-floats"]
+
 [dependencies]
 leo4-abi.workspace    = true
 leo4-native.workspace = true
