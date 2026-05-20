@@ -368,6 +368,31 @@ leo4-specific extensions:
   the Rust crate is not.
 - Uses `libloading` for dynamic load (lets users swap shims at runtime).
 
+#### Lean's unboxed FFI rules (shim emitter must mirror)
+
+The shim's `extern` declarations must match the C signature Lean's
+compiler actually emits for each `@[leo4_export]` helper, otherwise
+arguments and return values silently corrupt across the boundary.
+Lean's rule (see `Lean/Compiler/LCNF/ToImpureType.lean`'s
+`impureTypeForEnum` and the `hasTrivialImpureStructure?` codepath):
+
+| Lean type                                                   | C ABI seen by the shim |
+| ----------------------------------------------------------- | ---------------------- |
+| all-nullary inductive, `numCtors < 2⁸`                      | `uint8_t`              |
+| all-nullary inductive, `2⁸ ≤ numCtors < 2¹⁶`                | `uint16_t`             |
+| all-nullary inductive, `2¹⁶ ≤ numCtors < 2³²`               | `uint32_t`             |
+| all-nullary inductive, `numCtors ≥ 2³²`                     | `lean_object *` (boxed)|
+| single-`UInt64`-field structure (incl. `@[leo4_resource]`)  | `uint64_t`             |
+| every other inductive (mixed payload, > 1 relevant field)   | `lean_object *`        |
+
+The wire format on the leo4 side stays unchanged — `u32 LE` for IDL
+`enum`, `u64 LE` for `resource` — but the shim must narrow / widen
+across the boundary in step with Lean's unboxing. Discovered
+2026-05-20 while wiring nominal-type wrappers in
+`examples/01-hello/`; encoded in
+`lake/Leo4Plugin/Leo4Plugin/Main.lean`'s `enumScalar` and
+`resourceHandler`.
+
 ### Platform tier policy
 
 | Tier | Platforms                       | Guarantee |

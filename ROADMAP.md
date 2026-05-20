@@ -212,59 +212,78 @@ before `importModules`. This is exactly the kind of API tightening
 the matrix exists to catch. `spike/SPIKE-0-FINDINGS.md` Q4 has been
 extended with the v4.30 data point.
 
-## Phase 5 — ABI shim synthesis + `cc`/`leanc` driving
+## Phase 5 — ABI shim synthesis + `cc`/`leanc` driving — **MOSTLY DONE 2026-05-20**
 
 The biggest remaining gap: the C shim that bridges the canonical-ABI
 wire format to Lean's native ABI (lean.h symbols), built from the
 Lake plugin and linked into a shared library that
 `crates/leo4-native/` loads via `libloading`.
 
+**Status (2026-05-20):** every deliverable below is landed on Tier 1
+Linux except `examples/02-roundtrip/`. The shim emitter, loader,
+`leo4::import!`, `#[derive(LeanMarshal)]`, `leo4-build`, and the
+`examples/01-hello/` exit check (handshake-mismatch ⇒ code 5) all
+pass. `examples/02-roundtrip/` is the last exit criterion still open.
+
 **Deliverables:**
 
-- Lake plugin emits `<pkg>.leo4-shim.c` (or `.cpp`) per
-  CLAUDE.md "How to Work With the Lake Plugin", step 5–6.
-  - Per `@[leo4_export]` instantiation, one shim function with the
-    exact mangled name from `SPEC/mangling.md`.
-  - Each shim function: decode args via `leo4-abi`-equivalent C, call
-    Lean's native ABI, encode return value back into the caller's
-    buffer.
+- ✅ **Lake plugin emits `<pkg>.leo4-shim.c`** per CLAUDE.md "How to
+  Work With the Lake Plugin", step 5–6.
+  - Per `@[leo4_export]` instantiation, one `leo4_call_<mangled>`
+    shim function with the exact mangled name from `SPEC/mangling.md`.
+  - Each shim function: decode args via the canonical-ABI wire
+    format, call the matching `leo4_lean__<mangled>` helper, encode
+    return value back into the caller's buffer.
   - Shim depends on `lean.h` (the *only* place we touch it — Rust
     side stays free of `lean.h`).
-- Lake plugin drives `leanc` (or `cc` with Lean's compile flags) to
-  produce `<pkg>.leo4-shim.so` (Linux), `.dll` (Windows), and — as
-  Tier 3, best-effort — `.dylib` (macOS). Atomic emission per
-  `SPEC/handshake.md §"Atomic Emission"`.
-- `crates/leo4-native/`: full implementation — `Lean::init`,
-  `Lean::scope`, `Arena<'a>`, `LeanRef<'a, T>`. Loads
-  `<pkg>.leo4-shim.so` via `libloading`, calls `leo4_handshake` first,
-  then dispatches through the mangling table.
-- `crates/leo4-macros/`: `#[leo4::import]` expands to the dispatch
-  code. Generates `extern "C"` per `instantiation` in the mangling
-  table, plus a Rust wrapper that does:
-  - argument tuple encoding via `leo4-abi`
-  - `extern "C"` call
-  - return-value decoding
-  - error mapping back into a typed `Result<T, LeanError>`.
-- `crates/leo4-build/`: `build.rs` helper for downstream crates —
-  reads `<pkg>.leo4-handshake`, sets `cargo:rustc-link-search`,
-  `cargo:rustc-link-lib=<pkg>-leo4-shim`, and the
+  - The emitter matches Lean's actual FFI ABI for unboxed types
+    (`uint8_t` / `uint16_t` / `uint32_t` for all-nullary inductives
+    per `impureTypeForEnum`; raw `uint64_t` for single-`UInt64`
+    resource structures), discovered 2026-05-20 while wiring the
+    nominal-type wrappers.
+- ✅ **Lake plugin drives `leanc`** to produce `<pkg>.leo4-shim.so`
+  on Linux. `.dll` and `.dylib` not yet exercised (Tier 2 / 3).
+  Links `libleanshared` + the user package's `.so` (resolved via
+  `lake-manifest.json`'s `packages[].dir`) with the matching RPATH.
+- ✅ **`crates/leo4-native/`** — `Lean::open` (= `Lean::init` +
+  handshake + wrapper-module init), `Arena<'a>`, `LeanRef<'a, T>`,
+  per-callsite `Mutex<HashMap>` dispatch cache, inline
+  `lean_io_result_is_ok` / `lean_dec_ref`, `lean_dec_ref_cold` via
+  `dlsym`.
+- ✅ **`crates/leo4-macros/`** — `leo4::import!` expands to the
+  dispatch code; `#[derive(LeanMarshal)]` synthesises the
+  canonical-ABI encode / decode for the four nominal shapes (record,
+  all-unit enum, mixed-payload variant, single-`u64` resource).
+  Generic records get a `T: LeanMarshal` bound on the generated
+  impl. Multi-instantiation exports resolve by mangled arg list when
+  every arg's `rust_type_to_idl` succeeds, otherwise by fname-only
+  single-instantiation lookup (P5-b₃-iv attribute hint is the
+  remaining disambiguation path).
+- ✅ **`crates/leo4-build/`** — `leo4_build::wire(lake_build_dir)`
+  reads `<pkg>.leo4-handshake`, surfaces `LEO4_SHIM_SO` /
+  `LEO4_HANDSHAKE_FILE` as `env!()` values, and emits the
   `cargo:rerun-if-changed=` lines.
-- End-to-end example:
-  - `examples/01-hello/` — `def add (a b : UInt64) : UInt64 := a + b`
-    on the Lean side, called from Rust via `#[leo4::import]`.
-  - `examples/02-roundtrip/` — `def echoes (xs : List u32) (n : Nat) : List u32`
-    using user-defined types and a value-param.
+- ✅ **`examples/01-hello/`** — `add` / `hello` / `pointSum` /
+  `colorName` / `isLeaf` / `parserId` round-trip end-to-end +
+  in-process derive round-trip across all four nominal shapes +
+  handshake-mismatch detection (mutated `schema_hash_bytes` ⇒
+  code 5).
+- ⏳ **`examples/02-roundtrip/`** —
+  `def echoes (xs : List u32) (n : Nat) : List u32` using
+  user-defined types and a value-param. **Open**; last Phase 5
+  exit criterion.
 
 **Exit criteria:**
 
-- `examples/01-hello/` and `examples/02-roundtrip/` both run end to
-  end on **Linux** (Tier 1). macOS was demoted to Tier 3 on
-  2026-05-20: builds may still produce a `.dylib`, but neither this
-  exit criterion nor the CI matrix requires it.
-- `cargo test` covers handshake-mismatch detection (mutate the
-  handshake file, expect either link-time or runtime failure with
-  `LeanError.handshakeMismatch`).
-- `just test` runs all sides green on Linux.
+- ✅ `examples/01-hello/` runs end to end on Linux Tier 1.
+- ⏳ `examples/02-roundtrip/` runs end to end on Linux Tier 1.
+  macOS was demoted to Tier 3 on 2026-05-20: builds may still
+  produce a `.dylib`, but neither this exit criterion nor the CI
+  matrix requires it.
+- ✅ Handshake-mismatch detection lands in `examples/01-hello/`
+  (the in-process test mutates `schema_hash_bytes` and expects
+  `LeanError { code: 5 }`).
+- ✅ `just test` runs all sides green on Linux.
 
 **Dependencies:** Phase 2 (mangling), Phase 4 (error paths). Phase 3
 (WIT) optional.

@@ -5,9 +5,13 @@ toolchain version.
 
 ## Status
 
-**Phases 1–4 complete; Phase 5 prep (CI matrix infra) complete; Phase 5
-itself (C shim + Rust runtime + macros + examples) is the next concrete
-task.** See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
+**Phases 1–4 complete. Phase 5 substantially landed (2026-05-20):
+the C shim emitter, Rust loader, `leo4::import!` macro,
+`#[derive(LeanMarshal)]`, `leo4-build` helper, and
+`examples/01-hello/` are all green on Tier 1 (x86_64 Linux), including
+the handshake-mismatch exit criterion. `examples/02-roundtrip/`
+(list + Nat + value-param) is the remaining Phase 5 deliverable.**
+See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
 
 What works today:
 
@@ -64,16 +68,51 @@ What works today:
   persisted cache volume. GitHub Actions is the planned primary CI;
   Tart is the fallback path once Apple Silicon hardware is available.
 
+Phase 5 — landed end-to-end on Tier 1:
+
+- **C shim synthesis** — `lake/Leo4Plugin/Leo4Plugin/Main.lean`
+  emits `<pkg>.leo4-shim.c`, drives `leanc` to produce
+  `<pkg>.leo4-shim.so`, and links `libleanshared` + the user
+  package's `.so` (resolved via `lake-manifest.json`'s
+  `packages[].dir`) at the right RPATH so the loader picks them up.
+- **`crates/leo4-native/`** — `Lean::open` (handshake + runtime init
+  + wrapper-module init), `Arena<'a>`, `LeanRef<'a, T>`,
+  per-callsite `Mutex<HashMap>` dispatch cache, inline
+  `lean_io_result_is_ok` + `lean_dec_ref` (with `lean_dec_ref_cold`
+  delegated via `dlsym` for the cold path).
+- **`crates/leo4-macros/`** — `leo4::import! { fn add(a: u64, b: u64) -> u64; }`,
+  plus `#[derive(LeanMarshal)]` for the four nominal shapes
+  (record / all-unit enum / mixed-payload variant / `#[leo4(resource)]`
+  single-`u64` struct). The macro reads `OUT_DIR`'s mangling JSON,
+  matches by mangled arg list when every arg type lowers via
+  `rust_type_to_idl`, and falls back to a fname-only
+  single-instantiation lookup when a parameter is a user-defined
+  nominal type the macro can't lower syntactically.
+- **`crates/leo4-build/`** — `leo4_build::wire(lake_build_dir)`
+  emits `LEO4_SHIM_SO` / `LEO4_HANDSHAKE_FILE` env vars + the
+  `cargo:rerun-if-changed=` lines.
+- **`examples/01-hello/`** — `add(u64, u64) -> u64`, `hello() -> String`,
+  four nominal user-type wrappers (`pointSum` / `colorName` /
+  `isLeaf` / `parserId`), a derive-only Rust-side round-trip across
+  record / enum / variant / resource / generic-record, and the
+  handshake-mismatch exit check (`code == 5` on `schema_hash_bytes`
+  tamper).
+
 What is **not** built yet:
 
-- C shim synthesis from the Lake plugin (`<pkg>.leo4-shim.c`),
-  `leanc`/`cc` driving, `crates/leo4-native/` (`Lean::init`,
-  `Arena<'a>`, `LeanRef<'a, T>`, `libloading`), `crates/leo4-macros/`
-  (`#[leo4::import]`), `crates/leo4-build/` (`build.rs` helper),
-  `examples/01-hello/`, `examples/02-roundtrip/` — Phase 5.
+- `examples/02-roundtrip/` — `def echoes (xs : List u32) (n : Nat) : List u32`
+  exercising list / Nat / value-param erasure. The remaining
+  Phase 5 exit criterion.
+- `leo4::import!` attribute hint for multi-instantiation
+  disambiguation (P5-b₃-iv) — today a user writes every parameter
+  in a `rust_type_to_idl`-recognised form; the attribute would let
+  them name the FQN explicitly.
+- Phase 6 (mutual recursion), Phase 7 (async `io<T>` lowering), and
+  the larger schema-idl items (G: `ConstraintExpr<Atom>` typed AST;
+  H: mutual-recursion lift) — tracked in
+  `schema-idl-shortcomings.md` and the γ-plan.
 - Actual triggers for `LeanError` codes `0x02` / `0x03` / `0x04` /
-  `0x06` / `0x08` (require the native shim path; covered as
-  "reachable" stubs in v0). Phase 5 lifts those.
+  `0x06` / `0x08` beyond what the native shim path now exercises.
 
 ## Documents to read, in order
 
@@ -173,6 +212,10 @@ just wit-test           # WIT golden + wasm-tools/wit-bindgen (Phase 3)
 just conformance-test   # Lean encoder vs Rust encoder bytes (Phase 4)
 just test               # full ladder = lake + cargo + mangling + wit + conformance
 
+# Phase 5 end-to-end demo:
+just smoke-plugin                          # produce / refresh shim .so
+cargo run -p leo4-example-01-hello         # call Lean from Rust
+
 # Multi-version Lean matrix (containerised, Phase 5 prep):
 just ci-image           # build the container image once
 just ci-matrix          # run `just test` for v4.27/v4.28/v4.29.1/v4.30.0-rc2
@@ -184,10 +227,12 @@ After `just smoke-plugin` the emitted files describe `tests/sample-lean`'s
 IDL in canonical form:
 
 ```
-$ cat tests/sample-lean/.lake/build/leo4/leo4-sample.leo4-schema
+$ cat tests/sample-lean/.lake/build/leo4/leo4_sample.leo4-schema
 package leo4-sample;
 interface Sample {
   enum Sample.Color { red, green, blue };
+  variant Sample.Either<T0, T1> { left(T0), right(T1) };
+  record Sample.Pair<T0, T1> { fst: T0, snd: T1 };
   record Sample.Point { x: f64, y: f64 };
   variant Sample.Tree { leaf, node(Self, Self) };
   resource Sample.ParserHandle;
@@ -198,7 +243,7 @@ interface Sample {
 }
 
 $ just schema-hash
-7vi56qcxzb3xw
+4apuhe7gzvtzs
 ```
 
 Schema hashes rotate every time the canonical IDL form changes — by

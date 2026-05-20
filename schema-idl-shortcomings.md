@@ -27,9 +27,9 @@
 | 5  | schema-idl    | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
 | 6  | schema-idl    | Parser rejects non-ASCII identifiers (`α`, `β`, …)                 | no             | sidestepped 2026-05-20 by ASCII-positional binder names from plugin (parser unchanged) |
 | 7  | schema-idl    | `render::user_decl_to_idl` omits `generic_params` on nominal decls | yes (cosmetic) | landed 2026-05-20 (Rust render + Lean `userDeclToIDL`; parser `RawDecl` now carries `generics`; resolver wires `Shape::TypeVar` for in-scope binders) |
-| 8  | leo4-runtime  | `deriving LeanMarshal` generic-inductive support                   | no             | landed 2026-05-20 in working tree (not yet committed) |
-| 9  | leo4-plugin   | `walkUserDecl` generic-aware (param names, FVar→placeholder subst) | no             | landed 2026-05-20 in working tree (not yet committed) |
-| 10 | leo4-plugin   | `idlToLeanType` renders nominal generic application                | no             | landed 2026-05-20 in working tree (not yet committed) |
+| 8  | leo4-runtime  | `deriving LeanMarshal` generic-inductive support                   | no             | committed 2026-05-20 (`ef40451` + cascade `a8556a8` / `b2df550` / `92a0d9f`) |
+| 9  | leo4-plugin   | `walkUserDecl` generic-aware (param names, FVar→placeholder subst) | no             | committed 2026-05-20 (`ef40451`) |
+| 10 | leo4-plugin   | `idlToLeanType` renders nominal generic application                | no             | committed 2026-05-20 (`ef40451`, ASCII-positional binders in `a8556a8`) |
 | 11 | leo4-plugin   | Admit-set guard against HK type-vars (LEO4-DESIGN §4.2 check #5)   | yes (semantic) | landed 2026-05-20 (AdmitSet.lean's user-inductive enumeration now skips `iv.numParams > 0` heads) |
 | 12 | leo4-plugin   | Variant case with non-Self payload (W7-2d-iii)                     | no             | F-step minimum viable landed 2026-05-20: 0-field / all-Self / 1-field (Self ‖ scalar ‖ string) supported, per-instantiation helper emit; multi-field mixed / composite-payload variants still stub |
 
@@ -49,13 +49,13 @@ wire-up end-to-end" milestone
                         [#4 substitute helper]    landed
                                 │
                                 ▼
-              [#8 deriving generic inductive]    landed (uncommitted)
+              [#8 deriving generic inductive]    committed ef40451+
                                 │
                                 ▼
-         [#9 walkUserDecl generic-aware]         landed (uncommitted)
+         [#9 walkUserDecl generic-aware]         committed ef40451
                                 │
                                 ▼
-       [#10 idlToLeanType generic apply]         landed (uncommitted)
+       [#10 idlToLeanType generic apply]         committed ef40451
                                 │
               ┌─────────────────┴───────────────────┐
               ▼                                     ▼
