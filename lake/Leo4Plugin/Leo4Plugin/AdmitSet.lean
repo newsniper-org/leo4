@@ -238,6 +238,26 @@ partial def exprToIDLSubst
 
 /-! ## Walking structures and inductives -/
 
+/-- Pull the user-facing names of `iv`'s first `numParams` type
+parameters by reducing the inductive's `type` field. Generic-aware
+field walks need these so a type-variable reference can be lowered
+to a placeholder `IDLType` token that `Subst.substIDL` later resolves. -/
+private def paramBinderNames (iv : InductiveVal) : MetaM (Array Name) :=
+  Meta.forallTelescopeReducing iv.type fun args _ => do
+    let params := args.extract 0 iv.numParams
+    params.mapM fun fv => fv.fvarId!.getUserName
+
+/-- Substitution function for `exprToIDLSubst` that recognises one of
+`iv`'s declared type parameters by FVarId and lowers it to a nullary
+`IDLType.record <param-name> #[]` — the same shape the IDL parser
+emits for a bare named-type reference. `Subst.substIDL` then matches
+that fqn against an instantiation environment to finish the job. -/
+private def paramSubst (typeParams : Array Expr) (genNames : Array Name)
+    : FVarId → Option IDLType := fun fvId =>
+  match typeParams.findIdx? (fun fv => fv.fvarId! == fvId) with
+  | some idx => some (.record genNames[idx]!.toString #[])
+  | none     => none
+
 /-- Walk a user-defined `inductive`/`structure` `declName` and synthesise
 its `UserDecl`. The plugin classifies the shape (record vs enum vs
 variant vs resource) by what instances of `LeanMarshal`/`LeanResource`
@@ -247,6 +267,9 @@ the user has provided.
 * Otherwise (`LeanMarshal`, or a `derive`d instance) we walk the
   inductive value: single-ctor → record; all-nullary multi-ctor →
   enumT; else → variant. Self-references become `IDLType.self`.
+  Generic parameters become a placeholder `IDLType.record <name> #[]`
+  inside the field/case types and the declared binder names are
+  recorded in `UserDecl.generics` so callers can substitute.
 
 Returns `none` if `declName` is not an inductive, has no
 LeanMarshal/LeanResource opt-in, or its fields contain a type we
@@ -259,7 +282,7 @@ partial def walkUserDecl
   -- Resource short-circuit.
   if hasLeanResourceInstance env declName then
     let some (.inductInfo iv) := env.find? declName | return none
-    let genNames := iv.levelParams.toArray.map (fun _ => Name.anonymous)
+    let genNames ← paramBinderNames iv
     return some (.resource declName.toString genNames)
   -- Marshal required.
   unless hasLeanMarshalInstance env declName do return none
@@ -268,13 +291,15 @@ partial def walkUserDecl
   let _inFlight := inFlight.insert declName  -- not yet threaded through recursive field walks; W3-5
   let fqn := declName.toString
   let ctors := iv.ctors.toArray
-  -- All-nullary inductive → enumT.
+  -- All-nullary inductive → enumT. (Enum cases carry no payload, so
+  -- the user-facing form is irrelevant — but we still preserve
+  -- the binder count for round-trip / mangle parity if the user
+  -- ever writes a phantom-generic `enum Foo (α : Type) { … }`.)
   let allNullary : Bool := ctors.all fun cname =>
     match env.find? cname with
     | some (.ctorInfo cv) => cv.numFields == 0
     | _ => false
   if ctors.size > 1 ∧ allNullary then
-    -- enum
     let caseNames := ctors.map fun n => n.componentsRev.head!
     return some (.enumT fqn caseNames)
   if ctors.size == 1 then
@@ -286,36 +311,44 @@ partial def walkUserDecl
       | some info => info.fieldNames
       | none => (Array.range cv.numFields).map fun i => Name.mkSimple s!"_{i}"
     let res ← Meta.forallTelescopeReducing cv.type fun args _body => do
+      let typeParams := args.extract 0 iv.numParams
+      let genNames ← typeParams.mapM fun fv => fv.fvarId!.getUserName
+      let subst := paramSubst typeParams genNames
       let fieldArgs := args.extract iv.numParams args.size
       let mut acc : Array (Name × IDLType) := #[]
       for i in [0:fieldArgs.size] do
         let arg := fieldArgs[i]!
         let argTy ← Meta.inferType arg
-        match exprToIDLSubst env (some declName) (fun _ => none) argTy with
+        match exprToIDLSubst env (some declName) subst argTy with
         | some idl => acc := acc.push (fieldNames[i]!, idl)
         | none => return none
-      return some acc
+      return some (genNames, acc)
     match res with
     | none => return none
-    | some fields => return some (.record fqn #[] fields)
-  -- Mixed multi-ctor → variant.
+    | some (genNames, fields) => return some (.record fqn genNames fields)
+  -- Mixed multi-ctor → variant. Gather generic names from the first
+  -- ctor (every ctor shares the same enclosing binders).
+  let genNames ← paramBinderNames iv
   let mut cases : Array (Name × Array IDLType) := #[]
   for cname in ctors do
     let some (.ctorInfo cv) := env.find? cname | return none
     let caseName := cname.componentsRev.head!
     let payload ← Meta.forallTelescopeReducing cv.type fun args _body => do
+      let typeParams := args.extract 0 iv.numParams
+      let names ← typeParams.mapM fun fv => fv.fvarId!.getUserName
+      let subst := paramSubst typeParams names
       let fieldArgs := args.extract iv.numParams args.size
       let mut acc : Array IDLType := #[]
       for arg in fieldArgs do
         let argTy ← Meta.inferType arg
-        match exprToIDLSubst env (some declName) (fun _ => none) argTy with
+        match exprToIDLSubst env (some declName) subst argTy with
         | some idl => acc := acc.push idl
         | none => return none
       return some acc
     match payload with
     | none => return none
     | some p => cases := cases.push (caseName, p)
-  return some (.variant fqn #[] cases)
+  return some (.variant fqn genNames cases)
 
 /-! ## Class admit-set enumeration -/
 

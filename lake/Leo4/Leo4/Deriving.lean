@@ -8,10 +8,12 @@
 --   • all-nullary inductive — IDL enum encoding (u32 discriminator only)
 --   • mixed inductive — IDL variant encoding (u32 discriminator + per-case payload)
 --
--- Generic structures / inductives are *not* handled by this pass; the handler
--- returns `false` and the user gets the standard "no LeanMarshal handler"
--- diagnostic. Generic deriving lands in Phase 4 once IDL-level generics are
--- wired end-to-end.
+-- As of 2026-05-20 generic structures / inductives ARE supported: the
+-- synthesised instance carries one `{α : Type}` implicit binder and one
+-- `[Leo4.LeanMarshal α]` instance binder per declared type parameter,
+-- and the encode / decode bodies leave field-level marshalling to
+-- instance synthesis (which picks up the per-parameter `LeanMarshal`
+-- instances naturally).
 --
 -- Implementation note: we synthesise the instance command as a String and
 -- feed it to `Parser.runParserCategory`. This sidesteps `\`(…)`-quotation
@@ -42,6 +44,49 @@ private def isAllNullary (env : Environment) (indVal : InductiveVal) : Bool :=
 private def hasTypeParams (indVal : InductiveVal) : Bool :=
   indVal.numParams > 0
 
+/-! ## Generic-binder rendering
+
+For an inductive with `numParams = 0` the head is just `qname` and no
+binders are needed. For `numParams ≥ 1` we render:
+
+  - `head`         — `"(Foo α β)"`, applied with the type-param names
+  - `instBinders`  — `"[Leo4.LeanMarshal α] [Leo4.LeanMarshal β] "`
+  - `defBinders`   — `"{α : Type} {β : Type} [Leo4.LeanMarshal α] [Leo4.LeanMarshal β] "`
+
+`instBinders` is the form that goes on an `instance` declaration;
+`defBinders` is the form that goes on a `partial def` (which needs
+explicit implicit `Type` binders since there is no surrounding
+`instance` to bring them in). Both trail with a single space when
+non-empty so the surrounding format strings don't have to special-case
+the no-generics case. -/
+private def renderGenericFragments
+    (qname : String) (params : Array Name) : String × String × String :=
+  let lb : String := "{"
+  let rb : String := "}"
+  let names : List String := params.toList.map (·.toString)
+  let head :=
+    if names.isEmpty then qname
+    else "(" ++ qname ++ " " ++ String.intercalate " " names ++ ")"
+  let instBinders :=
+    if names.isEmpty then ""
+    else
+      String.intercalate " "
+        (names.map fun n => s!"[Leo4.LeanMarshal {n}]") ++ " "
+  let defBinders :=
+    if names.isEmpty then ""
+    else
+      let impl := String.intercalate " " (names.map fun n => lb ++ n ++ " : Type" ++ rb)
+      let inst := String.intercalate " " (names.map fun n => s!"[Leo4.LeanMarshal {n}]")
+      impl ++ " " ++ inst ++ " "
+  (head, instBinders, defBinders)
+
+/-- Extract the user-facing names of the inductive's type parameters
+(`α`, `β`, …) by reducing `indVal.type`'s leading `Π` binders. -/
+private def getParamBinders (indVal : InductiveVal) : MetaM (Array Name) :=
+  Meta.forallTelescopeReducing indVal.type fun args _ => do
+    let params := args.extract 0 indVal.numParams
+    params.mapM fun fv => fv.fvarId!.getUserName
+
 private def runSyntheticCommand (src : String) : CommandElabM Unit := do
   let env ← getEnv
   match Parser.runParserCategory env `command src "<leo4-derive>" with
@@ -56,10 +101,13 @@ private def qualified (n : Name) : String :=
 
 /-! ## Structure (single-ctor) -/
 
-private def mkStructureInstance (declName : Name) : CommandElabM Unit := do
+private def mkStructureInstance (declName : Name) (indVal : InductiveVal)
+    : CommandElabM Unit := do
   let env := (← getEnv)
   let fields := getStructureFields env declName
   let qname := qualified declName
+  let params ← liftTermElabM (getParamBinders indVal)
+  let (head, instBinders, _) := renderGenericFragments qname params
   -- Encode body.
   let mut encLets : String := ""
   for f in fields do
@@ -71,7 +119,7 @@ private def mkStructureInstance (declName : Name) : CommandElabM Unit := do
   let structFields :=
     String.intercalate ", " (fields.toList.map fun f => s!"{f.toString} := {f.toString}")
   let src : String := s!"\
-instance : Leo4.LeanMarshal {qname} where
+instance {instBinders}: Leo4.LeanMarshal {head} where
   canonicalEncode v buf := Id.run do
 {encLets}    return buf
   canonicalDecode buf off := do
@@ -84,6 +132,8 @@ instance : Leo4.LeanMarshal {qname} where
 private def mkEnumInstance (declName : Name) (indVal : InductiveVal) : CommandElabM Unit := do
   let qname := qualified declName
   let ctors := indVal.ctors.toArray
+  let params ← liftTermElabM (getParamBinders indVal)
+  let (head, instBinders, _) := renderGenericFragments qname params
   -- Encode: match arm per ctor; tag is i.toUInt32.
   let mut encArms : String := ""
   for i in [0:ctors.size] do
@@ -96,7 +146,7 @@ private def mkEnumInstance (declName : Name) (indVal : InductiveVal) : CommandEl
     decArms := decArms ++ s!"    | {i} => return ({cq}, off)\n"
   decArms := decArms ++ s!"    | t => throw (Leo4.LeanError.mk' Leo4.LeanError.decodeError s!\"{declName.toString}: invalid tag \{t.toNat}\")\n"
   let src : String := s!"\
-instance : Leo4.LeanMarshal {qname} where
+instance {instBinders}: Leo4.LeanMarshal {head} where
   canonicalEncode v buf :=
     Leo4.LeanMarshal.canonicalEncode (T := UInt32) (match v with
 {encArms}    ) buf
@@ -114,6 +164,8 @@ private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : Comman
   let ctors := indVal.ctors.toArray
   let encFn := s!"{declName.toString}._leo4_encode"
   let decFn := s!"{declName.toString}._leo4_decode"
+  let params ← liftTermElabM (getParamBinders indVal)
+  let (head, instBinders, defBinders) := renderGenericFragments qname params
   -- Encode arms.
   let mut encArms : String := ""
   let mut decArms : String := ""
@@ -162,17 +214,17 @@ private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : Comman
     s!"    | t => throw (Leo4.LeanError.mk' Leo4.LeanError.decodeError s!\"{declName.toString}: invalid tag \{t.toNat}\")\n"
 
   runSyntheticCommand s!"\
-partial def {encFn} (v : {qname}) (buf : ByteArray) : ByteArray :=
+partial def {encFn} {defBinders}(v : {head}) (buf : ByteArray) : ByteArray :=
   match v with
 {encArms}"
   runSyntheticCommand s!"\
-partial def {decFn} (buf : ByteArray) (off : Nat) :
-    Except Leo4.LeanError ({qname} × Nat) := do
+partial def {decFn} {defBinders}(buf : ByteArray) (off : Nat) :
+    Except Leo4.LeanError ({head} × Nat) := do
   let (tag, off) ← Leo4.LeanMarshal.canonicalDecode (T := UInt32) buf off
   match tag with
 {decArms}"
   runSyntheticCommand s!"\
-instance : Leo4.LeanMarshal {qname} where
+instance {instBinders}: Leo4.LeanMarshal {head} where
   canonicalEncode := {encFn}
   canonicalDecode := {decFn}"
 
@@ -181,16 +233,9 @@ instance : Leo4.LeanMarshal {qname} where
 private def mkLeanMarshalHandler (declNames : Array Name) : CommandElabM Bool := do
   let env ← getEnv
   for declName in declNames do
-    match env.find? declName with
-    | some (.inductInfo iv) =>
-        if hasTypeParams iv then
-          logWarning s!"deriving LeanMarshal: generic inductive `{declName}` not yet supported"
-          return false
-    | _ => return false
-  for declName in declNames do
-    let some (.inductInfo indVal) := env.find? declName | continue
+    let some (.inductInfo indVal) := env.find? declName | return false
     if isStructureLike env declName then
-      mkStructureInstance declName
+      mkStructureInstance declName indVal
     else if isAllNullary env indVal then
       mkEnumInstance declName indVal
     else

@@ -112,4 +112,10 @@ def listConcat (xs : List String) : String :=
 def pairAdd (p : UInt64 × UInt32) : UInt64 :=
   p.1 + p.2.toUInt64
 
+-- (Generic-record fixture deferred — see schema-idl-shortcomings.md.
+-- Pair / Either definitions and their monomorphic exports hit a
+-- cascade of limitations down-stack: schema-idl parser's ASCII-only
+-- identifiers, plugin nominal-decl render missing generic_params,
+-- admit-set HK guard. Re-enable once that stack is unblocked.)
+
 end Sample

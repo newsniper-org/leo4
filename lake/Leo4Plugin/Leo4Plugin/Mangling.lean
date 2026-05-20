@@ -141,7 +141,11 @@ partial def idlToLeanType : IDLType → String
       "(Except " ++ idlToLeanType e ++ " " ++ idlToLeanType t ++ ")"
   | .tuple ts =>
       "(" ++ String.intercalate " × " (ts.toList.map idlToLeanType) ++ ")"
-  | .record fqn _ | .variant fqn _ | .resource fqn _ => fqn
+  | .record fqn args | .variant fqn args | .resource fqn args =>
+    if args.isEmpty then fqn
+    else
+      "(" ++ fqn ++ " " ++
+        String.intercalate " " (args.toList.map idlToLeanType) ++ ")"
   | .enumT fqn      | .flagsT fqn   => fqn
   | .io t           => "(IO " ++ idlToLeanType t ++ ")"
   | .self           => "_"      -- only reachable inside a nominal body

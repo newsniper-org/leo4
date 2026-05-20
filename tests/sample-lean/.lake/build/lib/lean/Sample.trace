@@ -1,7 +1,7 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
  "outputs":
- {"o": ["fcf7f6f130c0fac0.olean"],
+ {"o": ["fd3546ea5a0328e2.olean"],
   "i": "964d462b65f0e770.ilean",
   "c": "5f7c8da9141beefc.c"},
  "log":
@@ -14,7 +14,7 @@
      [["«leo4-sample»/Sample:extraDep",
        [["@«leo4-sample»:extraDep", "00000000000006bb"]]],
       ["imports",
-       [["Leo4 transitive imports (legacy)", "25de694c1b51d6af"],
+       [["Leo4 transitive imports (legacy)", "e6addfc5a662186d"],
         ["Leo4:importAllArts", "31e0111b169f507f"]]]]],
     ["libs",
      [["import dynlibs", "00000000000006bb"],
@@ -23,10 +23,10 @@
       ["module plugins", "00000000000006bb"]]]]],
   ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
    "fa77a35a41db35c0"],
-  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "e698585495013576"],
+  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "0f240e4480b906ce"],
   ["options", "00000000000006bb"],
   ["isModule: false", "feefd2a0d3a1847e"],
   ["Module.name: Sample", "aa097ba15ee094f1"],
   ["Package.id?: (some leo4-sample)", "553e3cd0f8245097"],
   ["Module.leanArgs: #[]", "00000000000006bb"]],
- "depHash": "1be7ea0d60d29b22"}
+ "depHash": "a0191ee0200cda89"}

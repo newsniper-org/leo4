@@ -1,11 +1,12 @@
 # schema-idl shortcomings
 
-> Outstanding limitations of the domain-neutral `crates/schema-idl/`
-> crate, as of W7-2d (2026-05-19). This file is the single ledger
-> for "what's left in schema-idl, ranked." Limitations that belong
-> downstream (leo4 plugin's shim emitter, `LeanMarshal` instances,
-> WIT lowering, etc.) are listed in `ROADMAP.md` / `LEO4-DESIGN.md`
-> and intentionally **not** repeated here.
+> Outstanding limitations across the IDL stack, last audited 2026-05-20
+> while pursuing **priority A** (#4 generic substitution). The audit
+> uncovered downstream limitations in leo4 plugin / runtime code that
+> share a dependency chain with schema-idl work, so this ledger now
+> tracks both halves and labels each item by ownership
+> (`schema-idl` / `leo4-plugin` / `leo4-runtime`). The cascade table
+> in §"Dependency graph" makes the inter-item order explicit.
 >
 > Companion docs:
 > - `for-general-interface-descriptions.md` — reuse guide + decision log
@@ -17,19 +18,72 @@
 
 ## Index
 
-| #  | Title                                                              | Grammar impact | Status   |
-|----|--------------------------------------------------------------------|----------------|----------|
-| 1  | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | open     |
-| 2  | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | deferred |
-| 3  | `ConstraintExpr<Atom>` typed AST missing (D-ii decided 2026-05-19) | yes            | deferred |
-| 4  | Generic type-parameter substitution helper missing                 | no             | landed 2026-05-20; generic-record wire-up demo waits on leo4 `deriving LeanMarshal` handler |
-| 5  | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
+| #  | Owner         | Title                                                              | Grammar impact | Status   |
+|----|---------------|--------------------------------------------------------------------|----------------|----------|
+| 1  | schema-idl    | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | open     |
+| 2  | schema-idl    | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | deferred |
+| 3  | schema-idl    | `ConstraintExpr<Atom>` typed AST missing (D-ii decided 2026-05-19) | yes            | deferred |
+| 4  | schema-idl    | Generic type-parameter substitution helper                         | no             | landed 2026-05-20 (Rust + Lean mirror) |
+| 5  | schema-idl    | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
+| 6  | schema-idl    | Parser rejects non-ASCII identifiers (`α`, `β`, …)                 | no             | **open, blocking #4 demo** |
+| 7  | schema-idl    | `render::user_decl_to_idl` omits `generic_params` on nominal decls | yes (cosmetic) | **open, blocking #4 demo** |
+| 8  | leo4-runtime  | `deriving LeanMarshal` generic-inductive support                   | no             | landed 2026-05-20 in working tree (not yet committed) |
+| 9  | leo4-plugin   | `walkUserDecl` generic-aware (param names, FVar→placeholder subst) | no             | landed 2026-05-20 in working tree (not yet committed) |
+| 10 | leo4-plugin   | `idlToLeanType` renders nominal generic application                | no             | landed 2026-05-20 in working tree (not yet committed) |
+| 11 | leo4-plugin   | Admit-set guard against HK type-vars (LEO4-DESIGN §4.2 check #5)   | yes (semantic) | **open, blocking #4 demo on generic exports** |
+| 12 | leo4-plugin   | Variant case with non-Self payload (W7-2d-iii)                     | no             | open |
 
 "Status" legend:
 - **open** — nothing blocks landing it; just hasn't been prioritised.
+- **open, blocking #4 demo** — must land before a sample-level
+  generic-record fixture round-trips through cross-impl.
 - **deferred** — decision recorded, implementation parked until a
   consuming phase / external need arrives.
+- **landed YYYY-MM-DD** — code in tree; may or may not be committed yet.
 - **Phase N** — fix tied to a leo4 roadmap phase entry gate.
+
+## Dependency graph: what blocks the "generic record / variant
+wire-up end-to-end" milestone
+
+```text
+                        [#4 substitute helper]    landed
+                                │
+                                ▼
+              [#8 deriving generic inductive]    landed (uncommitted)
+                                │
+                                ▼
+         [#9 walkUserDecl generic-aware]         landed (uncommitted)
+                                │
+                                ▼
+       [#10 idlToLeanType generic apply]         landed (uncommitted)
+                                │
+              ┌─────────────────┴───────────────────┐
+              ▼                                     ▼
+[#6 parser non-ASCII idents]           [#7 render generic_params header]
+ (Rust schema-idl)                      (leo4-plugin Emit.lean)
+              │                                     │
+              └────────────────┬────────────────────┘
+                               ▼
+        [sample monomorphic-instance fixture (Pair u64 u32)] ▶ wire-up ✓
+
+  Separate sub-track (generic export at the boundary, not monomorphic
+  use of a generic record):
+        [#11 admit-set HK guard]   →  blocks generic `def f<α> …` exports
+        [#12 variant non-Self]     →  blocks generic Either-style payloads
+
+  Far downstream:
+        [#1 UserDecl::Flags] [#2 effect] [#3 ConstraintExpr<Atom>] [#5 mutual]
+        — none of these on the generic-record critical path.
+```
+
+Two side-tracks branch from the same trunk:
+
+- **Monomorphic-instance fixture** (`Pair u64 u32` exported by a
+  non-generic function such as `pairFstU64U32`). Needs #6 + #7
+  before cross-impl byte-identical holds.
+- **Generic-export fixture** (`def pairFst<α β>(…) : α`). Needs the
+  above plus #11 (kind-mandatory constraints) and #12 (variant
+  non-Self payloads) for the full `Either α β` case.
 
 ---
 
@@ -382,34 +436,42 @@ mangling is unaffected. Real consumers — including any meaningful
 AI-IDL — will hit this immediately (`Tensor<dt, rank, shape>` is the
 canonical example).
 
-### Status (2026-05-20)
+### Status (2026-05-20, post-audit)
 
-- **schema-idl side: landed.** `crates/schema-idl/src/subst.rs`
-  exports `substitute(ty, env)`, `instantiate_record(decl, args)`,
-  `instantiate_variant(decl, args)`, with 11 unit tests covering
-  leaf substitution, nested composites, generic record application,
-  Self pass-through, and arity mismatches.
-- **leo4-idl re-exports them** at the crate root so existing
-  call sites can pick the new helpers up without an extra dependency.
-- **Plugin adoption: landed at the code level.**
-  `lake/Leo4Plugin/Leo4Plugin/AdmitSet.lean` ships
-  `Subst.substIDL` / `Subst.mkEnv` (line-for-line mirror of the Rust
-  helpers). `lake/Leo4Plugin/Leo4Plugin/Main.lean::handlerFor`
-  swaps the `if !generics.isEmpty || !args.isEmpty then none` bail
-  for proper `mkEnv` + `substIDL` walks on the
-  `.record` / `.resource` / `.variant` branches. Arity mismatch
-  (binders vs args) still returns `none` — that is the
-  caller-bug-in-IDL case the kind discipline should catch upstream.
-- **End-to-end demo blocked elsewhere.** A sample fixture with a
-  user-declared `structure Pair (α β : Type) … deriving LeanMarshal`
-  hit `error: deriving LeanMarshal: generic inductive 'Sample.Pair'
-  not yet supported` in `lake/Leo4/Leo4/Deriving.lean`. That gap is
-  a leo4-runtime-library limitation, not a schema-idl one;
-  consequently the generic-record wire-up path is exercised today
-  only by the schema-idl Rust unit tests and by code review of the
-  mirror in `Subst.substIDL`. Filing a follow-up against
-  `lake/Leo4/Leo4/Deriving.lean` to support generic inductives will
-  unlock the end-to-end fixture.
+- **schema-idl side: landed (committed in `5b34aaf`).**
+  `crates/schema-idl/src/subst.rs` exports `substitute(ty, env)`,
+  `instantiate_record(decl, args)`, `instantiate_variant(decl, args)`,
+  with 11 unit tests. leo4-idl re-exports them.
+- **Plugin adoption: landed (committed in `6f15756`).**
+  `Subst.substIDL` / `Subst.mkEnv` in AdmitSet.lean; the `handlerFor`
+  bail on non-empty generics replaced with proper `mkEnv + substIDL`
+  walks on `.record / .resource / .variant`.
+- **`deriving LeanMarshal` generic-inductive support: landed in
+  working tree, not yet committed.** `lake/Leo4/Leo4/Deriving.lean`
+  now generates `instance [Leo4.LeanMarshal α] [Leo4.LeanMarshal β]
+  : Leo4.LeanMarshal (Pair α β) where …` and the matching generic
+  `partial def`s for variants. (See ledger item #8.)
+- **Plugin `walkUserDecl` generic-aware: landed in working tree,
+  not yet committed.** AdmitSet.lean now extracts type-param binder
+  names and threads an FVar→placeholder substitution into
+  `exprToIDLSubst`. `UserDecl.record/variant/resource` carry their
+  generics arrays. (See ledger item #9.)
+- **`idlToLeanType` generic application form: landed in working
+  tree, not yet committed.** Mangling.lean's `idlToLeanType` now
+  emits `(Sample.Pair α β)` form for `Record { fqn, args }` with
+  non-empty args. (See ledger item #10.)
+- **Still blocking the end-to-end fixture:**
+  - Item #6 — schema-idl parser rejects non-ASCII identifiers (`α`,
+    `β`). Plugin emits binder names verbatim from Lean source, so a
+    `structure Pair (α β : Type)` lands `α / β` into the schema and
+    leo4c chokes on byte 113 of the round-tripped form.
+  - Item #7 — `render::user_decl_to_idl` doesn't print
+    `generic_params` on nominal-decl headers, so even after #6 lands,
+    `record Sample.Pair { fst: α, snd: β }` reads as fields with
+    dangling type-var references and the resolver can't pin them.
+  - Items #11 / #12 only matter for generic `@[leo4_export]` at the
+    boundary (admit-set HK guard + variant non-Self payload). The
+    monomorphic-instance fixture (`pairFstU64U32`) doesn't need them.
 
 ### Grammar impact
 
@@ -550,17 +612,27 @@ checker treats as a single recursion frame."
 
 ---
 
-## Priority ordering (decision-aware)
+## Priority ordering (post-2026-05-20 audit)
 
-After D-i / D-ii landed:
+| Rank | Items | Why this rank |
+|------|-------|---------------|
+| **A**  | (#4 #8 #9 #10 landed) — commit pending | First, finalize what's in-tree. #8/#9/#10 are buildable, do not break cross-impl (sample reverted to the W7-2d baseline), and are needed regardless of whether the demo lands soon |
+| **A+** | #6 parser non-ASCII identifiers + binder-name normaliser | One coordinated change: (a) plugin emits ASCII-safe generic names (`T0/T1`) instead of forwarding `α/β` verbatim, or (b) schema-idl parser accepts a wider identifier alphabet. Pick (a) — keeps the SPEC unchanged and the wire format pure ASCII |
+| **A++** | #7 nominal-decl `generic_params` render | leo4 plugin `Emit.lean` prints `record Sample.Pair<T0, T1> { … }`. Rust schema-idl parser already accepts the production; the round-trip closes |
+| **B**  | Sample fixture re-introduction + cross-impl byte-identical check | Adds `Pair u64 u32`-style monomorphic fixtures back to `tests/sample-lean/Sample.lean`. End-to-end demo of #4 |
+| **C**  | #2 `FuncDecl.effect` field (D-i) | Pre-stage for Phase 7 async; small AST work; land before Phase 7 entry |
+| **D**  | #1 `UserDecl::Flags` variant | Small isolated PR, roundtrip correctness |
+| **E**  | #11 admit-set HK guard | Generic-`@[leo4_export]` boundary path; touches LEO4-DESIGN check #5; mid-size plugin work. Needed for generic-export fixtures (not for monomorphic-instance ones) |
+| **F**  | #12 variant non-Self payload (W7-2d-iii) | Plugin variantHandler / helper emission generalisation; needed for `Either`-style payloads |
+| **G**  | #3 `ConstraintExpr<Atom>` | Largest churn — Schema<A> parametric across crate. Wait for first atom-set consumer |
+| **H**  | #5 mutual recursion | Phase 6 owns entry decision |
 
-| Rank | Item | Why this rank |
-|------|------|---------------|
-| **A** | #4 substitution helper | Highest value-to-effort: pure function in schema-idl, no grammar work, immediately unblocks the leo4 shim's generic-nominal restriction and provides AI-IDL reuse for free |
-| **B** | #2 `FuncDecl.effect` field | Bounded by D-i; small AST + parser change. Land before Phase 7's entry gate fires so the async work isn't piling on top of unrelated AST surgery |
-| **C** | #1 `UserDecl::Flags` | Small isolated PR. Restores IDL roundtrip correctness; sample-fixture pickup waits for a consumer that declares flags |
-| **D** | #3 `ConstraintExpr<Atom>` | Largest churn — `Schema<A>` parametric across the crate. Plan: backward-compat alias `type Schema = SchemaG<LeoAtoms>` so existing call sites compile unchanged. Land when the leo4 plugin's elaborator work begins, or when the first non-leo4 atom set has a concrete user |
-| **E** | #5 mutual recursion | Phase 6 owns the entry decision; until then the v0 rejection is normative |
+The A/A+/A++/B group is the **generic-record critical path**: items
+should ship together in a single commit (or two close ones) because
+breaking any link in the chain leaves the working tree with
+non-buildable sample fixtures. The audit revert (sample fixture
+removed) was done precisely so the chain can be commited piecewise
+without an interim red state.
 
 ## Decision log
 
