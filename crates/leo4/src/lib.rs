@@ -28,7 +28,9 @@
 
 pub use leo4_native::{Arena, Lean, LeanError, LeanRef, LeanResult};
 
-pub use leo4_abi::{composites, error_codes, scalars, LeanMarshal};
+pub use leo4_abi::{bignat, bigint, composites, error_codes, scalars, LeanMarshal};
+pub use leo4_abi::bignat::BigNat;
+pub use leo4_abi::bigint::BigInt;
 
 /// Canonical-ABI error type raised by encode / decode (distinct
 /// from the loader's [`LeanError`], which carries dispatch /

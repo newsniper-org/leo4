@@ -147,6 +147,10 @@ LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listConcat(lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_listConcat___boxed(lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_pairAdd(lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_pairAdd___boxed(lean_object*);
+lean_object* l_List_appendTR___redArg(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_List_foldl___at___00Sample_echoes_spec__0(lean_object*, lean_object*);
+lean_object* l_List_replicateTR___redArg(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_echoes(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_instLeanMarshalPair___redArg___lam__0(lean_object*, lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_instLeanMarshalPair___redArg___lam__1(lean_object*, lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_instLeanMarshalPair___redArg(lean_object*, lean_object*);
@@ -1920,6 +1924,38 @@ x_2 = lp_leo4_x2dsample_Sample_pairAdd(x_1);
 lean_dec_ref(x_1);
 x_3 = lean_box_uint64(x_2);
 return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_List_foldl___at___00Sample_echoes_spec__0(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+if (lean_obj_tag(x_2) == 0)
+{
+return x_1;
+}
+else
+{
+lean_object* x_3; lean_object* x_4; lean_object* x_5; 
+x_3 = lean_ctor_get(x_2, 0);
+lean_inc(x_3);
+x_4 = lean_ctor_get(x_2, 1);
+lean_inc(x_4);
+lean_dec_ref(x_2);
+x_5 = l_List_appendTR___redArg(x_1, x_3);
+x_1 = x_5;
+x_2 = x_4;
+goto _start;
+}
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_echoes(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+lean_object* x_3; lean_object* x_4; lean_object* x_5; 
+x_3 = lean_box(0);
+x_4 = l_List_replicateTR___redArg(x_2, x_1);
+x_5 = lp_leo4_x2dsample_List_foldl___at___00Sample_echoes_spec__0(x_3, x_4);
+return x_5;
 }
 }
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_instLeanMarshalPair___redArg___lam__0(lean_object* x_1, lean_object* x_2, lean_object* x_3, lean_object* x_4) {

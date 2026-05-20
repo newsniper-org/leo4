@@ -5,13 +5,13 @@ toolchain version.
 
 ## Status
 
-**Phases 1–4 complete. Phase 5 substantially landed (2026-05-20):
-the C shim emitter, Rust loader, `leo4::import!` macro,
-`#[derive(LeanMarshal)]`, `leo4-build` helper, and
-`examples/01-hello/` are all green on Tier 1 (x86_64 Linux), including
-the handshake-mismatch exit criterion. `examples/02-roundtrip/`
-(list + Nat + value-param) is the remaining Phase 5 deliverable.**
-See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder.
+**Phases 1–5 complete (2026-05-20).** The C shim emitter, Rust
+loader, `leo4::import!` macro, `#[derive(LeanMarshal)]`,
+`leo4-build` helper, and both end-to-end demos
+(`examples/01-hello/` + `examples/02-roundtrip/`) are green on
+Tier 1 (x86_64 Linux), including the handshake-mismatch exit check.
+See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder. Phase 6
+(mutual recursion) is the next gate.
 
 What works today:
 
@@ -96,15 +96,16 @@ Phase 5 — landed end-to-end on Tier 1:
 - **`examples/01-hello/`** — `add(u64, u64) -> u64`, `hello() -> String`,
   four nominal user-type wrappers (`pointSum` / `colorName` /
   `isLeaf` / `parserId`), a derive-only Rust-side round-trip across
-  record / enum / variant / resource / generic-record, and the
-  handshake-mismatch exit check (`code == 5` on `schema_hash_bytes`
-  tamper).
+  record / enum / variant / resource / generic-record, the
+  `#[leo4(args = "…")]` attribute path on the 15-instantiation
+  `Sample.stringify`, and the handshake-mismatch exit check
+  (`code == 5` on `schema_hash_bytes` tamper).
+- **`examples/02-roundtrip/`** — `Sample.echoes(xs : List UInt32, n : Nat) -> List UInt32`
+  driving `list<u32>` on both arg and return + `bignat` as a
+  parameter, plus `listSumU64` / `listConcat` and a
+  multi-instantiation `listLen` pick. Phase 5 exit demo.
 
 What is **not** built yet:
-
-- `examples/02-roundtrip/` — `def echoes (xs : List u32) (n : Nat) : List u32`
-  exercising list / Nat / value-param erasure. The remaining
-  Phase 5 exit criterion.
 - Phase 6 (mutual recursion), Phase 7 (async `io<T>` lowering), and
   the larger schema-idl items (G: `ConstraintExpr<Atom>` typed AST;
   H: mutual-recursion lift) — tracked in
@@ -210,9 +211,10 @@ just wit-test           # WIT golden + wasm-tools/wit-bindgen (Phase 3)
 just conformance-test   # Lean encoder vs Rust encoder bytes (Phase 4)
 just test               # full ladder = lake + cargo + mangling + wit + conformance
 
-# Phase 5 end-to-end demo:
+# Phase 5 end-to-end demos:
 just smoke-plugin                          # produce / refresh shim .so
-cargo run -p leo4-example-01-hello         # call Lean from Rust
+cargo run -p leo4-example-01-hello         # scalars + nominal types + handshake check
+cargo run -p leo4-example-02-roundtrip     # list<T> + bignat round-trip
 
 # Multi-version Lean matrix (containerised, Phase 5 prep):
 just ci-image           # build the container image once

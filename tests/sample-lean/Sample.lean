@@ -112,6 +112,15 @@ def listConcat (xs : List String) : String :=
 def pairAdd (p : UInt64 × UInt32) : UInt64 :=
   p.1 + p.2.toUInt64
 
+-- P5-e fixture: List + Nat + List return. Exercises `list<u32>` on
+-- both the argument and the return side, plus `bignat` as a runtime
+-- `n : Nat` value parameter (the SPEC's value-param erasure rule
+-- only kicks in for `{N : Nat}`-style implicit binders; here `n` is
+-- an ordinary explicit parameter, transmitted on the wire as bignat).
+@[leo4_export]
+def echoes (xs : List UInt32) (n : Nat) : List UInt32 :=
+  (List.replicate n xs).foldl (· ++ ·) []
+
 -- Generic user nominal types (re-enabled 2026-05-20 after the A/A+/A++
 -- chain landed: deriving generic-inductive, walkUserDecl generic-aware,
 -- idlToLeanType nominal application, ASCII-positional binder

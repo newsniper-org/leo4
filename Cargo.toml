@@ -12,6 +12,7 @@ members = [
     "crates/leo4",
     "crates/leo4c",
     "examples/01-hello",
+    "examples/02-roundtrip",
 ]
 
 [workspace.package]

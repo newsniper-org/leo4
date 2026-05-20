@@ -1,0 +1,18 @@
+[package]
+name        = "leo4-example-02-roundtrip"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Phase 5 exit demo: round-trip List + Nat + List through `Sample.echoes` (Lean ↔ Rust). Companion to examples/01-hello."
+
+[dependencies]
+leo4.workspace = true
+
+[build-dependencies]
+leo4-build.workspace = true
+
+[lints]
+workspace = true

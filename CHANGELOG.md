@@ -50,7 +50,13 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 - **`examples/01-hello/`** — `add` / `hello` / `pointSum` /
   `colorName` / `isLeaf` / `parserId` round-trip end-to-end on
   Tier 1 Linux. Includes the handshake-mismatch exit check (mutated
-  `schema_hash_bytes` → `LEO4_ERR_HANDSHAKE_MISMATCH` = 5).
+  `schema_hash_bytes` → `LEO4_ERR_HANDSHAKE_MISMATCH` = 5) and the
+  attribute-routed `Sample.stringify` pick (P5-b₃-iv).
+- **`examples/02-roundtrip/`** — `Sample.echoes (xs : List UInt32) (n : Nat) : List UInt32`
+  driving `list<u32>` on both argument and return + `bignat` as an
+  argument. Also exercises `listSumU64` / `listConcat` and a
+  multi-instantiation `listLen` pick over `list<u32>`. Phase 5
+  exit demo for the list + bignat wires.
 - **Sample fixture** — `Sample.Pair<α, β>`, `Sample.Either<α, β>`,
   and the four nominal user types (`Point` / `Color` / `Tree` /
   `ParserHandle`).
@@ -76,10 +82,11 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ### Pending
 
-- `examples/02-roundtrip/` (P5-e) — list + Nat + value-param erasure.
-  Last Phase 5 exit criterion.
-<!-- P5-b₃-iv landed 2026-05-20 -->
-
+- Plugin-side value-param erasure for implicit `{N : Nat}` binders
+  (the SPEC §"Value-param erasure" rule). `examples/02-roundtrip/`
+  works around this by passing `n : Nat` as an explicit runtime
+  argument; the implicit-binder path will be picked up alongside
+  Phase 6 / Phase 7 plugin work.
 - Phase 6 (mutual recursion), Phase 7 (async), Phase 8 (Mathlib
   subset).
 - schema-idl items G (`ConstraintExpr<Atom>` typed AST) and H

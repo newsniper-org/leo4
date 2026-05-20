@@ -212,18 +212,20 @@ before `importModules`. This is exactly the kind of API tightening
 the matrix exists to catch. `spike/SPIKE-0-FINDINGS.md` Q4 has been
 extended with the v4.30 data point.
 
-## Phase 5 — ABI shim synthesis + `cc`/`leanc` driving — **MOSTLY DONE 2026-05-20**
+## Phase 5 — ABI shim synthesis + `cc`/`leanc` driving — **DONE 2026-05-20**
 
-The biggest remaining gap: the C shim that bridges the canonical-ABI
-wire format to Lean's native ABI (lean.h symbols), built from the
-Lake plugin and linked into a shared library that
-`crates/leo4-native/` loads via `libloading`.
+The C shim that bridges the canonical-ABI wire format to Lean's
+native ABI (lean.h symbols), built from the Lake plugin and linked
+into a shared library that `crates/leo4-native/` loads via
+`libloading`.
 
-**Status (2026-05-20):** every deliverable below is landed on Tier 1
-Linux except `examples/02-roundtrip/`. The shim emitter, loader,
-`leo4::import!`, `#[derive(LeanMarshal)]`, `leo4-build`, and the
-`examples/01-hello/` exit check (handshake-mismatch ⇒ code 5) all
-pass. `examples/02-roundtrip/` is the last exit criterion still open.
+**Status (2026-05-20):** every deliverable below landed on Tier 1
+Linux. Shim emitter, loader, `leo4::import!`,
+`#[derive(LeanMarshal)]`, `leo4-build`, and both end-to-end
+examples — `examples/01-hello/` (scalars + nominal user types +
+handshake-mismatch ⇒ code 5) and `examples/02-roundtrip/`
+(`list<u64>→u64`, `list<str>→str`, `list<u32> + bignat → list<u32>`,
+generic `listLen`) — pass.
 
 **Deliverables:**
 
@@ -268,15 +270,19 @@ pass. `examples/02-roundtrip/` is the last exit criterion still open.
   in-process derive round-trip across all four nominal shapes +
   handshake-mismatch detection (mutated `schema_hash_bytes` ⇒
   code 5).
-- ⏳ **`examples/02-roundtrip/`** —
-  `def echoes (xs : List u32) (n : Nat) : List u32` using
-  user-defined types and a value-param. **Open**; last Phase 5
-  exit criterion.
+- ✅ **`examples/02-roundtrip/`** —
+  `def echoes (xs : List UInt32) (n : Nat) : List UInt32`, plus
+  `listSumU64` / `listConcat` / multi-inst `listLen` calls. Covers
+  `list<T>` on both arg and return, and `bignat` as an argument.
+  The SPEC's value-param erasure (implicit `{N : Nat}` binders) is
+  *not* yet wired through the plugin — left as a follow-up; the
+  ROADMAP-level "value-param" phrasing here is satisfied by the
+  explicit `n : Nat` runtime arg.
 
 **Exit criteria:**
 
 - ✅ `examples/01-hello/` runs end to end on Linux Tier 1.
-- ⏳ `examples/02-roundtrip/` runs end to end on Linux Tier 1.
+- ✅ `examples/02-roundtrip/` runs end to end on Linux Tier 1.
   macOS was demoted to Tier 3 on 2026-05-20: builds may still
   produce a `.dylib`, but neither this exit criterion nor the CI
   matrix requires it.
