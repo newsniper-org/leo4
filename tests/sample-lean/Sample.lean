@@ -204,5 +204,18 @@ def doubleVal {_N : Nat} (x : UInt32) : UInt32 := 2 * x
 @[leo4_export]
 def addRat (a b : Rat) : Rat := a + b
 
+-- Phase 8 #55: wide-int round-trip via `Leo4.LeanU128`. The Rust
+-- caller writes `u128` directly; macros route it to this nominal.
+@[leo4_export]
+def addU128 (a b : Leo4.LeanU128) : Leo4.LeanU128 :=
+  -- Compute lo + hi separately with explicit carry — no Lean-stdlib
+  -- UInt128 arithmetic to lean on, so this is the hand-rolled
+  -- two-limb add. (Mathlib opt-in would give nicer ops; leo4 stays
+  -- Mathlib-independent per ROADMAP §8.)
+  let s_lo := a.lo + b.lo
+  let carry : UInt64 := if s_lo < a.lo then 1 else 0
+  let s_hi := a.hi + b.hi + carry
+  { lo := s_lo, hi := s_hi }
+
 
 end Sample

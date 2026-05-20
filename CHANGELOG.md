@@ -7,6 +7,37 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 8 #55: stable 128-bit integers (`u128`, `i128`) (2026-05-20)
+
+Wide-integer carriers via the "Lean record pairs Rust primitive"
+pattern. Stable Rust path — no nightly, no feature gate.
+
+- `lake/Leo4/Leo4/Wide.lean` — new module, auto-imported from
+  `Leo4`. Defines
+  `structure LeanU128 where lo, hi : UInt64 deriving LeanMarshal` and
+  matching `LeanI128`. Wire form is `lo (8B LE) + hi (8B LE)` —
+  byte-identical to Rust's `u128::to_le_bytes()` /
+  `i128::to_le_bytes()`.
+- `crates/leo4-abi/src/scalars.rs` — `impl LeanMarshal for u128 /
+  i128` directly (no newtype wrapper). 16 wire bytes LE.
+- `crates/leo4-macros-backend/src/lib.rs` — `rust_type_to_idl` maps
+  bare `u128 → Record { fqn: "Leo4.LeanU128" }` and
+  `i128 → Record { fqn: "Leo4.LeanI128" }`. Users write bare
+  `u128` in `leo4::import!` and the macro auto-routes.
+- Sample: `def addU128 (a b : Leo4.LeanU128) : Leo4.LeanU128` with
+  hand-rolled two-limb add + carry (Lean stdlib has no UInt128 ops;
+  leo4 stays Mathlib-independent per ROADMAP §8).
+- examples/01-hello rt: `sample::addU128(&lean, (1u128 << 64) |
+  0xdeadbeefcafebabe, 1)` asserts high limb participates.
+
+Schema hash rotates `2iomjhrbofmos` → `uj55sds6f7cpq`. Cross-impl
+mangling: **65 mangled names byte-identical**.
+
+Zero plugin changes — the existing record path handles
+`Leo4.LeanU128` natively because its wire is just `record { lo: u64,
+hi: u64 }`. Same applies for `LeanI128`. Future carriers (#56, #57)
+follow this pattern.
+
 ### Added — Phase 5 (2026-05-16 → 2026-05-20)
 
 - **`crates/leo4-native/`** — `Lean::open` (handshake + Lean runtime

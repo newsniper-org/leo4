@@ -110,6 +110,35 @@ impl LeanMarshal for i64 {
     }
 }
 
+// ── 128-bit integers (stable Rust) ────────────────────────────────────
+//
+// Wire format: 16 bytes LE. Pairs with Lean's `Leo4.LeanU128` /
+// `Leo4.LeanI128` structures (`{ lo : UInt64, hi : UInt64 }`); the
+// byte stream matches `u128::to_le_bytes()` exactly because the lo
+// field encodes as the low 8 bytes LE and hi as the high 8 bytes LE.
+
+impl LeanMarshal for u128 {
+    fn canonical_encode(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_le_bytes());
+    }
+    fn canonical_decode(buf: &[u8], off: usize) -> Result<(Self, usize), LeanError> {
+        need(buf, off, 16, "u128")?;
+        let v = u128::from_le_bytes(buf[off..off + 16].try_into().unwrap());
+        Ok((v, off + 16))
+    }
+}
+
+impl LeanMarshal for i128 {
+    fn canonical_encode(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.to_le_bytes());
+    }
+    fn canonical_decode(buf: &[u8], off: usize) -> Result<(Self, usize), LeanError> {
+        need(buf, off, 16, "i128")?;
+        let v = i128::from_le_bytes(buf[off..off + 16].try_into().unwrap());
+        Ok((v, off + 16))
+    }
+}
+
 // ── floats ────────────────────────────────────────────────────────────
 
 impl LeanMarshal for f32 {

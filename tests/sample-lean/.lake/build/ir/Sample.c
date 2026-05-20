@@ -235,6 +235,9 @@ LEAN_EXPORT uint32_t lp_leo4_x2dsample_Sample_doubleVal(lean_object*, uint32_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_doubleVal___boxed(lean_object*, lean_object*);
 lean_object* l_Rat_add(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addRat(lean_object*, lean_object*);
+uint8_t lean_uint64_dec_lt(uint64_t, uint64_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addU128(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addU128___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -4176,6 +4179,61 @@ _start:
 {
 lean_object* x_3; 
 x_3 = l_Rat_add(x_1, x_2);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addU128(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint64_t x_3; uint64_t x_4; uint64_t x_5; uint64_t x_6; lean_object* x_7; uint64_t x_8; uint64_t x_9; uint8_t x_14; 
+x_3 = lean_ctor_get_uint64(x_1, 0);
+x_4 = lean_ctor_get_uint64(x_1, 8);
+x_5 = lean_ctor_get_uint64(x_2, 0);
+x_6 = lean_ctor_get_uint64(x_2, 8);
+if (lean_is_exclusive(x_2)) {
+ x_7 = x_2;
+} else {
+ lean_dec_ref(x_2);
+ x_7 = lean_box(0);
+}
+x_8 = lean_uint64_add(x_3, x_5);
+x_14 = lean_uint64_dec_lt(x_8, x_3);
+if (x_14 == 0)
+{
+uint64_t x_15; 
+x_15 = 0;
+x_9 = x_15;
+goto block_13;
+}
+else
+{
+uint64_t x_16; 
+x_16 = 1;
+x_9 = x_16;
+goto block_13;
+}
+block_13:
+{
+uint64_t x_10; uint64_t x_11; lean_object* x_12; 
+x_10 = lean_uint64_add(x_4, x_6);
+x_11 = lean_uint64_add(x_10, x_9);
+if (lean_is_scalar(x_7)) {
+ x_12 = lean_alloc_ctor(0, 0, 16);
+} else {
+ x_12 = x_7;
+}
+lean_ctor_set_uint64(x_12, 0, x_8);
+lean_ctor_set_uint64(x_12, 8, x_11);
+return x_12;
+}
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addU128___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+lean_object* x_3; 
+x_3 = lp_leo4_x2dsample_Sample_addU128(x_1, x_2);
+lean_dec_ref(x_1);
 return x_3;
 }
 }

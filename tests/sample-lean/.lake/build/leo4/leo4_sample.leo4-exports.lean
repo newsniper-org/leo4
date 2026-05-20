@@ -10,7 +10,7 @@
 -- export wrappers; the shim's external-marshal handler
 -- `extern`-declares them and bridges `uint8_t* ⇄ ByteArray`.
 --
--- Schema hash : 2iomjhrbofmos
+-- Schema hash : uj55sds6f7cpq
 -- Package     : leo4-sample
 -- Interface   : Sample
 
@@ -24,259 +24,263 @@ def _leo4_marshal_Rat_dec (buf : ByteArray) (off : Nat) : Except Leo4.LeanError 
 def _leo4_marshal_Rat_enc (val : Rat) (buf : ByteArray) : ByteArray :=
   Leo4.LeanMarshal.canonicalEncode val buf
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__b__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__b__huj55sds6f7cpq]
 def _leo4_export_stringify_b (p0 : Bool) : String :=
   Sample.stringify (T := Bool) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__bN__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__bN__huj55sds6f7cpq]
 def _leo4_export_stringify_bN (p0 : Nat) : String :=
   Sample.stringify (T := Nat) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__str__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__str__huj55sds6f7cpq]
 def _leo4_export_stringify_str (p0 : String) : String :=
   Sample.stringify (T := String) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__bI__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__bI__huj55sds6f7cpq]
 def _leo4_export_stringify_bI (p0 : Int) : String :=
   Sample.stringify (T := Int) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u8__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u8__huj55sds6f7cpq]
 def _leo4_export_stringify_u8 (p0 : UInt8) : String :=
   Sample.stringify (T := UInt8) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__f32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__f32__huj55sds6f7cpq]
 def _leo4_export_stringify_f32 (p0 : Float32) : String :=
   Sample.stringify (T := Float32) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i32__huj55sds6f7cpq]
 def _leo4_export_stringify_i32 (p0 : Int32) : String :=
   Sample.stringify (T := Int32) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u16__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u16__huj55sds6f7cpq]
 def _leo4_export_stringify_u16 (p0 : UInt16) : String :=
   Sample.stringify (T := UInt16) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i64__huj55sds6f7cpq]
 def _leo4_export_stringify_i64 (p0 : Int64) : String :=
   Sample.stringify (T := Int64) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__S_Rat_s__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__S_Rat_s__huj55sds6f7cpq]
 def _leo4_export_stringify_S_Rat_s (p0 : Rat) : String :=
   Sample.stringify (T := Rat) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u64__huj55sds6f7cpq]
 def _leo4_export_stringify_u64 (p0 : UInt64) : String :=
   Sample.stringify (T := UInt64) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__f64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__f64__huj55sds6f7cpq]
 def _leo4_export_stringify_f64 (p0 : Float) : String :=
   Sample.stringify (T := Float) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i8__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i8__huj55sds6f7cpq]
 def _leo4_export_stringify_i8 (p0 : Int8) : String :=
   Sample.stringify (T := Int8) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i16__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__i16__huj55sds6f7cpq]
 def _leo4_export_stringify_i16 (p0 : Int16) : String :=
   Sample.stringify (T := Int16) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__u32__huj55sds6f7cpq]
 def _leo4_export_stringify_u32 (p0 : UInt32) : String :=
   Sample.stringify (T := UInt32) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stringify__c__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stringify__c__huj55sds6f7cpq]
 def _leo4_export_stringify_c (p0 : Char) : String :=
   Sample.stringify (T := Char) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__huj55sds6f7cpq]
 def _leo4_export_pairSndU64U32_S_Sample_Pair_u64_u32_s (p0 : (Sample.Pair UInt64 UInt32)) : UInt32 :=
   Sample.pairSndU64U32 p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__huj55sds6f7cpq]
 def _leo4_export_safeDiv_u64_u64 (p0 : UInt64) (p1 : UInt64) : (Option UInt64) :=
   Sample.safeDiv p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__huj55sds6f7cpq]
 def _leo4_export_exprIsLit_V_Sample_Expr_v (p0 : Sample.Expr) : Bool :=
   Sample.exprIsLit p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__huj55sds6f7cpq]
 def _leo4_export_stmtIsNop_V_Sample_Stmt_v (p0 : Sample.Stmt) : Bool :=
   Sample.stmtIsNop p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__huj55sds6f7cpq]
 def _leo4_export_pairFstU64U32_S_Sample_Pair_u64_u32_s (p0 : (Sample.Pair UInt64 UInt32)) : UInt64 :=
   Sample.pairFstU64U32 p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__huj55sds6f7cpq]
 def _leo4_export_pointSum_S_Sample_Point_s (p0 : Sample.Point) : Float :=
   Sample.pointSum p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__huj55sds6f7cpq]
 def _leo4_export_pairAdd_T_u64_u32_t (p0 : (UInt64 × UInt32)) : UInt64 :=
   Sample.pairAdd p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__huj55sds6f7cpq]
 def _leo4_export_maxScalar_i64_i64 (p0 : Int64) (p1 : Int64) : Int64 :=
   Sample.maxScalar (T := Int64) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__huj55sds6f7cpq]
 def _leo4_export_maxScalar_b_b (p0 : Bool) (p1 : Bool) : Bool :=
   Sample.maxScalar (T := Bool) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__huj55sds6f7cpq]
 def _leo4_export_maxScalar_u16_u16 (p0 : UInt16) (p1 : UInt16) : UInt16 :=
   Sample.maxScalar (T := UInt16) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__huj55sds6f7cpq]
 def _leo4_export_maxScalar_str_str (p0 : String) (p1 : String) : String :=
   Sample.maxScalar (T := String) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__huj55sds6f7cpq]
 def _leo4_export_maxScalar_u64_u64 (p0 : UInt64) (p1 : UInt64) : UInt64 :=
   Sample.maxScalar (T := UInt64) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__huj55sds6f7cpq]
 def _leo4_export_maxScalar_u8_u8 (p0 : UInt8) (p1 : UInt8) : UInt8 :=
   Sample.maxScalar (T := UInt8) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__huj55sds6f7cpq]
 def _leo4_export_maxScalar_u32_u32 (p0 : UInt32) (p1 : UInt32) : UInt32 :=
   Sample.maxScalar (T := UInt32) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__huj55sds6f7cpq]
 def _leo4_export_maxScalar_i16_i16 (p0 : Int16) (p1 : Int16) : Int16 :=
   Sample.maxScalar (T := Int16) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__huj55sds6f7cpq]
 def _leo4_export_maxScalar_bI_bI (p0 : Int) (p1 : Int) : Int :=
   Sample.maxScalar (T := Int) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__huj55sds6f7cpq]
 def _leo4_export_maxScalar_bN_bN (p0 : Nat) (p1 : Nat) : Nat :=
   Sample.maxScalar (T := Nat) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__huj55sds6f7cpq]
 def _leo4_export_maxScalar_i8_i8 (p0 : Int8) (p1 : Int8) : Int8 :=
   Sample.maxScalar (T := Int8) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__huj55sds6f7cpq]
 def _leo4_export_maxScalar_i32_i32 (p0 : Int32) (p1 : Int32) : Int32 :=
   Sample.maxScalar (T := Int32) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__huj55sds6f7cpq]
 def _leo4_export_maxScalar_c_c (p0 : Char) (p1 : Char) : Char :=
   Sample.maxScalar (T := Char) p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__huj55sds6f7cpq]
 def _leo4_export_add_u64_u64 (p0 : UInt64) (p1 : UInt64) : UInt64 :=
   Sample.add p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__huj55sds6f7cpq]
 def _leo4_export_listSumU64_L_u64_l (p0 : (List UInt64)) : UInt64 :=
   Sample.listSumU64 p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__hello____h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__hello____huj55sds6f7cpq]
 def _leo4_export_hello_ (_unit : Unit) : String :=
   Sample.hello 
 
-@[export leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__addU128__S_Leo4_LeanU128_s_S_Leo4_LeanU128_s__huj55sds6f7cpq]
+def _leo4_export_addU128_S_Leo4_LeanU128_s_S_Leo4_LeanU128_s (p0 : Leo4.LeanU128) (p1 : Leo4.LeanU128) : Leo4.LeanU128 :=
+  Sample.addU128 p0 p1
+
+@[export leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__huj55sds6f7cpq]
 def _leo4_export_isLeaf_V_Sample_Tree_v (p0 : Sample.Tree) : Bool :=
   Sample.isLeaf p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__parseU64__str__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__parseU64__str__huj55sds6f7cpq]
 def _leo4_export_parseU64_str (p0 : String) : (Except String UInt64) :=
   Sample.parseU64 p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__huj55sds6f7cpq]
 def _leo4_export_listConcat_L_str_l (p0 : (List String)) : String :=
   Sample.listConcat p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_b_l (p0 : (List Bool)) : Nat :=
   Sample.listLen (T := Bool) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_c_l (p0 : (List Char)) : Nat :=
   Sample.listLen (T := Char) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_str_l (p0 : (List String)) : Nat :=
   Sample.listLen (T := String) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_bI_l (p0 : (List Int)) : Nat :=
   Sample.listLen (T := Int) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_bN_l (p0 : (List Nat)) : Nat :=
   Sample.listLen (T := Nat) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_u8_l (p0 : (List UInt8)) : Nat :=
   Sample.listLen (T := UInt8) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_u16_l (p0 : (List UInt16)) : Nat :=
   Sample.listLen (T := UInt16) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_u32_l (p0 : (List UInt32)) : Nat :=
   Sample.listLen (T := UInt32) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_u64_l (p0 : (List UInt64)) : Nat :=
   Sample.listLen (T := UInt64) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_i8_l (p0 : (List Int8)) : Nat :=
   Sample.listLen (T := Int8) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_i16_l (p0 : (List Int16)) : Nat :=
   Sample.listLen (T := Int16) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_i32_l (p0 : (List Int32)) : Nat :=
   Sample.listLen (T := Int32) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_i64_l (p0 : (List Int64)) : Nat :=
   Sample.listLen (T := Int64) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_f32_l (p0 : (List Float32)) : Nat :=
   Sample.listLen (T := Float32) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__huj55sds6f7cpq]
 def _leo4_export_listLen_L_f64_l (p0 : (List Float)) : Nat :=
   Sample.listLen (T := Float) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__huj55sds6f7cpq]
 def _leo4_export_colorName_E_Sample_Color_e (p0 : Sample.Color) : String :=
   Sample.colorName p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__huj55sds6f7cpq]
 def _leo4_export_doubleVal_u32 (p0 : UInt32) : UInt32 :=
   Sample.doubleVal (_N := default) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__huj55sds6f7cpq]
 def _leo4_export_eitherTaggedU64String_V_Sample_Either_u64_str_v (p0 : (Sample.Either UInt64 String)) : Bool :=
   Sample.eitherTaggedU64String p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__addRat__S_Rat_s_S_Rat_s__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__addRat__S_Rat_s_S_Rat_s__huj55sds6f7cpq]
 def _leo4_export_addRat_S_Rat_s_S_Rat_s (p0 : Rat) (p1 : Rat) : Rat :=
   Sample.addRat p0 p1
 
-@[export leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__huj55sds6f7cpq]
 def _leo4_export_parserId_X_Sample_ParserHandle_x (p0 : Sample.ParserHandle) : Sample.ParserHandle :=
   Sample.parserId p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__huj55sds6f7cpq]
 def _leo4_export_constantFortyTwo_u32 (p0 : UInt32) : UInt32 :=
   Sample.constantFortyTwo (_T := Unit) p0
 
-@[export leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__h2iomjhrbofmos]
+@[export leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__huj55sds6f7cpq]
 def _leo4_export_echoes_L_u32_l_bN (p0 : (List UInt32)) (p1 : Nat) : (List UInt32) :=
   Sample.echoes p0 p1
 

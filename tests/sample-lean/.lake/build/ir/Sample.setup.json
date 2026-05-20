@@ -4,7 +4,9 @@
  "name": "Sample",
  "isModule": false,
  "importArts":
- {"Leo4.Syntax":
+ {"Leo4.Wide":
+  ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Wide.olean"],
+  "Leo4.Syntax":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Syntax.olean"],
   "Leo4.Resource":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Resource.olean"],

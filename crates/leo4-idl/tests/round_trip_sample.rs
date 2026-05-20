@@ -10,8 +10,9 @@ fn parses_lake_plugin_sample_schema() {
     assert_eq!(schema.interface, "Sample");
     // Sample declares: Point (record), Color (enum), Tree (variant),
     // ParserHandle (resource), Pair (generic record), Either (generic
-    // variant), Rat (external-marshal — Phase 8 step 2), plus a
-    // mutual { Expr; Stmt } cluster — eight entries total.
-    assert_eq!(schema.user_decls.len(), 8, "expected 8 user decls");
+    // variant), Rat (external-marshal — Phase 8 step 2), the Phase 6
+    // `mutual { Expr; Stmt }` cluster, plus `Leo4.LeanU128` (Phase 8
+    // #55 wide-integer carrier) — nine entries total.
+    assert_eq!(schema.user_decls.len(), 9, "expected 9 user decls");
     assert!(schema.funcs.len() >= 9, "expected at least 9 funcs, got {}", schema.funcs.len());
 }

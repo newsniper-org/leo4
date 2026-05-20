@@ -48,6 +48,9 @@ mod sample {
         // shim routes encode/decode through Lean-emitted
         // `leo4_marshal_Rat_dec/_enc` helpers.
         fn addRat(a: leo4::LeanRat, b: leo4::LeanRat) -> leo4::LeanRat;
+        // Phase 8 #55: bare Rust `u128` routes through `Leo4.LeanU128`
+        // on the Lean side via macro auto-mapping. Wire: 16 bytes LE.
+        fn addU128(a: u128, b: u128) -> u128;
     }
 }
 
@@ -187,6 +190,14 @@ fn main() -> Result<(), leo4::LeanError> {
     // Expected: 1/2 = (num=1, den=2) after gcd normalisation.
     assert_eq!(sum.num, leo4::BigInt::from_i64(1));
     assert_eq!(sum.den, leo4::BigNat::from_u64(2));
+
+    // Phase 8 #55: stable `u128` round-trip. Cross the u64 boundary
+    // intentionally so the high limb participates.
+    let big = (1u128 << 64) | 0xdead_beef_cafe_babe;
+    let small = 1u128;
+    let sum128 = sample::addU128(&lean, big, small)?;
+    assert_eq!(sum128, big + small);
+    println!("addU128({big:#x}, 1) = {sum128:#x}");
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

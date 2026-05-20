@@ -26,6 +26,11 @@ import Leo4.Resource
 import Leo4.Builtins
 import Leo4.Deriving
 import Leo4.Build
+-- Phase 8 wide-integer carriers (#55, 2026-05-20). Provides
+-- `Leo4.LeanU128` / `Leo4.LeanI128` as Lean structures matching Rust's
+-- `u128` / `i128` byte layout. Auto-imported so admit-sets and
+-- `deriving LeanMarshal` see them.
+import Leo4.Wide
 -- Phase 8 step 2: re-enable auto-import of MathlibSubset.
 -- The plugin now recognises types with proof-carrying fields as
 -- `UserDecl.externalMarshal` instead of choking, so `LeanMarshal Rat`

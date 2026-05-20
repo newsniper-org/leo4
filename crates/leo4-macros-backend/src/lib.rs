@@ -344,6 +344,16 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
         "i16" => I16,
         "i32" => I32,
         "i64" => I64,
+        // Stable 128-bit integers (#55). Pair with Lean `Leo4.LeanU128`
+        // / `Leo4.LeanI128` records on the wire (16 bytes LE).
+        "u128" => Record {
+            fqn: "Leo4.LeanU128".to_string(),
+            args: vec![],
+        },
+        "i128" => Record {
+            fqn: "Leo4.LeanI128".to_string(),
+            args: vec![],
+        },
         "f32" => F32,
         "f64" => F64,
         "bool" => Bool,
