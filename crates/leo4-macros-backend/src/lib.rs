@@ -15,9 +15,10 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use schema_idl::{mangle_type, IDLType};
 use syn::{
     parse::{Parse, ParseStream, Parser},
-    FnArg, ReturnType, Signature,
+    FnArg, GenericArgument, PathArguments, ReturnType, Signature, Type,
 };
 
 /// Parsed body of `leo4::import! { fn add(a: u64, b: u64) -> u64; … }`.
@@ -144,12 +145,26 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
         ReturnType::Type(_, ty) => (**ty).clone(),
     };
 
-    // Look up the mangled body. P5-b₂ keeps the simple "single
-    // instantiation by fname" match — generic exports come back at
-    // P5-b₃ with full arg-type-based disambiguation.
-    let mangled_body = lookup_mangled_body(mangling, &fname).map_err(|e| {
-        syn::Error::new_spanned(&sig.ident, e)
-    })?;
+    // Compute the IDL-side mangling of each argument's Rust type so
+    // we can disambiguate instantiations of a generic export. Types
+    // we can't lower today (nominal user types without an explicit
+    // hint, function pointers, references, …) trip `unrecognised`
+    // and yield a localized compile error.
+    let arg_idls: Vec<IDLType> = arg_types
+        .iter()
+        .map(|t| {
+            rust_type_to_idl(t).ok_or_else(|| {
+                syn::Error::new_spanned(
+                    t,
+                    "leo4::import!: this Rust type isn't recognised as a leo4 IDL type; supported set is u8..u64, i8..i64, f32/f64, bool, char, String, Vec<T>, Option<T>, Result<T,E>, (T1, T2)",
+                )
+            })
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    let arg_mangles: Vec<String> = arg_idls.iter().map(mangle_type).collect();
+
+    let mangled_body = lookup_mangled_body(mangling, &fname, &arg_mangles)
+        .map_err(|e| syn::Error::new_spanned(&sig.ident, e))?;
 
     let lean = format_ident!("lean");
 
@@ -165,8 +180,11 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
     let fname_ident = sig.ident.clone();
     let vis = quote! { pub };
 
-    // P5-b₂ minimum: fixed 4096-byte return buffer. P5-b₃ adds a
-    // grow-on-LEO4_ERR_RETURN_BUF_TOO_SMALL retry loop.
+    // Grow-on-too-small retry loop. The shim returns
+    // LEO4_ERR_RETURN_BUF_TOO_SMALL (code 7) with `*ret_len` set to
+    // the required size; `LeanError.detail` carries it as
+    // "need <N> bytes". We parse the detail back out for a single
+    // retry; further retries fail with the same shim error.
     Ok(quote! {
         #vis fn #fname_ident(
             #lean: &::leo4::Lean,
@@ -174,21 +192,126 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
         ) -> ::core::result::Result<#ret_ty, ::leo4::LeanError> {
             let mut args: ::std::vec::Vec<u8> = ::std::vec::Vec::new();
             #(#encode_stmts)*
-            let mut ret: ::std::vec::Vec<u8> = ::std::vec::Vec::with_capacity(4096);
-            ret.resize(4096, 0u8);
-            let written = #lean.call_shim(#mangled_body, &args, &mut ret)?;
-            ret.truncate(written);
+            let mut cap: usize = 4096;
+            let written = loop {
+                let mut ret: ::std::vec::Vec<u8> = ::std::vec::Vec::with_capacity(cap);
+                ret.resize(cap, 0u8);
+                match #lean.call_shim(#mangled_body, &args, &mut ret) {
+                    ::core::result::Result::Ok(written) => {
+                        ret.truncate(written);
+                        break ret;
+                    }
+                    ::core::result::Result::Err(e) if e.code == 7 => {
+                        // Detail format: "… need <N> bytes, got <M>".
+                        let needed = e.detail
+                            .split_whitespace()
+                            .filter_map(|w| w.parse::<usize>().ok())
+                            .next();
+                        let next_cap = match needed {
+                            ::core::option::Option::Some(n) if n > cap => n,
+                            _ => cap.saturating_mul(2),
+                        };
+                        if next_cap == cap {
+                            return ::core::result::Result::Err(e);
+                        }
+                        cap = next_cap;
+                    }
+                    ::core::result::Result::Err(e) => return ::core::result::Result::Err(e),
+                }
+            };
             let (value, _consumed) =
-                <#ret_ty as ::leo4::LeanMarshal>::canonical_decode(&ret, 0)?;
+                <#ret_ty as ::leo4::LeanMarshal>::canonical_decode(&written, 0)?;
             ::core::result::Result::Ok(value)
         }
     })
 }
 
-/// Find the `entries[*].instantiations[0].mangled` for a function
-/// whose `logical_name` ends in `::<fname>`. Errors if zero or
-/// multiple entries match.
-fn lookup_mangled_body(mangling: &serde_json::Value, fname: &str) -> Result<String, String> {
+/// Map a Rust type (as parsed by `syn`) to its IDL counterpart so
+/// we can mangle it the same way the Lake plugin does. Returns
+/// `None` for types outside the recognised set.
+fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
+    if let Type::Tuple(t) = ty {
+        if t.elems.is_empty() {
+            // unit type `()`; no IDL counterpart at v0.
+            return None;
+        }
+        let inners: ::std::option::Option<Vec<IDLType>> =
+            t.elems.iter().map(rust_type_to_idl).collect();
+        return inners.map(IDLType::Tuple);
+    }
+    let Type::Path(p) = ty else { return None };
+    if p.qself.is_some() {
+        return None;
+    }
+    let last = p.path.segments.last()?;
+    let name = last.ident.to_string();
+    let args_of_seg = || -> Vec<Type> {
+        let PathArguments::AngleBracketed(ab) = &last.arguments else {
+            return Vec::new();
+        };
+        ab.args
+            .iter()
+            .filter_map(|a| match a {
+                GenericArgument::Type(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    use IDLType::*;
+    Some(match name.as_str() {
+        "u8" => U8,
+        "u16" => U16,
+        "u32" => U32,
+        "u64" => U64,
+        "i8" => I8,
+        "i16" => I16,
+        "i32" => I32,
+        "i64" => I64,
+        "f32" => F32,
+        "f64" => F64,
+        "bool" => Bool,
+        "char" => Char,
+        "String" => String,
+        "Vec" => {
+            let args = args_of_seg();
+            let inner = rust_type_to_idl(args.first()?)?;
+            List(Box::new(inner))
+        }
+        "Option" => {
+            let args = args_of_seg();
+            let inner = rust_type_to_idl(args.first()?)?;
+            Option(Box::new(inner))
+        }
+        "Result" => {
+            let args = args_of_seg();
+            let t = rust_type_to_idl(args.first()?)?;
+            let e = args.get(1).and_then(rust_type_to_idl).map(Box::new);
+            Result(Box::new(t), e)
+        }
+        _ => return None,
+    })
+    .or_else(|| {
+        // Fall through to handle Type::Tuple via the outer caller —
+        // the closure above returns None for unrecognised idents,
+        // and Some(...) for the matched arms; .or_else here is dead.
+        None
+    })
+}
+
+/// Find the mangled body for a leo4 export matching `fname` and the
+/// caller's `arg_mangles` (each parameter's IDL `mangle_type` string,
+/// in declaration order).
+///
+/// Match rule: the entry's `logical_name` must end in `::<fname>`;
+/// among its `instantiations`, the one whose `param_types[*].encoded`
+/// list equals `arg_mangles` wins. Returns an error if no instantiation
+/// matches or if multiple entries share the fname (the latter would
+/// signal an IDL bug, since `logical_name` is per-export).
+fn lookup_mangled_body(
+    mangling: &serde_json::Value,
+    fname: &str,
+    arg_mangles: &[String],
+) -> Result<String, String> {
     let entries = mangling
         .get("entries")
         .and_then(|x| x.as_array())
@@ -204,26 +327,120 @@ fn lookup_mangled_body(mangling: &serde_json::Value, fname: &str) -> Result<Stri
             hits.push(e);
         }
     }
-    match hits.len() {
-        0 => Err(format!("no leo4 export named `{fname}` in mangling JSON")),
-        1 => {
-            let insts = hits[0]
-                .get("instantiations")
-                .and_then(|x| x.as_array())
-                .ok_or_else(|| format!("entry `{fname}` has no `instantiations`"))?;
-            if insts.len() != 1 {
-                return Err(format!(
-                    "leo4 export `{fname}` has {} instantiations — P5-b₂ requires a single (non-generic) instantiation",
-                    insts.len()
-                ));
-            }
-            let m = insts[0]
+    let entry = match hits.len() {
+        0 => return Err(format!("no leo4 export named `{fname}` in mangling JSON")),
+        1 => hits[0],
+        n => {
+            return Err(format!(
+                "ambiguous: {n} leo4 exports match `{fname}` — same logical name in different interfaces?"
+            ));
+        }
+    };
+
+    let insts = entry
+        .get("instantiations")
+        .and_then(|x| x.as_array())
+        .ok_or_else(|| format!("entry `{fname}` has no `instantiations`"))?;
+    for inst in insts {
+        let param_types = inst
+            .get("param_types")
+            .and_then(|x| x.as_array())
+            .ok_or_else(|| format!("entry `{fname}` instantiation missing `param_types`"))?;
+        if param_types.len() != arg_mangles.len() {
+            continue;
+        }
+        let inst_matches = param_types.iter().zip(arg_mangles.iter()).all(|(pt, am)| {
+            pt.get("encoded")
+                .and_then(|x| x.as_str())
+                .is_some_and(|enc| enc == am)
+        });
+        if inst_matches {
+            return inst
                 .get("mangled")
                 .and_then(|x| x.as_str())
-                .ok_or_else(|| format!("entry `{fname}` instantiation missing `mangled`"))?;
-            Ok(m.to_string())
+                .map(str::to_string)
+                .ok_or_else(|| format!("matched instantiation of `{fname}` missing `mangled`"));
         }
-        n => Err(format!("ambiguous: {n} leo4 exports match `{fname}`")),
     }
+    Err(format!(
+        "no instantiation of leo4 export `{fname}` matches arg list {arg_mangles:?}"
+    ))
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use schema_idl::IDLType;
+
+    #[test]
+    fn rust_type_to_idl_basics() {
+        let ty: Type = syn::parse_str("u64").unwrap();
+        assert_eq!(rust_type_to_idl(&ty), Some(IDLType::U64));
+
+        let ty: Type = syn::parse_str("Vec<u32>").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::List(Box::new(IDLType::U32)))
+        );
+
+        let ty: Type = syn::parse_str("Option<String>").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Option(Box::new(IDLType::String)))
+        );
+
+        let ty: Type = syn::parse_str("(u8, bool)").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Tuple(vec![IDLType::U8, IDLType::Bool]))
+        );
+
+        let ty: Type = syn::parse_str("MyCustom").unwrap();
+        assert_eq!(rust_type_to_idl(&ty), None);
+    }
+
+    #[test]
+    fn lookup_disambiguates_by_arg_mangle() {
+        let m: serde_json::Value = serde_json::from_str(
+            r#"{
+              "entries": [{
+                "logical_name": "Sample::stringify",
+                "instantiations": [
+                  { "param_types": [{ "encoded": "u64" }],
+                    "mangled": "MANGLED_U64" },
+                  { "param_types": [{ "encoded": "b" }],
+                    "mangled": "MANGLED_BOOL" }
+                ]
+              }]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            lookup_mangled_body(&m, "stringify", &["u64".into()]).unwrap(),
+            "MANGLED_U64"
+        );
+        assert_eq!(
+            lookup_mangled_body(&m, "stringify", &["b".into()]).unwrap(),
+            "MANGLED_BOOL"
+        );
+    }
+
+    #[test]
+    fn lookup_rejects_no_match() {
+        let m: serde_json::Value = serde_json::from_str(
+            r#"{
+              "entries": [{
+                "logical_name": "Sample::add",
+                "instantiations": [
+                  { "param_types": [{ "encoded": "u64" }, { "encoded": "u64" }],
+                    "mangled": "MANGLED_ADD" }
+                ]
+              }]
+            }"#,
+        )
+        .unwrap();
+        let err = lookup_mangled_body(&m, "add", &["u32".into(), "u32".into()]).unwrap_err();
+        assert!(err.contains("no instantiation"), "{err}");
+    }
+}
