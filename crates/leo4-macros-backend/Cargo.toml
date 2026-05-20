@@ -6,9 +6,13 @@ rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
+description = "Procedural-macro backend for leo4. Pure-Rust expander split out of the `proc-macro = true` `leo4-macros` crate so its logic is testable as a library and compilable without the `proc_macro` crate. See LEO4-DESIGN.md §9."
 
 [dependencies]
+syn         = { workspace = true }
+quote       = { workspace = true }
+proc-macro2 = { workspace = true }
+serde_json  = { workspace = true }
 
 [lints]
 workspace = true

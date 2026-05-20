@@ -127,6 +127,7 @@ name = "leo4"
 version = "0.0.0"
 dependencies = [
  "leo4-abi",
+ "leo4-macros",
  "leo4-native",
 ]
 
@@ -159,6 +160,12 @@ dependencies = [
 [[package]]
 name = "leo4-macros-backend"
 version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn",
+]
 
 [[package]]
 name = "leo4-native"

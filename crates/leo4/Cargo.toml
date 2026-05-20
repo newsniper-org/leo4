@@ -11,6 +11,7 @@ description = "Top-level façade re-exporting `leo4-native` (loader / dispatch) 
 [dependencies]
 leo4-abi.workspace    = true
 leo4-native.workspace = true
+leo4-macros.workspace = true
 
 [lints]
 workspace = true

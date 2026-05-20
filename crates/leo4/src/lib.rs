@@ -30,6 +30,12 @@ pub use leo4_native::{Arena, Lean, LeanError, LeanRef, LeanResult};
 
 pub use leo4_abi::{composites, scalars, LeanMarshal};
 
+/// `leo4::import! { fn add(a: u64, b: u64) -> u64; }` — generate
+/// Rust wrappers for `@[leo4_export]` definitions on the Lean side.
+/// P5-b₂ minimum: scalar-only, single-instantiation. P5-b₃ adds
+/// composite / nominal payloads + generic exports.
+pub use leo4_macros::import;
+
 /// Convenience: encode any `LeanMarshal` value to a `Vec<u8>` in
 /// canonical-ABI form. Mirrors `leo4_abi::marshal::encode_to_vec` so
 /// downstream code can stay on a single `leo4::*` import path.
