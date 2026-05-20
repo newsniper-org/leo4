@@ -80,6 +80,35 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — WASIp3 sibling project skeleton (2026-05-20)
+
+`sibling/leo4-wasip3/` — Cargo project **outside** the main leo4
+workspace, pinning `nightly` Rust via its own
+`rust-toolchain.toml` and targeting `wasm32-wasip3`. The skeleton:
+
+- `Cargo.toml` declares the nightly toolchain + path-dep on
+  `crates/leo4-abi` (the canonical-ABI marshalling layer is
+  shared between native and wasm; only dispatch / loader differs).
+- `src/lib.rs` carries a placeholder `pub struct Lean` mirroring
+  the planned `leo4_native::Lean` surface so downstream code can
+  `use leo4_wasip3::Lean` interchangeably under wasm.
+- `sibling/README.md` documents the convention for non-workspace
+  projects + the planned `leo4-wasm64/` sibling deferred until
+  upstream stabilisation.
+
+The WASIp3 API design crystallised in the same session: **sync API
+on both targets** — the wasm side uses `futures::executor::block_on`
+(or `wasmtime_wasi::block_on`) inside its sync wasm export to drive
+async sub-tasks. WASIp3 explicitly avoids function coloring, so a
+sync wasm export can call async imports. This means the
+`leo4::import!` macro emits the same shape on both targets, no
+per-target `cfg!` at the call site, and the `async-runtime`
+feature stays opt-in for users who want native concurrency.
+
+Phase 7 lands the concrete host import bindings, `block_on` choice,
+and `Lean::open` equivalent for wasm; this commit is the
+infrastructure shell so the wire-up has a home.
+
 ### Added — Phase 8 step 1: `Rat` LeanMarshal infrastructure (2026-05-20)
 
 ROADMAP Phase 8 (Mathlib-compatible subset) first landing. Mirror

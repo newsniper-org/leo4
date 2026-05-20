@@ -1,0 +1,17 @@
+# sibling/leo4-wasip3 — nightly toolchain.
+#
+# WASIp3 + wasm64 targets currently require nightly (per upstream
+# documentation circa Rust 1.95 / 1.96 timeframe). The main leo4
+# workspace stays on stable (`/rust-toolchain.toml`); this sibling
+# crate isolates the nightly dependency so the main workspace's
+# MSRV / CI policy isn't affected.
+#
+# Pin a date once the WASIp3 surface is stable enough for a fixed
+# nightly. For now we float on `nightly` so the developer's local
+# `rustup` picks up whatever WASIp3-aware nightly they have.
+
+[toolchain]
+channel    = "nightly"
+components = ["rustfmt", "clippy", "rust-src"]
+profile    = "default"
+targets    = ["wasm32-wasip3"]

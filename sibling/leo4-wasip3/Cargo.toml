@@ -1,0 +1,31 @@
+[package]
+name        = "leo4-wasip3"
+version     = "0.0.0"
+edition     = "2024"
+rust-version = "1.85"
+license     = "MIT OR Apache-2.0"
+authors     = ["윤병익 <yeun0908@gmail.com>"]
+repository  = "https://github.com/Honey-Be/leo4"
+description = "WASIp3 backend for leo4 — sibling project, nightly toolchain. Bridges the leo4 IDL/schema layer to wasip3 async imports while exposing a uniform sync API to user code via `block_on` (no function-coloring per the WASIp3 model)."
+
+# NOT a member of the main leo4 workspace. The main workspace
+# (`/Cargo.toml`) pins stable Rust; this sibling pins nightly via
+# `rust-toolchain.toml`. Path-dep into the main workspace's
+# `leo4-abi` (the canonical-ABI marshalling layer) keeps the IDL
+# / wire-format code shared — only the loader / dispatch layer
+# differs between native and wasm.
+
+[dependencies]
+leo4-abi = { path = "../../crates/leo4-abi" }
+
+# Re-enabled when the WASIp3 surface is finalised in nightly Rust
+# and the `wasip3` crate is published. Until then this sibling is
+# a placeholder showing the wire-up shape.
+# wasip3 = "0.x"
+# futures = { version = "0.3", default-features = false, features = ["executor"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
