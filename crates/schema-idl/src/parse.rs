@@ -54,6 +54,14 @@ pub enum ResolveError {
     /// `future<T>` / `stream<T>` only valid at function-boundary
     /// position (D-i 2026-05-19). Found inside a payload type.
     EffectInPayload { kind: &'static str },
+    /// `Cyc<i>` used outside any `mutual { … }` block. The token is
+    /// scoped to the enclosing group only (SPEC/phase-6-mutual.md §2).
+    CycOutsideMutual { index: u32 },
+    /// `Cyc<i>` with `i ≥ group_size` of the enclosing mutual group.
+    CycIndexOutOfRange { index: u32, group_size: usize },
+    /// A `mutual { … }` block with fewer than two members. Singletons
+    /// should drop the brackets and use `Self` (§1).
+    MutualGroupTooSmall { size: usize },
 }
 
 impl fmt::Display for ResolveError {
@@ -74,6 +82,24 @@ impl fmt::Display for ResolveError {
                     "`{kind}<T>` is only valid at a function's return position, not inside a payload"
                 )
             }
+            ResolveError::CycOutsideMutual { index } => {
+                write!(
+                    f,
+                    "`Cyc<{index}>` used outside any `mutual {{ … }}` block"
+                )
+            }
+            ResolveError::CycIndexOutOfRange { index, group_size } => {
+                write!(
+                    f,
+                    "`Cyc<{index}>` references position {index} but the enclosing mutual group has {group_size} member(s)"
+                )
+            }
+            ResolveError::MutualGroupTooSmall { size } => {
+                write!(
+                    f,
+                    "`mutual {{ … }}` block has {size} member(s); a group must have at least 2 (use `Self` for singletons)"
+                )
+            }
         }
     }
 }
@@ -88,6 +114,10 @@ pub enum RawType {
     Builtin(IDLType),
     /// A nominal reference: `Sample.Point`, `My.Kv.Pair<u32, string>`, …
     Named { fqn: String, args: Vec<RawType> },
+    /// `Cyc<n>` — Phase 6 cycle-breaker token. Resolution verifies that
+    /// the enclosing scope is a `mutual_decl` member and that `n` is in
+    /// range; bare top-level / non-mutual scopes are rejected.
+    Cyc(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +145,12 @@ pub enum RawDecl {
         generics: Vec<String>,
         members: Vec<String>,
     },
+    /// `mutual { decl₀; decl₁; … }` — Phase 6 cluster of ≥ 2 nominal
+    /// decls sharing a `Cyc<i>` namespace. Bracket-form mirrors Lean's
+    /// `mutual … end`. Singletons are rejected by the resolver.
+    Mutual {
+        members: Vec<RawDecl>,
+    },
 }
 
 impl RawDecl {
@@ -125,6 +161,7 @@ impl RawDecl {
             | RawDecl::Variant { fqn, .. }
             | RawDecl::Resource { fqn, .. }
             | RawDecl::Flags { fqn, .. } => fqn,
+            RawDecl::Mutual { .. } => "",
         }
     }
 }
@@ -290,6 +327,7 @@ pub fn parse_raw(input: &str) -> Result<RawSchema, ParseError> {
             || p.peek_keyword("enum")
             || p.peek_keyword("resource")
             || p.peek_keyword("flags")
+            || p.peek_keyword("mutual")
         {
             top_nominal_decls.push(p.parse_nominal_decl()?);
         } else {
@@ -334,7 +372,7 @@ pub fn resolve(raw: &RawSchema) -> Result<Schema, ResolveError> {
     let user_decls = raw
         .decls
         .iter()
-        .map(|d| resolve_decl(d, &shapes))
+        .map(|d| resolve_decl(d, &shapes, None))
         .collect::<Result<Vec<_>, _>>()?;
     let funcs = raw
         .funcs
@@ -343,9 +381,9 @@ pub fn resolve(raw: &RawSchema) -> Result<Schema, ResolveError> {
             let params = f
                 .params
                 .iter()
-                .map(|(n, t)| Ok::<_, ResolveError>((n.clone(), resolve_type(t, &shapes)?)))
+                .map(|(n, t)| Ok::<_, ResolveError>((n.clone(), resolve_type(t, &shapes, None)?)))
                 .collect::<Result<Vec<_>, _>>()?;
-            let ret = resolve_type(&f.ret, &shapes)?;
+            let ret = resolve_type(&f.ret, &shapes, None)?;
             Ok::<_, ResolveError>(FuncDecl {
                 name: f.name.clone(),
                 params,
@@ -387,25 +425,71 @@ enum Shape {
 fn build_shape_map(decls: &[RawDecl]) -> HashMap<String, Shape> {
     let mut map = HashMap::with_capacity(decls.len());
     for d in decls {
-        let s = match d {
-            RawDecl::Record { .. } => Shape::Record,
-            RawDecl::Enum { .. } => Shape::Enum,
-            RawDecl::Variant { .. } => Shape::Variant,
-            RawDecl::Resource { .. } => Shape::Resource,
-            RawDecl::Flags { .. } => Shape::Flags,
-        };
-        map.insert(d.fqn().to_string(), s);
+        insert_shape_entries(&mut map, d);
     }
     map
 }
 
-fn resolve_type(t: &RawType, shapes: &HashMap<String, Shape>) -> Result<IDLType, ResolveError> {
+fn insert_shape_entries(map: &mut HashMap<String, Shape>, d: &RawDecl) {
+    match d {
+        RawDecl::Record { fqn, .. } => {
+            map.insert(fqn.clone(), Shape::Record);
+        }
+        RawDecl::Enum { fqn, .. } => {
+            map.insert(fqn.clone(), Shape::Enum);
+        }
+        RawDecl::Variant { fqn, .. } => {
+            map.insert(fqn.clone(), Shape::Variant);
+        }
+        RawDecl::Resource { fqn, .. } => {
+            map.insert(fqn.clone(), Shape::Resource);
+        }
+        RawDecl::Flags { fqn, .. } => {
+            map.insert(fqn.clone(), Shape::Flags);
+        }
+        // Mutual groups: register each member's FQN/shape under the
+        // top-level shape map so peer references via FQN (when the
+        // author uses an explicit name instead of `Cyc<i>`) resolve
+        // correctly. The Cyc form is preferred but the FQN path
+        // remains valid for nominal references *into* the group from
+        // outside it.
+        RawDecl::Mutual { members } => {
+            for m in members {
+                insert_shape_entries(map, m);
+            }
+        }
+    }
+}
+
+/// Phase 6 mutual-group scope passed down through `resolve_type` /
+/// `resolve_decl`. `Some(n)` ⇒ we are inside a mutual block of `n`
+/// members; `None` ⇒ outside, `Cyc<i>` is a hard error.
+type MutualCtx = Option<usize>;
+
+fn resolve_type(
+    t: &RawType,
+    shapes: &HashMap<String, Shape>,
+    mctx: MutualCtx,
+) -> Result<IDLType, ResolveError> {
     match t {
         RawType::Builtin(b) => Ok(b.clone()),
+        RawType::Cyc(i) => match mctx {
+            None => Err(ResolveError::CycOutsideMutual { index: *i }),
+            Some(group_size) => {
+                if (*i as usize) < group_size {
+                    Ok(IDLType::Cyc(*i))
+                } else {
+                    Err(ResolveError::CycIndexOutOfRange {
+                        index: *i,
+                        group_size,
+                    })
+                }
+            }
+        },
         RawType::Named { fqn, args } => {
             let args_idl = args
                 .iter()
-                .map(|a| resolve_type(a, shapes))
+                .map(|a| resolve_type(a, shapes, mctx))
                 .collect::<Result<Vec<_>, _>>()?;
             match shapes.get(fqn) {
                 Some(Shape::Record) => Ok(IDLType::Record {
@@ -456,13 +540,17 @@ fn shapes_with_typars<'a>(
     map
 }
 
-fn resolve_decl(d: &RawDecl, shapes: &HashMap<String, Shape>) -> Result<UserDecl, ResolveError> {
+fn resolve_decl(
+    d: &RawDecl,
+    shapes: &HashMap<String, Shape>,
+    mctx: MutualCtx,
+) -> Result<UserDecl, ResolveError> {
     match d {
         RawDecl::Record { fqn, generics, fields } => {
             let local = shapes_with_typars(shapes, generics);
             let fields = fields
                 .iter()
-                .map(|(n, t)| Ok::<_, ResolveError>((n.clone(), resolve_type(t, &local)?)))
+                .map(|(n, t)| Ok::<_, ResolveError>((n.clone(), resolve_type(t, &local, mctx)?)))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(UserDecl::Record {
                 fqn: fqn.clone(),
@@ -481,7 +569,7 @@ fn resolve_decl(d: &RawDecl, shapes: &HashMap<String, Shape>) -> Result<UserDecl
                 .map(|(n, payload)| {
                     let payload = payload
                         .iter()
-                        .map(|t| resolve_type(t, &local))
+                        .map(|t| resolve_type(t, &local, mctx))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok::<_, ResolveError>((n.clone(), payload))
                 })
@@ -501,6 +589,25 @@ fn resolve_decl(d: &RawDecl, shapes: &HashMap<String, Shape>) -> Result<UserDecl
             generics: generics.clone(),
             members: members.clone(),
         }),
+        RawDecl::Mutual { members } => {
+            if members.len() < 2 {
+                return Err(ResolveError::MutualGroupTooSmall {
+                    size: members.len(),
+                });
+            }
+            let group_size = members.len();
+            let inner_ctx: MutualCtx = Some(group_size);
+            // Phase 6: every member's field / case types resolve with
+            // the mutual context set to the group's size so any
+            // `Cyc<i>` inside the block can be bounds-checked. Nested
+            // `mutual` blocks are caught by `parse_mutual_decl` so we
+            // don't need to guard against them here.
+            let resolved = members
+                .iter()
+                .map(|m| resolve_decl(m, shapes, inner_ctx))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(UserDecl::Mutual { members: resolved })
+        }
     }
 }
 
@@ -728,6 +835,16 @@ impl<'a> Parser<'a> {
                 return Ok(RawType::Builtin(IDLType::SelfApp(args)));
             }
             return Ok(RawType::Builtin(IDLType::Self_));
+        }
+        // Phase 6 cycle-breaker `Cyc<n>` — n is an ASCII-decimal
+        // unsigned integer (no leading zeros). Validity in scope
+        // is checked at resolve time, not parse time.
+        if self.peek_keyword("Cyc") {
+            self.expect_keyword("Cyc")?;
+            self.expect_char('<')?;
+            let n = self.parse_unsigned_int()?;
+            self.expect_char('>')?;
+            return Ok(RawType::Cyc(n));
         }
         // Nominal reference (FQN, optional generic args).
         let fqn = self.parse_fqn()?;
@@ -1001,6 +1118,7 @@ impl<'a> Parser<'a> {
                 || self.peek_keyword("variant")
                 || self.peek_keyword("resource")
                 || self.peek_keyword("flags")
+                || self.peek_keyword("mutual")
             {
                 decls.push(self.parse_nominal_decl()?);
             } else if self.peek_keyword("type") {
@@ -1065,12 +1183,68 @@ impl<'a> Parser<'a> {
             self.parse_resource_decl()
         } else if self.peek_keyword("flags") {
             self.parse_flags_decl()
+        } else if self.peek_keyword("mutual") {
+            self.parse_mutual_decl()
         } else {
             Err(ParseError::Expected {
                 at: self.pos,
                 what: "nominal decl keyword".into(),
             })
         }
+    }
+
+    /// `mutual { nominal_decl nominal_decl … }` — Phase 6 cluster.
+    /// The parser accepts any number of inner decls (including 0 or 1);
+    /// the resolver enforces "≥ 2 members" (SPEC/phase-6-mutual.md §1).
+    /// Nested `mutual` blocks are a parse error.
+    fn parse_mutual_decl(&mut self) -> Result<RawDecl, ParseError> {
+        self.expect_keyword("mutual")?;
+        self.expect_char('{')?;
+        let mut members: Vec<RawDecl> = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.peek_char() == Some('}') {
+                break;
+            }
+            if self.peek_keyword("mutual") {
+                return Err(ParseError::Expected {
+                    at: self.pos,
+                    what: "nested `mutual` blocks are not allowed".into(),
+                });
+            }
+            members.push(self.parse_nominal_decl()?);
+        }
+        self.expect_char('}')?;
+        Ok(RawDecl::Mutual { members })
+    }
+
+    /// Parse an ASCII-decimal unsigned integer with no leading sign and
+    /// no leading-zero stutter. Used by `Cyc<n>`.
+    fn parse_unsigned_int(&mut self) -> Result<u32, ParseError> {
+        self.skip_ws();
+        let start = self.pos;
+        while let Some(c) = self.peek_char() {
+            if c.is_ascii_digit() {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        if self.pos == start {
+            return Err(ParseError::Expected {
+                at: start,
+                what: "unsigned decimal integer".into(),
+            });
+        }
+        let s = std::str::from_utf8(&self.input[start..self.pos])
+            .map_err(|_| ParseError::Expected {
+                at: start,
+                what: "ASCII decimal integer".into(),
+            })?;
+        s.parse::<u32>().map_err(|_| ParseError::Expected {
+            at: start,
+            what: format!("u32 (got `{s}`)"),
+        })
     }
 
     fn parse_flags_decl(&mut self) -> Result<RawDecl, ParseError> {
@@ -1321,6 +1495,10 @@ fn raw_to_builtin(rt: RawType) -> Result<IDLType, ParseError> {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(IDLType::Record { fqn, args })
         }
+        // `Cyc<i>` here is a parser-time guess (e.g. inside `list<…>`
+        // before resolution). Carry it through verbatim; `resolve_type`
+        // re-checks scope and bounds at the full schema level.
+        RawType::Cyc(i) => Ok(IDLType::Cyc(i)),
     }
 }
 
@@ -1614,5 +1792,65 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(s.user_decls[0], UserDecl::Resource { .. }));
+    }
+
+    // ─── Phase 6: mutual_decl + Cyc<i> ─────────────────────────────
+
+    #[test]
+    fn mutual_group_basic() {
+        let s = parse(
+            "package p; interface i { mutual { \
+               variant p.Expr { lit(u64), neg(Cyc<0>), seq(Cyc<1>) }; \
+               variant p.Stmt { nop, block(list<Cyc<1>>), call(Cyc<0>) }; \
+             } func dummy() -> u8; }",
+        )
+        .unwrap();
+        let group = match &s.user_decls[0] {
+            UserDecl::Mutual { members } => members,
+            other => panic!("expected Mutual, got {other:?}"),
+        };
+        assert_eq!(group.len(), 2);
+        match &group[0] {
+            UserDecl::Variant { fqn, cases, .. } => {
+                assert_eq!(fqn, "p.Expr");
+                // neg's payload is Cyc<0>
+                let neg_payload = &cases.iter().find(|(n, _)| n == "neg").unwrap().1;
+                assert_eq!(neg_payload, &vec![IDLType::Cyc(0)]);
+            }
+            _ => panic!("expected Variant for member[0]"),
+        }
+    }
+
+    #[test]
+    fn mutual_group_singleton_rejected() {
+        let err = parse(
+            "package p; interface i { mutual { variant p.X { a, b(Cyc<0>) }; } }",
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("at least 2"), "{msg}");
+    }
+
+    #[test]
+    fn cyc_outside_mutual_rejected() {
+        let err = parse(
+            "package p; interface i { variant p.X { a, b(Cyc<0>) }; }",
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("outside any `mutual"), "{msg}");
+    }
+
+    #[test]
+    fn cyc_index_out_of_range_rejected() {
+        let err = parse(
+            "package p; interface i { mutual { \
+               variant p.A { a, b(Cyc<5>) }; \
+               variant p.B { x }; \
+             } }",
+        )
+        .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Cyc<5>"), "{msg}");
     }
 }

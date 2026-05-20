@@ -4,7 +4,8 @@
 (* are leo4-specific extensions that lower to WIT during the lowering pass.   *)
 
 document        = { package_decl | use_decl | interface_decl | world_decl
-                  | type_decl | constraint_decl | nominal_decl } ;
+                  | type_decl | constraint_decl | nominal_decl
+                  | mutual_decl } ;
 
 package_decl    = "package" , ident , [ ":" , ident ] , [ "@" , semver ] , ";" ;  (* [WIT] *)
 
@@ -12,7 +13,7 @@ use_decl        = "use" , path , [ "as" , ident ] , ";" ;                       
 
 interface_decl  = "interface" , ident , [ generic_params ] , "{" ,
                   { type_decl | func_decl | resource_decl | nominal_decl
-                  | use_decl } , "}" ;                                              (* [leo4] generic_params, nominal_decl *)
+                  | mutual_decl | use_decl } , "}" ;                                (* [leo4] generic_params, nominal_decl, mutual_decl *)
 
 world_decl      = "world" , ident , "{" , { world_item } , "}" ;                   (* [WIT] *)
 world_item      = "export" , ident , [ "(" , ident , ")" ] , ";"
@@ -38,6 +39,13 @@ nominal_variant_decl   = "variant"  , fqn , [ generic_params ] , "{" , variant_c
 nominal_enum_decl      = "enum"     , fqn , [ generic_params ] , "{" , ident , { "," , ident } , "}" , ";" ;
 nominal_resource_decl  = "resource" , fqn , [ generic_params ] , [ resource_body ] , ";" ;
 nominal_flags_decl     = "flags"    , fqn , [ generic_params ] , "{" , ident , { "," , ident } , "}" , ";" ;
+
+(* Phase 6 — Mutual recursion between nominal types (SPEC/phase-6-mutual.md §1).
+   Brackets ≥ 2 nominal decls into one recursion frame. Members reference each
+   other via the `Cyc<i>` cycle-breaker token (see `cyc_type` below) instead of
+   FQN; the index `i` is 0-based and scoped to the immediately enclosing block.
+   A singleton mutual block is a parse error — authors keep using `Self`.       *)
+mutual_decl     = "mutual" , "{" , nominal_decl , nominal_decl , { nominal_decl } , "}" ;  (* [leo4] *)
 
 generic_params  = "<" , generic_param , { "," , generic_param } , ">" ;            (* [leo4] *)
 generic_param   = type_param | value_param ;                                       (* [leo4] *)
@@ -83,7 +91,7 @@ resource_body   = "{" , { func_decl } , "}" ;
 
 type            = primitive | builtin_generic | named_type | record_type
                 | variant_type | tuple_type | flag_type | enum_type
-                | io_type | self_type ;                                            (* [leo4] io_type, self_type *)
+                | io_type | self_type | cyc_type ;                                 (* [leo4] io_type, self_type, cyc_type *)
 
 primitive       = "u8" | "u16" | "u32" | "u64"
                 | "i8" | "i16" | "i32" | "i64"
@@ -102,6 +110,12 @@ primitive       = "u8" | "u16" | "u32" | "u64"
    nested decls reset the binding. Mutual self-reference (two declarations
    naming each other) is rejected in v0; see LEO4-DESIGN.md §4.3. *)
 self_type       = "Self" , [ "<" , type , { "," , type } , ">" ] ;                 (* [leo4] *)
+
+(* Phase 6 cycle-breaker. Valid only inside a `mutual_decl` member; the
+   resolver rejects `Cyc<i>` outside any mutual block or with `i ≥ group_size`.
+   Singleton groups normalise `Cyc<0>` back to `Self` in canonical-form output. *)
+cyc_type        = "Cyc" , "<" , unsigned_int , ">" ;                               (* [leo4] *)
+unsigned_int    = digit , { digit } ;                                              (* [leo4] zero-or-more decimal digits, no sign *)
 
 builtin_generic = "list" , "<" , type , ">"
                 | "option" , "<" , type , ">"
