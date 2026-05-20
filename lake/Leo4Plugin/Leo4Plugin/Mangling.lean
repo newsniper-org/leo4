@@ -53,6 +53,11 @@ partial def mangleType : IDLType → String
   | .io t       => "I_" ++ mangleType t ++ "_i"
   | .self       => "self"
   | .selfApp args => "self_" ++ joinUnderscore (args.map mangleType) ++ "_x"
+  -- Phase 6 cycle-breaker (SPEC/phase-6-mutual.md §2): `Cyc<i>` →
+  -- `c<i>c`, where `<i>` is ASCII-decimal with no leading zeros.
+  -- Mirrors `crates/schema-idl/src/mangle.rs`'s `Cyc(i)` arm
+  -- byte-for-byte.
+  | .cyc i      => "c" ++ toString i ++ "c"
 
 /-! ## Schema hash (SPEC/mangling.md §3) -/
 
@@ -151,6 +156,11 @@ partial def idlToLeanType : IDLType → String
   | .io t           => "(IO " ++ idlToLeanType t ++ ")"
   | .self           => "_"      -- only reachable inside a nominal body
   | .selfApp _      => "_"
+  -- `Cyc<i>` mirrors `Self` / `Self<…>` for mutual groups: the Lean
+  -- wrapper template only cares about the variable's *type identity*
+  -- and the deriving handler closes the cycle through its own
+  -- `mutual ... end` block, so a wildcard suffices here.
+  | .cyc _          => "_"
 
 /-! ## Function-name mangling (SPEC/mangling.md §1) -/
 
@@ -242,6 +252,7 @@ partial def idlForm : IDLType → String
   | .io t            => "io<" ++ idlForm t ++ ">"
   | .self            => "Self"
   | .selfApp args    => "Self<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
+  | .cyc i           => "Cyc<" ++ toString i ++ ">"
 
 /-- Render the `<T0, T1>` generic-params suffix that immediately follows
 the fqn in a nominal declaration. Empty when there are no generics. -/

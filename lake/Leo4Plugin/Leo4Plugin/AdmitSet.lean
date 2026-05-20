@@ -44,6 +44,12 @@ inductive IDLType where
   /-- `Self<T₁, …, Tₙ>` — explicit substitution; mangles as `self_<…>_x`
   (SPEC/mangling.md §"Self and Self<…>"). -/
   | selfApp (args : Array IDLType)
+  /-- `Cyc<i>` — Phase 6 cycle-breaker reference to the `i`-th member of
+  the enclosing mutual group (SPEC/phase-6-mutual.md §2). `i` is 0-based
+  and scoped to the immediately enclosing `mutual { … }` block; the
+  resolver rejects `Cyc<i>` outside any group or with `i ≥ group_size`.
+  Mangles as `c<i>c`. -/
+  | cyc (i : UInt32)
   deriving Repr, Inhabited, BEq
 
 /-- A user-package nominal type declaration. The plugin discovers these by
