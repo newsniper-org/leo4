@@ -6,9 +6,11 @@ rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
+description = "Native (libloading) backend for leo4. Loads `<pkg>.leo4-shim.so`, runs the schema handshake, and dispatches into per-instantiation shim entry points. See LEO4-DESIGN.md §9.1 and ROADMAP.md Phase 5."
 
 [dependencies]
+libloading.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

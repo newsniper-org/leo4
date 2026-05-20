@@ -506,6 +506,7 @@ mod tests {
                     },
                 )],
                 ret: IDLType::F64,
+                effect: schema_idl::Effect::Sync,
             }],
         };
         let out = lower(&schema);
