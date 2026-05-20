@@ -360,10 +360,27 @@ leo4-specific extensions:
 
 ### 9.1 leo4-native
 
-- Loads a `.so`/`.dylib`/`.dll` shim produced by Lake.
+- Loads a `.so` / `.dll` shim produced by Lake (Tier 1: Linux,
+  Windows). macOS `.dylib` is **Tier 3 (best-effort)** as of
+  2026-05-20 — the loader compiles and may work, but CI does not
+  verify it and regressions on macOS are out-of-scope for v0.
 - Shim is a thin C layer over `lean.h`; the *shim* is version-locked to Lean,
   the Rust crate is not.
 - Uses `libloading` for dynamic load (lets users swap shims at runtime).
+
+### Platform tier policy
+
+| Tier | Platforms                       | Guarantee |
+|------|---------------------------------|-----------|
+| 1    | x86_64-unknown-linux-gnu        | every commit verified by CI; regressions block merge |
+| 2    | x86_64-pc-windows-msvc          | feature parity expected, periodic CI |
+| 3    | aarch64-apple-darwin / x86_64-apple-darwin | best-effort; community fixes welcome but not gating |
+
+The macOS demotion (2026-05-20) was a scope-cut decision: the
+canonical-ABI shim, the `LeanMarshal` derivation handler, and the
+plugin emit path are all platform-agnostic in code, so the demotion
+only changes which platforms appear in the exit criteria and CI
+matrix, not the source.
 
 ### 9.2 leo4-wasm
 

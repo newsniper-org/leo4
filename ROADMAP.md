@@ -231,8 +231,9 @@ Lake plugin and linked into a shared library that
   - Shim depends on `lean.h` (the *only* place we touch it — Rust
     side stays free of `lean.h`).
 - Lake plugin drives `leanc` (or `cc` with Lean's compile flags) to
-  produce `<pkg>.leo4-shim.so` (Linux), `.dylib` (macOS), `.dll`
-  (Windows). Atomic emission per SPEC/handshake.md §"Atomic Emission".
+  produce `<pkg>.leo4-shim.so` (Linux), `.dll` (Windows), and — as
+  Tier 3, best-effort — `.dylib` (macOS). Atomic emission per
+  `SPEC/handshake.md §"Atomic Emission"`.
 - `crates/leo4-native/`: full implementation — `Lean::init`,
   `Lean::scope`, `Arena<'a>`, `LeanRef<'a, T>`. Loads
   `<pkg>.leo4-shim.so` via `libloading`, calls `leo4_handshake` first,
@@ -257,11 +258,13 @@ Lake plugin and linked into a shared library that
 **Exit criteria:**
 
 - `examples/01-hello/` and `examples/02-roundtrip/` both run end to
-  end on Linux + macOS.
+  end on **Linux** (Tier 1). macOS was demoted to Tier 3 on
+  2026-05-20: builds may still produce a `.dylib`, but neither this
+  exit criterion nor the CI matrix requires it.
 - `cargo test` covers handshake-mismatch detection (mutate the
   handshake file, expect either link-time or runtime failure with
   `LeanError.handshakeMismatch`).
-- `just test` runs all sides green.
+- `just test` runs all sides green on Linux.
 
 **Dependencies:** Phase 2 (mangling), Phase 4 (error paths). Phase 3
 (WIT) optional.

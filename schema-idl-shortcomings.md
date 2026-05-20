@@ -31,7 +31,7 @@
 | 9  | leo4-plugin   | `walkUserDecl` generic-aware (param names, FVar→placeholder subst) | no             | landed 2026-05-20 in working tree (not yet committed) |
 | 10 | leo4-plugin   | `idlToLeanType` renders nominal generic application                | no             | landed 2026-05-20 in working tree (not yet committed) |
 | 11 | leo4-plugin   | Admit-set guard against HK type-vars (LEO4-DESIGN §4.2 check #5)   | yes (semantic) | landed 2026-05-20 (AdmitSet.lean's user-inductive enumeration now skips `iv.numParams > 0` heads) |
-| 12 | leo4-plugin   | Variant case with non-Self payload (W7-2d-iii)                     | no             | open |
+| 12 | leo4-plugin   | Variant case with non-Self payload (W7-2d-iii)                     | no             | F-step minimum viable landed 2026-05-20: 0-field / all-Self / 1-field (Self ‖ scalar ‖ string) supported, per-instantiation helper emit; multi-field mixed / composite-payload variants still stub |
 
 "Status" legend:
 - **open** — nothing blocks landing it; just hasn't been prioritised.

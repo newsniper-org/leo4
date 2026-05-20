@@ -1110,23 +1110,72 @@ handful of decls; if real consumers ship hundreds, swap in a
 private def findUserDecl (decls : Array UserDecl) (fqn : String) : Option UserDecl :=
   decls.find? fun d => d.fqn == fqn
 
-/-- Predicate: every case of the variant has either zero fields or
-fields that are all `Self`. The W7-2d-ii helper-function emitter only
-supports this shape; anything richer falls back to the unimplemented
-stub. -/
-private def variantIsSelfOnly (cases : Array (Name × Array IDLType)) : Bool :=
-  cases.all fun (_, fields) =>
-    fields.all fun t => match t with | .self => true | _ => false
+/-- True iff the given variant case is in the F-step "minimum-viable"
+shape that `renderVariantHelpers` knows how to emit:
+
+  * zero fields                       — `lean_box(disc)`
+  * all-Self N fields                 — recursive helper call
+  * single field of `Self`            — recursive helper call (subsumed above)
+  * single field of a scalar          — wire-format memcpy + ctor scalar slot
+  * single field of `string`          — `leo4_decode_string` + ctor object slot
+
+Everything richer (multi-field with non-Self payloads, single
+composite like list/option/record, etc.) still falls back to the
+LEO4_ERR_UNIMPLEMENTED stub. -/
+private def variantCaseSupported (fields : Array IDLType) : Bool :=
+  if fields.isEmpty then true
+  else if fields.all (fun t => match t with | .self => true | _ => false) then true
+  else if fields.size == 1 then
+    match fields[0]! with
+    | .string => true
+    | t       => (scalarCType t).isSome
+  else false
+
+private def variantAllCasesSupported (cases : Array (Name × Array IDLType)) : Bool :=
+  cases.all fun (_, fields) => variantCaseSupported fields
+
+/-- C-safe suffix encoding for a list of `IDLType` arguments. Reuses
+the leo4-mangling type encoding (`SPEC/mangling.md` §2) so the
+generated helper name is deterministic, byte-identical to what the
+Rust side would compute, and unique per instantiation. -/
+private def variantHelperSuffix (fqn : String) (args : Array IDLType) : String :=
+  let safe := fqnSeg fqn
+  if args.isEmpty then safe
+  else safe ++ "_" ++ String.intercalate "_" (args.toList.map mangleType)
+
+/-- Classification of a variant case for the F-step helper emitter. -/
+private inductive CaseKind
+  | empty                       -- 0 fields
+  | allSelf (n : Nat)           -- n Self fields (subsumes single Self)
+  | scalar (c : String) (sz : Nat) (kind : String)  -- single scalar (cType, wire size, ctor accessor suffix)
+  | str                         -- single `string`
+deriving Inhabited
+
+private def classifyCase (fields : Array IDLType) : Option CaseKind :=
+  if fields.isEmpty then some .empty
+  else if fields.all (fun t => match t with | .self => true | _ => false) then
+    some (.allSelf fields.size)
+  else if h : fields.size = 1 then
+    match fields[0] with
+    | .string => some .str
+    | t       =>
+      match scalarCType t with
+      | some sc => some (.scalar sc.c sc.size (scalarCtorKind sc.c))
+      | none    => none
+  else none
 
 /-- Emit forward decls + definitions for the self-recursive
-encoder/decoder helpers of one variant declaration. Returns `none`
-when the variant doesn't fit the W7-2d-ii restriction. -/
+encoder/decoder helpers of one variant declaration. F-step shape
+predicate above (`variantCaseSupported`) governs which variants
+qualify; `none` is returned for anything richer (mixed-field
+payload with non-Self entries, single composite field, etc.). -/
 private def renderVariantHelpers
-    (fqn : String) (cases : Array (Name × Array IDLType)) : Option String := Id.run do
-  if !variantIsSelfOnly cases then return none
-  let safe := fqnSeg fqn
-  let dec := s!"leo4_dec_{safe}"
-  let enc := s!"leo4_enc_{safe}"
+    (fqn : String) (args : Array IDLType)
+    (cases : Array (Name × Array IDLType)) : Option String := Id.run do
+  if !variantAllCasesSupported cases then return none
+  let suffix := variantHelperSuffix fqn args
+  let dec := s!"leo4_dec_{suffix}"
+  let enc := s!"leo4_enc_{suffix}"
   let lb := "{"
   let rb := "}"
   -- Decoder.
@@ -1137,14 +1186,14 @@ private def renderVariantHelpers
     "    uint8_t disc = buf[*off]; *off += 1u;\n"
   for i in [0 : cases.size] do
     let (_, fields) := cases[i]!
-    let n := fields.size
+    let kind := (classifyCase fields).get!
     decBody := decBody ++ s!"    if (disc == {i}u) " ++ lb ++ "\n"
-    if n == 0 then
+    match kind with
+    | .empty =>
       decBody := decBody ++ s!"        *out = lean_box({i});\n" ++
                 "        return LEO4_OK;\n" ++
                 "    " ++ rb ++ "\n"
-    else
-      -- Recursive Self payloads.
+    | .allSelf n =>
       let mut accCleanup : String := ""
       for j in [0 : n] do
         decBody := decBody ++ s!"        lean_object *f{j};\n" ++
@@ -1157,6 +1206,25 @@ private def renderVariantHelpers
       decBody := decBody ++ "        *out = r;\n" ++
                 "        return LEO4_OK;\n" ++
                 "    " ++ rb ++ "\n"
+    | .scalar c sz ctorKind =>
+      decBody := decBody ++
+        s!"        if (buf_len - *off < {sz}u) return LEO4_ERR_DECODE;\n" ++
+        s!"        {c} f0; leo4_memcpy(&f0, buf + *off, {sz}); *off += {sz}u;\n" ++
+        s!"        lean_object *r = lean_alloc_ctor({i}, 0, {sz});\n" ++
+        s!"        lean_ctor_set_{ctorKind}(r, 0, f0);\n" ++
+        "        *out = r;\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
+    | .str =>
+      decBody := decBody ++
+        s!"        lean_object *f0;\n" ++
+        s!"        " ++ lb ++ s!" int32_t st = leo4_decode_string(buf, buf_len, off, &f0);\n" ++
+        s!"          if (st) return st; " ++ rb ++ "\n" ++
+        s!"        lean_object *r = lean_alloc_ctor({i}, 1, 0);\n" ++
+        s!"        lean_ctor_set(r, 0, f0);\n" ++
+        "        *out = r;\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
   decBody := decBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
   -- Encoder.
   let mut encBody : String :=
@@ -1166,18 +1234,34 @@ private def renderVariantHelpers
     "    buf[*off] = (uint8_t)tag; *off += 1u;\n"
   for i in [0 : cases.size] do
     let (_, fields) := cases[i]!
-    let n := fields.size
+    let kind := (classifyCase fields).get!
     encBody := encBody ++ s!"    if (tag == {i}u) " ++ lb ++ "\n"
-    if n == 0 then
+    match kind with
+    | .empty =>
       encBody := encBody ++ "        return LEO4_OK;\n" ++
                 "    " ++ rb ++ "\n"
-    else
+    | .allSelf n =>
       for j in [0 : n] do
         encBody := encBody ++ s!"        lean_object *f{j} = lean_ctor_get(v, {j});\n" ++
           s!"        " ++ lb ++ s!" int32_t st = {enc}(f{j}, buf, cap, off, needed_out);\n" ++
           s!"          if (st) return st; " ++ rb ++ "\n"
       encBody := encBody ++ "        return LEO4_OK;\n" ++
                 "    " ++ rb ++ "\n"
+    | .scalar c sz ctorKind =>
+      encBody := encBody ++
+        s!"        if (cap - *off < {sz}u) " ++ lb ++ s!" *needed_out = *off + {sz}u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+        s!"        {c} f0 = lean_ctor_get_{ctorKind}(v, 0);\n" ++
+        s!"        leo4_memcpy(buf + *off, &f0, {sz}); *off += {sz}u;\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
+    | .str =>
+      encBody := encBody ++
+        s!"        lean_object *f0 = lean_ctor_get(v, 0);\n" ++
+        "        size_t need = leo4_encoded_size_string(f0);\n" ++
+        "        if (cap - *off < need) " ++ lb ++ " *needed_out = *off + need; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+        "        leo4_write_string(f0, buf, off);\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
   encBody := encBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
   return some (
     s!"static int32_t {dec}(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out);\n" ++
@@ -1185,14 +1269,16 @@ private def renderVariantHelpers
     "\n" ++ decBody ++ "\n" ++ encBody ++ "\n"
   )
 
-/-- `variant V` per SPEC §9, restricted to the W7-2d-ii shape
-(self-only payloads). Delegates to the per-variant
-`leo4_dec_<safe>` / `leo4_enc_<safe>` helpers emitted at the
-translation-unit level. -/
-private def variantHandler (fqn : String) : TyHandler :=
-  let safe := fqnSeg fqn
-  let dec := s!"leo4_dec_{safe}"
-  let enc := s!"leo4_enc_{safe}"
+/-- `variant V` per SPEC §9, with F-step shape support. Delegates
+to the per-instantiation `leo4_dec_<safe-fqn>_<args-mangle>` /
+`leo4_enc_<safe-fqn>_<args-mangle>` helpers emitted at the
+translation-unit level. Each (fqn, args) tuple gets its own
+helper pair so substituted case payloads (different at each
+instantiation) can specialise. -/
+private def variantHandler (fqn : String) (args : Array IDLType) : TyHandler :=
+  let suffix := variantHelperSuffix fqn args
+  let dec := s!"leo4_dec_{suffix}"
+  let enc := s!"leo4_enc_{suffix}"
   let lb := "{"
   let rb := "}"
   { cType        := "lean_object *"
@@ -1274,11 +1360,11 @@ private partial def handlerFor (userDecls : Array UserDecl) : IDLType → Option
         | some (.variant _ generics cases) =>
           let env ← Subst.mkEnv generics args
           -- After substitution, each case's payload may have changed
-          -- shape — check the self-only restriction on the substituted
-          -- form, not the original.
+          -- shape — check support against the substituted form, not
+          -- the original.
           let cases' := cases.map fun (n, fs) => (n, fs.map (Subst.substIDL env))
-          if !variantIsSelfOnly cases' then none
-          else some (variantHandler fqn)
+          if !variantAllCasesSupported cases' then none
+          else some (variantHandler fqn args)
         | _ => none
       | _      => none
 
@@ -1452,16 +1538,47 @@ def renderShimSource
     "    *off += plen;\n" ++
     "}\n" ++
     "\n"
-  -- Per-variant helper function pair (W7-2d-ii). Emitted at TU scope
-  -- so self-recursive payloads can call back into themselves. Variants
-  -- whose cases mix non-Self payloads with Self fall through to the
-  -- LEO4_ERR_UNIMPLEMENTED entry-point stub for now.
+  -- Per-(variant decl × generic instantiation) helper function pair
+  -- (W7-2d-ii + F-step generalisation). Each (fqn, args) pair gets
+  -- one helper, so substituted case payloads — different at each
+  -- instantiation of a generic variant — get specialised emit.
+  -- Variant instantiations are collected by walking every entry
+  -- point's parameter / return IDLType tree and recording the
+  -- unique (fqn, args) tuples encountered.
+  let rec collectVariants : IDLType → Array (String × Array IDLType) → Array (String × Array IDLType)
+    | t, acc =>
+      let acc := match t with
+        | .variant fqn args =>
+          if acc.any (fun (f, a) => f == fqn && a == args) then acc
+          else acc.push (fqn, args)
+        | _ => acc
+      match t with
+      | .variant _ args | .record _ args | .resource _ args | .selfApp args =>
+        args.foldl (init := acc) (fun a x => collectVariants x a)
+      | .list inner | .option inner | .io inner =>
+        collectVariants inner acc
+      | .result tOk tErr =>
+        let acc := collectVariants tOk acc
+        match tErr with
+        | some e => collectVariants e acc
+        | none   => acc
+      | .tuple ts => ts.foldl (init := acc) (fun a x => collectVariants x a)
+      | _ => acc
+  let mut variantInsts : Array (String × Array IDLType) := #[]
+  for a in analyses do
+    for (_gargs, params, ret) in a.resolved do
+      for p in params do variantInsts := collectVariants p.encoded variantInsts
+      variantInsts := collectVariants ret variantInsts
   let mut variantHelpers : String := ""
-  for d in userDecls do
-    match d with
-    | .variant fqn _ cases =>
-      if let some hs := renderVariantHelpers fqn cases then
-        variantHelpers := variantHelpers ++ hs
+  for (fqn, args) in variantInsts do
+    match findUserDecl userDecls fqn with
+    | some (.variant _ generics cases) =>
+      match Subst.mkEnv generics args with
+      | some env =>
+        let cases' := cases.map fun (n, fs) => (n, fs.map (Subst.substIDL env))
+        if let some hs := renderVariantHelpers fqn args cases' then
+          variantHelpers := variantHelpers ++ hs
+      | none => ()
     | _ => ()
   let banner := banner ++ variantHelpers
   let mut body := ""

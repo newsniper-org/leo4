@@ -226,10 +226,19 @@ contains:
 
 The matrix is a fallback path against GitHub-Actions outages — the
 same `just test` ladder runs locally, and any divergence between
-local-container output and GitHub Actions output is a real bug. Apple
-Silicon coverage via `tart` is pencilled in for when Mac hardware
-becomes available; until then, macOS verification rides on
-GitHub-hosted `macos-26` runners.
+local-container output and GitHub Actions output is a real bug.
+
+### Platform tiers (2026-05-20)
+
+| Tier | Platforms | Guarantee |
+|------|-----------|-----------|
+| 1    | x86_64 Linux (glibc)              | every commit, every matrix entry must pass |
+| 2    | x86_64 Windows                    | feature parity, periodic CI |
+| 3    | macOS (Apple Silicon / Intel)     | best-effort; not gating, no CI |
+
+macOS dropped from Tier 1 to Tier 3 on 2026-05-20 — see
+`LEO4-DESIGN.md §9.1` for rationale. The code paths remain
+platform-agnostic; only the test/exit-criteria scope shrunk.
 
 ## License
 
