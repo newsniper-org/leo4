@@ -70,6 +70,13 @@ structure EmitBundle where
   `initialize_<Module>` symbol to dlsym before any shim entry point
   is called. (P5-a₂ wires this through to the Rust loader.) -/
   targetModule    : String
+  /-- Linker-visible `initialize_*` symbol emitted by `lean -c` for
+  the auto-generated wrapper file. Loading it (one call from
+  leo4-native) transitively initialises `initialize_Init` and the
+  user package's `initialize_<targetModule>`, so the loader doesn't
+  need to know either of those individually. Computed by the plugin
+  from the wrapper file's stem via `manglerLeanModuleName`. -/
+  wrapperInitSymbol : String
   schemaHash      : Hash
   /-- `lean-toolchain` file contents, informational. -/
   leanToolchain   : String
@@ -143,6 +150,7 @@ private def handshakeJson (b : EmitBundle) : Json :=
     ("version",             Json.num (1 : Int)),
     ("package",             Json.str b.package),
     ("target_module",       Json.str b.targetModule),
+    ("wrapper_init_symbol", Json.str b.wrapperInitSymbol),
     ("schema_hash",         Json.str b.schemaHash.toBase32lc),
     ("schema_hash_bytes",   Json.str b.schemaHash.toHex),
     ("abi_version",         Json.num (1 : Int)),

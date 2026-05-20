@@ -147,10 +147,27 @@ private def runOrThrow (cmd : String) (args : Array String) : IO Unit := do
 /-- Phase 1: compile the auto-emitted wrapper `.lean` to a `.c` file
 via `lake env lean -c`. The output path is `wrapperSrc` with its
 `.lean` extension swapped for `.c` (so a wrapper at
-`<pkg>.leo4-exports.lean` produces `<pkg>.leo4-exports.c`). -/
+`<pkg>.leo4-exports.lean` produces `<pkg>.leo4-exports.c`).
+
+P5-a₃-β (2026-05-20): we pass `--root=<wrapper-dir>` so that the
+Lean compiler derives the wrapper's *module name* from
+`<wrapper-basename>` (e.g. `leo4_sample.leo4-exports`) rather than
+from the absolute path to the file. The plugin then computes the
+emitted `initialize_*` symbol from that deterministic module name
+and stores it on the handshake JSON so the loader can dlsym it
+without knowing where on disk the build happened. -/
 def compileWrapperToC (cfg : BuildCfg) : IO System.FilePath := do
   let outC := cfg.wrapperSrc.withExtension "c"
-  runOrThrow "lake" #["env", "lean", "-c", outC.toString, cfg.wrapperSrc.toString]
+  let rootDir : String :=
+    match cfg.wrapperSrc.parent with
+    | some p => p.toString
+    | none   => "."
+  runOrThrow "lake" #[
+    "env", "lean",
+    "-c", outC.toString,
+    "--root=" ++ rootDir,
+    cfg.wrapperSrc.toString
+  ]
   return outC
 
 /-- Phase 2 (generic): compile any `.c` source to a `.o` next to it,

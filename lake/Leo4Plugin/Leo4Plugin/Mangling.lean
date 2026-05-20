@@ -162,6 +162,30 @@ identifier and rejects dashes. -/
 def normalizePackageSegment (pkg : String) : String :=
   (pkg.replace ":" "_").replace "-" "_"
 
+/-- Lean's C-identifier mangling rule for module names (empirically
+determined from the names of `initialize_*` symbols `lean -c` emits):
+alphanumerics are preserved, `_` doubles to `__`, and every other
+character is encoded as `_x<lowercase-2-digit-hex-codepoint>`. So:
+
+    "leo4_sample.leo4-exports"
+       → "leo4" "__" "sample" "_x2e" "leo4" "_x2d" "exports"
+       = "leo4__sample_x2eleo4_x2dexports"
+
+Used by the plugin to compute the wrapper module's `initialize_*`
+symbol name so the Rust loader can dlsym it deterministically. -/
+def manglerLeanModuleName (s : String) : String :=
+  s.foldl (init := "") fun acc c =>
+    if c.isAlpha || c.isDigit then acc.push c
+    else if c == '_' then acc ++ "__"
+    else
+      let n := c.toNat
+      let hi := n / 16
+      let lo := n % 16
+      let hex (d : Nat) : Char :=
+        if d < 10 then Char.ofNat (d + 0x30)        -- '0' + d
+        else Char.ofNat (d - 10 + 0x61)              -- 'a' + (d-10)
+      acc ++ "_x" ++ String.singleton (hex hi) ++ String.singleton (hex lo)
+
 /-- Full mangled name. See `SPEC/mangling.md` §1. -/
 def mangle
     (pkg : String) (iface : String) (fname : String)

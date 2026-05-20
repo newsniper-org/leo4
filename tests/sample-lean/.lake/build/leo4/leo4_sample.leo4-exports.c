@@ -1,5 +1,5 @@
 // Lean compiler output
-// Module: tests.«sample-lean».«.lake».build.leo4.«leo4_sample.leo4-exports»
+// Module: «leo4_sample.leo4-exports»
 // Imports: public import Init public import Sample
 #include <lean/lean.h>
 #if defined(__clang__)
@@ -1812,7 +1812,7 @@ return x_4;
 lean_object* initialize_Init(uint8_t builtin);
 lean_object* initialize_leo4_x2dsample_Sample(uint8_t builtin);
 static bool _G_initialized = false;
-LEAN_EXPORT lean_object* initialize_tests_sample_x2dlean_00_x2elake_build_leo4_leo4__sample_x2eleo4_x2dexports(uint8_t builtin) {
+LEAN_EXPORT lean_object* initialize_leo4__sample_x2eleo4_x2dexports(uint8_t builtin) {
 lean_object * res;
 if (_G_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_initialized = true;

@@ -1731,9 +1731,18 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
       function_count := analyses.size
       resource_count := resourceCount }
 
+  -- Wrapper init symbol: file stem of the emitted wrapper, run through
+  -- Lean's C-identifier escape rule. The wrapper file is
+  -- `<normalizedPkg>.leo4-exports.lean` (emitted later in this
+  -- function, but the path is deterministic so we compute the symbol
+  -- name up-front and attach it to the handshake bundle).
+  let wrapperInitSymbol :=
+    let stemForMangle := s!"{normalizePackageSegment cfg.pkg}.leo4-exports"
+    s!"initialize_{Leo4Plugin.manglerLeanModuleName stemForMangle}"
   let bundle : Emit.EmitBundle := {
     package            := cfg.pkg
     targetModule       := cfg.target.toString
+    wrapperInitSymbol  := wrapperInitSymbol
     schemaHash         := schemaHash
     leanToolchain      := ← findLeanToolchain
     pluginVersion      := pluginVersion

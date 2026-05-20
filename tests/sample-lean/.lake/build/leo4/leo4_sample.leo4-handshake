@@ -1,4 +1,5 @@
-{"version": 1,
+{"wrapper_init_symbol": "initialize_leo4__sample_x2eleo4_x2dexports",
+ "version": 1,
  "target_module": "Sample",
  "schema_hash_bytes": "e01f4393e6cd6799",
  "schema_hash": "4apuhe7gzvtzs",
@@ -6,7 +7,7 @@
  "leo4_plugin_version": "0.1.0",
  "lean_toolchain": "leanprover/lean4:v4.29.1",
  "interfaces": [{"resource_count": 1, "name": "Sample", "function_count": 18}],
- "emitted_at": "2026-05-20T02:21:38Z",
+ "emitted_at": "2026-05-20T02:57:40Z",
  "constraint_universe":
  {"scalar":
   ["u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64"],
