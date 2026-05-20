@@ -273,6 +273,15 @@ fn render_user_decl(d: &UserDecl, needs: &mut BTreeSet<SideAlias>) -> String {
             let name = kebab_case(fqn);
             format!("  resource {name};")
         }
+        UserDecl::Flags { fqn, members, .. } => {
+            let name = kebab_case(fqn);
+            let body = members
+                .iter()
+                .map(|m| kebab_case(m))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("  flags {name} {{ {body} }}")
+        }
     }
 }
 

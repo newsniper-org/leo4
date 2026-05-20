@@ -62,6 +62,15 @@ pub enum UserDecl {
         fqn: String,
         generics: Vec<String>,
     },
+    /// `flags F<…> { read, write, exec }` — bitfield-of-named-flags.
+    /// SPEC/idl-grammar.ebnf line 47. The pre-2026-05-20 parser
+    /// collapsed `flags` declarations onto `UserDecl::Enum`, losing the
+    /// flags/enum distinction; this dedicated variant restores it.
+    Flags {
+        fqn: String,
+        generics: Vec<String>,
+        members: Vec<String>,
+    },
 }
 
 impl UserDecl {
@@ -71,9 +80,24 @@ impl UserDecl {
             UserDecl::Record { fqn, .. }
             | UserDecl::Enum { fqn, .. }
             | UserDecl::Variant { fqn, .. }
-            | UserDecl::Resource { fqn, .. } => fqn,
+            | UserDecl::Resource { fqn, .. }
+            | UserDecl::Flags { fqn, .. } => fqn,
         }
     }
+}
+
+/// Function-level effect (`SPEC/mangling.md` D-i 2026-05-19,
+/// `LEO4-DESIGN.md` D4). Async / streaming are *boundary-only*
+/// modifiers; they never appear as `IDLType` variants inside record /
+/// variant / list payloads. The parser desugars
+/// `func foo(…) -> future<T>;` and `… -> stream<T>;` into
+/// `FuncDecl { effect: Async / Stream, ret: T }`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Effect {
+    #[default]
+    Sync,
+    Async,
+    Stream,
 }
 
 /// A function exported across the boundary, post-resolution.
@@ -82,6 +106,10 @@ pub struct FuncDecl {
     pub name: String,
     pub params: Vec<(String, IDLType)>,
     pub ret: IDLType,
+    /// Function-level effect; defaults to `Sync` for pre-Phase-7
+    /// code paths. Phase 7 wires this into the shim emitter.
+    #[allow(unused)]
+    pub effect: Effect,
 }
 
 /// A fully-resolved IDL schema. `parse::parse(...)` returns one of these.

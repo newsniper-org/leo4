@@ -20,8 +20,8 @@
 
 | #  | Owner         | Title                                                              | Grammar impact | Status   |
 |----|---------------|--------------------------------------------------------------------|----------------|----------|
-| 1  | schema-idl    | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | open     |
-| 2  | schema-idl    | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | deferred |
+| 1  | schema-idl    | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | Rust side landed 2026-05-20; Lean `UserDecl.flagsT` pending |
+| 2  | schema-idl    | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | AST slot landed 2026-05-20; parser desugaring waits for Phase 7 entry |
 | 3  | schema-idl    | `ConstraintExpr<Atom>` typed AST missing (D-ii decided 2026-05-19) | yes            | deferred |
 | 4  | schema-idl    | Generic type-parameter substitution helper                         | no             | landed 2026-05-20 (Rust + Lean mirror) |
 | 5  | schema-idl    | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
@@ -30,7 +30,7 @@
 | 8  | leo4-runtime  | `deriving LeanMarshal` generic-inductive support                   | no             | landed 2026-05-20 in working tree (not yet committed) |
 | 9  | leo4-plugin   | `walkUserDecl` generic-aware (param names, FVar→placeholder subst) | no             | landed 2026-05-20 in working tree (not yet committed) |
 | 10 | leo4-plugin   | `idlToLeanType` renders nominal generic application                | no             | landed 2026-05-20 in working tree (not yet committed) |
-| 11 | leo4-plugin   | Admit-set guard against HK type-vars (LEO4-DESIGN §4.2 check #5)   | yes (semantic) | **open, blocking #4 demo on generic exports** |
+| 11 | leo4-plugin   | Admit-set guard against HK type-vars (LEO4-DESIGN §4.2 check #5)   | yes (semantic) | landed 2026-05-20 (AdmitSet.lean's user-inductive enumeration now skips `iv.numParams > 0` heads) |
 | 12 | leo4-plugin   | Variant case with non-Self payload (W7-2d-iii)                     | no             | open |
 
 "Status" legend:

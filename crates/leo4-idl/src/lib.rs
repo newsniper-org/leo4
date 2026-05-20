@@ -35,7 +35,7 @@ pub mod wit;
 pub use schema_idl::{
     collapse_whitespace, fqn_seg, idl_form, instantiate_record, instantiate_variant,
     mangle, mangle_type, parse, parse_raw, render_canonical, resolve, substitute,
-    user_decl_to_idl, FuncDecl, Hash, IDLType, ParseError, RawSchema, ResolveError,
+    user_decl_to_idl, Effect, FuncDecl, Hash, IDLType, ParseError, RawSchema, ResolveError,
     Schema, UserDecl,
 };
 

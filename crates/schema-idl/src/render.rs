@@ -24,7 +24,10 @@ fn ws(pretty: bool) -> (&'static str, &'static str) {
 /// resources (lex by FQN), then functions (lex by name).
 fn decl_band(d: &UserDecl) -> u8 {
     match d {
-        UserDecl::Record { .. } | UserDecl::Enum { .. } | UserDecl::Variant { .. } => 0,
+        UserDecl::Record { .. }
+        | UserDecl::Enum { .. }
+        | UserDecl::Variant { .. }
+        | UserDecl::Flags { .. } => 0,
         UserDecl::Resource { .. } => 1,
     }
 }
@@ -125,6 +128,13 @@ pub fn user_decl_to_idl(d: &UserDecl) -> String {
         }
         UserDecl::Resource { fqn, generics } => {
             format!("resource {fqn}{}", generic_header(generics))
+        }
+        UserDecl::Flags { fqn, generics, members } => {
+            format!(
+                "flags {fqn}{} {{ {} }}",
+                generic_header(generics),
+                members.join(", ")
+            )
         }
     }
 }
@@ -256,6 +266,7 @@ mod tests {
                 },
             )],
             ret: IDLType::F64,
+            effect: crate::Effect::Sync,
         }];
         let c1 = render_canonical(pkg, iface, &user_decls, &funcs, false);
         let c2 = render_canonical(pkg, iface, &user_decls, &funcs, false);

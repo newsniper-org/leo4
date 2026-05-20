@@ -396,14 +396,24 @@ def classAdmitSet (env : Environment) (cls : Name) : Array IDLType := Id.run do
         -- Pick the right shape from the inductive value.
         match env.find? tName with
         | some (.inductInfo iv) =>
-          let idl : IDLType :=
-            if iv.ctors.length == 1 then .record tName.toString #[]
-            else if iv.ctors.all (fun cname =>
-                     match env.find? cname with
-                     | some (.ctorInfo cv) => cv.numFields == 0
-                     | _ => false) then .enumT tName.toString
-            else .variant tName.toString #[]
-          unless acc.contains idl do acc := acc.push idl
+          -- LEO4-DESIGN §4.2 mandatory check #5: higher-kinded
+          -- (`numParams > 0`) inductives are NOT type-instances on
+          -- their own. Adding `IDLType.record fqn #[]` for a generic
+          -- `Foo : Type → Type` would lower to a wrapper that treats
+          -- `Foo` as `Type`, then the elaborator would see
+          -- `(Foo : Type)` and reject the application. Such admit-set
+          -- members must come from an explicit `oneof` constraint
+          -- that pins concrete type arguments, not from this
+          -- closed-world unconstrained enumeration. Skip them here.
+          unless iv.numParams > 0 do
+            let idl : IDLType :=
+              if iv.ctors.length == 1 then .record tName.toString #[]
+              else if iv.ctors.all (fun cname =>
+                       match env.find? cname with
+                       | some (.ctorInfo cv) => cv.numFields == 0
+                       | _ => false) then .enumT tName.toString
+              else .variant tName.toString #[]
+            unless acc.contains idl do acc := acc.push idl
         | _ => pure ()
   acc
 

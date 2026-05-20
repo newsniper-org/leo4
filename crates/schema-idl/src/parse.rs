@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::idl::{FuncDecl, IDLType, Schema, UserDecl};
+use crate::idl::{Effect, FuncDecl, IDLType, Schema, UserDecl};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
@@ -50,16 +50,29 @@ impl std::error::Error for ParseError {}
 pub enum ResolveError {
     UnknownNominal { fqn: String },
     EnumWithArgs { fqn: String },
+    FlagsWithArgs { fqn: String },
+    /// `future<T>` / `stream<T>` only valid at function-boundary
+    /// position (D-i 2026-05-19). Found inside a payload type.
+    EffectInPayload { kind: &'static str },
 }
 
 impl fmt::Display for ResolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ResolveError::UnknownNominal { fqn } => {
-                write!(f, "unknown nominal type `{fqn}` (no record/enum/variant/resource decl)")
+                write!(f, "unknown nominal type `{fqn}` (no record/enum/variant/resource/flags decl)")
             }
             ResolveError::EnumWithArgs { fqn } => {
                 write!(f, "enum `{fqn}` cannot take generic arguments")
+            }
+            ResolveError::FlagsWithArgs { fqn } => {
+                write!(f, "flags `{fqn}` cannot take generic arguments")
+            }
+            ResolveError::EffectInPayload { kind } => {
+                write!(
+                    f,
+                    "`{kind}<T>` is only valid at a function's return position, not inside a payload"
+                )
             }
         }
     }
@@ -97,6 +110,11 @@ pub enum RawDecl {
         fqn: String,
         generics: Vec<String>,
     },
+    Flags {
+        fqn: String,
+        generics: Vec<String>,
+        members: Vec<String>,
+    },
 }
 
 impl RawDecl {
@@ -105,7 +123,8 @@ impl RawDecl {
             RawDecl::Record { fqn, .. }
             | RawDecl::Enum { fqn, .. }
             | RawDecl::Variant { fqn, .. }
-            | RawDecl::Resource { fqn, .. } => fqn,
+            | RawDecl::Resource { fqn, .. }
+            | RawDecl::Flags { fqn, .. } => fqn,
         }
     }
 }
@@ -331,6 +350,12 @@ pub fn resolve(raw: &RawSchema) -> Result<Schema, ResolveError> {
                 name: f.name.clone(),
                 params,
                 ret,
+                // D-i 2026-05-19: effect is a function-level flag,
+                // not an IDLType variant. v0 parser doesn't yet
+                // desugar `future<T>` / `stream<T>` — those route
+                // through the unknown-nominal path. Phase 7 entry
+                // wires this slot to the desugarer.
+                effect: Effect::Sync,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -348,6 +373,7 @@ enum Shape {
     Enum,
     Variant,
     Resource,
+    Flags,
     /// In-scope generic type parameter of the enclosing nominal decl.
     /// `resolve_decl` injects entries of this shape into a local copy
     /// of the shape map before walking field / case types so a bare
@@ -366,6 +392,7 @@ fn build_shape_map(decls: &[RawDecl]) -> HashMap<String, Shape> {
             RawDecl::Enum { .. } => Shape::Enum,
             RawDecl::Variant { .. } => Shape::Variant,
             RawDecl::Resource { .. } => Shape::Resource,
+            RawDecl::Flags { .. } => Shape::Flags,
         };
         map.insert(d.fqn().to_string(), s);
     }
@@ -399,6 +426,12 @@ fn resolve_type(t: &RawType, shapes: &HashMap<String, Shape>) -> Result<IDLType,
                     fqn: fqn.clone(),
                     args: args_idl,
                 }),
+                Some(Shape::Flags) => {
+                    if !args_idl.is_empty() {
+                        return Err(ResolveError::FlagsWithArgs { fqn: fqn.clone() });
+                    }
+                    Ok(IDLType::Flags(fqn.clone()))
+                }
                 Some(Shape::TypeVar) => Ok(IDLType::Record {
                     fqn: fqn.clone(),
                     args: vec![],
@@ -462,6 +495,11 @@ fn resolve_decl(d: &RawDecl, shapes: &HashMap<String, Shape>) -> Result<UserDecl
         RawDecl::Resource { fqn, generics } => Ok(UserDecl::Resource {
             fqn: fqn.clone(),
             generics: generics.clone(),
+        }),
+        RawDecl::Flags { fqn, generics, members } => Ok(UserDecl::Flags {
+            fqn: fqn.clone(),
+            generics: generics.clone(),
+            members: members.clone(),
         }),
     }
 }
@@ -1038,15 +1076,15 @@ impl<'a> Parser<'a> {
     fn parse_flags_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("flags")?;
         let fqn = self.parse_fqn()?;
-        let _generics = self.parse_optional_generic_params()?;
+        let generics = self.parse_generic_param_names()?;
         self.expect_char('{')?;
-        let mut cases: Vec<String> = Vec::new();
+        let mut members: Vec<String> = Vec::new();
         loop {
             self.skip_ws();
             if self.peek_char() == Some('}') {
                 break;
             }
-            cases.push(self.parse_ident()?);
+            members.push(self.parse_ident()?);
             self.skip_ws();
             if self.peek_char() == Some(',') {
                 self.pos += 1;
@@ -1056,10 +1094,7 @@ impl<'a> Parser<'a> {
         }
         self.expect_char('}')?;
         self.expect_char(';')?;
-        // We re-use RawDecl::Enum for flags at the parse layer; the
-        // resolver will downgrade. Phase 3 WIT lowering may distinguish
-        // them more precisely (SPEC/canonical-abi.md §11).
-        Ok(RawDecl::Enum { fqn, cases })
+        Ok(RawDecl::Flags { fqn, generics, members })
     }
 
     /// Thin wrapper around `parse_optional_generic_params` that
