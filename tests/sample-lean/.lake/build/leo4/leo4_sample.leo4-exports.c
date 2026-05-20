@@ -177,7 +177,7 @@ LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__
 LEAN_EXPORT lean_object* l___leo4__export__listSumU64__L__u64__l___boxed(lean_object*);
 static const lean_string_object l___leo4__export__hello___00__closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 12, .m_capacity = 12, .m_length = 11, .m_data = "hello, leo4"};
 static const lean_object* l___leo4__export__hello___00__closed__0 = (const lean_object*)&l___leo4__export__hello___00__closed__0_value;
-LEAN_EXPORT const lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs = (const lean_object*)&l___leo4__export__hello___00__closed__0_value;
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs(lean_object*);
 uint8_t lp_leo4_x2dsample_Sample_isLeaf(lean_object*);
 LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h4apuhe7gzvtzs(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__isLeaf__V__Sample__Tree__v___boxed(lean_object*);
@@ -1566,6 +1566,14 @@ uint64_t x_2; lean_object* x_3;
 x_2 = leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__h4apuhe7gzvtzs(x_1);
 x_3 = lean_box_uint64(x_2);
 return x_3;
+}
+}
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs(lean_object* x_1) {
+_start:
+{
+lean_object* x_2; 
+x_2 = ((lean_object*)(l___leo4__export__hello___00__closed__0));
+return x_2;
 }
 }
 LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h4apuhe7gzvtzs(lean_object* x_1) {

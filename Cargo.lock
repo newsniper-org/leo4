@@ -179,6 +179,7 @@ dependencies = [
 name = "leo4-native"
 version = "0.0.0"
 dependencies = [
+ "leo4-abi",
  "libloading",
  "serde_json",
 ]

@@ -153,7 +153,7 @@ def _leo4_export_listSumU64_L_u64_l (p0 : (List UInt64)) : UInt64 :=
   Sample.listSumU64 p0
 
 @[export leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs]
-def _leo4_export_hello_  : String :=
+def _leo4_export_hello_ (_unit : Unit) : String :=
   Sample.hello 
 
 @[export leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__h4apuhe7gzvtzs]

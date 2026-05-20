@@ -347,14 +347,28 @@ private def renderOneWrapper
                   (params.map (·.encoded)) schemaHash
   let paramSeg := joinByUnderscore (params.map fun p => mangleType p.encoded)
   let wrapperName := s!"_leo4_export_{sanitiseIdent a.fname}_{sanitiseIdent paramSeg}"
-  -- Parameter signatures `(p0 : T0)` + arg references `p0`.
+  -- Parameter signatures `(p0 : T0)` + arg references `p0`. When
+  -- there are no parameters we insert a dummy `(_unit : Unit)` so
+  -- Lean's code generator emits the wrapper as a *function* rather
+  -- than as a constant (const-folding hello-style 0-arg definitions
+  -- into a `const lean_object*` variable, which the shim then can't
+  -- call). The shim's 0-arg entry point passes `lean_box(0)` for
+  -- this dummy slot.
   let mut paramSigs : Array String := #[]
   let mut paramApps : Array String := #[]
+  if params.isEmpty then
+    paramSigs := paramSigs.push "(_unit : Unit)"
+    paramApps := paramApps.push "_unit"
+  else
+    for i in [0 : params.size] do
+      let encStr := idlToLeanType params[i]!.encoded
+      paramSigs := paramSigs.push s!"(p{i} : {encStr})"
+      paramApps := paramApps.push s!"p{i}"
+  -- For the user-decl call we never pass the unit dummy along.
+  let mut callApps : Array String := #[]
   for i in [0 : params.size] do
-    let encStr := idlToLeanType params[i]!.encoded
-    paramSigs := paramSigs.push s!"(p{i} : {encStr})"
-    paramApps := paramApps.push s!"p{i}"
-  let paramApp := String.intercalate " " paramApps.toList
+    callApps := callApps.push s!"p{i}"
+  let paramApp := String.intercalate " " callApps.toList
   let paramSigsLine := String.intercalate " " paramSigs.toList
   -- Named generic args. Phantom slots (no observable effect on the
   -- body) are filled with `Unit` so Lean has *some* witness to pin the
@@ -1401,9 +1415,13 @@ private def renderOneShim
       rb ++ "\n"
   let phs := paramHs.map (·.get!)
   let retH := retH?.get!
-  -- Lean helper extern declaration.
+  -- Lean helper extern declaration. The Lean wrapper takes a dummy
+  -- `Unit` (passed as `lean_box(0)`) when there are no real params,
+  -- so that Lean's code generator emits it as a function rather than
+  -- a `const lean_object*` constant (renderOneWrapper does the same
+  -- on the Lean side).
   let externArgsList :=
-    if phs.isEmpty then ["void"] else phs.toList.map (·.externCType)
+    if phs.isEmpty then ["lean_object *"] else phs.toList.map (·.externCType)
   let externDecl :=
     s!"extern {retH.externCType} {helper}(" ++
     String.intercalate ", " externArgsList ++ ");\n"
@@ -1427,7 +1445,7 @@ private def renderOneShim
   let argApp := String.intercalate ", "
     ((List.range phs.size).map (fun i => s!"a{i}"))
   let invoke :=
-    if phs.isEmpty then s!"{helper}()" else s!"{helper}({argApp})"
+    if phs.isEmpty then s!"{helper}(lean_box(0))" else s!"{helper}({argApp})"
   -- Post-call cleanup for the return value (only owned types need it).
   let retCleanup := if retH.ownsRef then " lean_dec(r);" else ""
   let body :=

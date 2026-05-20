@@ -21,6 +21,7 @@
 mod sample {
     leo4::import! {
         fn add(a: u64, b: u64) -> u64;
+        fn hello() -> String;
     }
 }
 
@@ -38,6 +39,12 @@ fn main() -> Result<(), leo4::LeanError> {
     let big = sample::add(&lean, u64::MAX - 1, 1)?;
     assert_eq!(big, u64::MAX);
     println!("add(u64::MAX - 1, 1) = {big}");
+
+    // P5-b₂ composite check: String return type. `Sample.hello`
+    // exercises the LeanMarshal codegen for variable-size payloads.
+    let greeting = sample::hello(&lean)?;
+    assert_eq!(greeting, "hello, leo4");
+    println!("hello() = {greeting:?}");
 
     Ok(())
 }

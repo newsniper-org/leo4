@@ -11,6 +11,7 @@ description = "Native (libloading) backend for leo4. Loads `<pkg>.leo4-shim.so`,
 [dependencies]
 libloading.workspace = true
 serde_json.workspace = true
+leo4-abi.workspace   = true
 
 [lints]
 workspace = true

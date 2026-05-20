@@ -17,7 +17,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
     parse::{Parse, ParseStream, Parser},
-    FnArg, ItemFn, ReturnType, Signature, Type,
+    FnArg, ReturnType, Signature,
 };
 
 /// Parsed body of `leo4::import! { fn add(a: u64, b: u64) -> u64; … }`.
@@ -112,10 +112,12 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
 
     let fname = sig.ident.to_string();
 
-    // P5-b₂ minimum: scalar-only. Reject anything else with a clear
-    // diagnostic so the failure mode is local.
-    let mut arg_kinds: Vec<ScalarKind> = Vec::new();
+    // Collect (name, type) pairs. We delegate encoding to leo4-abi's
+    // `LeanMarshal` trait (P5-b₂ generalisation): every parameter
+    // and the return type must implement it, but we don't introspect
+    // the type AST beyond rejecting `self` receivers.
     let mut arg_idents: Vec<syn::Ident> = Vec::new();
+    let mut arg_types: Vec<syn::Type> = Vec::new();
     for input in &sig.inputs {
         let FnArg::Typed(pt) = input else {
             return Err(syn::Error::new_spanned(
@@ -126,79 +128,59 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
         let syn::Pat::Ident(ident) = pt.pat.as_ref() else {
             return Err(syn::Error::new_spanned(
                 &pt.pat,
-                "leo4::import! requires simple `name: T` parameters at P5-b₂",
+                "leo4::import! requires simple `name: T` parameters",
             ));
         };
-        let kind = match classify_scalar(pt.ty.as_ref()) {
-            Some(k) => k,
-            None => {
-                return Err(syn::Error::new_spanned(
-                    &pt.ty,
-                    "non-scalar parameter — P5-b₂ supports u8/u16/u32/u64/i8..i64/f32/f64/bool/char only; composite / nominal lands in P5-b₃",
-                ));
-            }
-        };
-        arg_kinds.push(kind);
         arg_idents.push(ident.ident.clone());
+        arg_types.push((*pt.ty).clone());
     }
-    let ret_kind = match &sig.output {
+    let ret_ty = match &sig.output {
         ReturnType::Default => {
             return Err(syn::Error::new_spanned(
                 sig,
                 "leo4::import! requires an explicit return type (use `-> ()` for no result)",
             ));
         }
-        ReturnType::Type(_, ty) => match classify_scalar(ty.as_ref()) {
-            Some(k) => k,
-            None => {
-                return Err(syn::Error::new_spanned(
-                    ty,
-                    "non-scalar return — P5-b₂ supports scalar return types only (P5-b₃ for composites)",
-                ));
-            }
-        },
+        ReturnType::Type(_, ty) => (**ty).clone(),
     };
 
-    // Look up the mangled body. We match on the last `::` segment of
-    // `logical_name`; if multiple entries share that name, P5-b₂
-    // rejects (requires the user to disambiguate by writing the
-    // mangled body explicitly — that path lands with P5-b₃ once
-    // generics support is wired).
+    // Look up the mangled body. P5-b₂ keeps the simple "single
+    // instantiation by fname" match — generic exports come back at
+    // P5-b₃ with full arg-type-based disambiguation.
     let mangled_body = lookup_mangled_body(mangling, &fname).map_err(|e| {
         syn::Error::new_spanned(&sig.ident, e)
     })?;
 
     let lean = format_ident!("lean");
-    let in_size: usize = arg_kinds.iter().map(|k| k.wire_size()).sum();
-    let out_size: usize = ret_kind.wire_size();
 
-    // Encode each arg into a single Vec<u8> by repeated to_le_bytes.
-    let encode_stmts = arg_idents.iter().zip(&arg_kinds).map(|(name, kind)| {
-        let to_bytes = kind.to_le_bytes_call(name);
-        quote! { args.extend_from_slice(&#to_bytes); }
+    // Encode each arg via `<T as LeanMarshal>::canonical_encode`.
+    let encode_stmts = arg_idents.iter().zip(arg_types.iter()).map(|(name, ty)| {
+        quote! { <#ty as ::leo4::LeanMarshal>::canonical_encode(&#name, &mut args); }
     });
 
-    let from_bytes = ret_kind.from_le_bytes_call(quote! { ret });
-    let ret_ty = ret_kind.rust_type();
-
-    let arg_decls = arg_idents.iter().zip(&arg_kinds).map(|(name, kind)| {
-        let ty = kind.rust_type();
+    let arg_decls = arg_idents.iter().zip(arg_types.iter()).map(|(name, ty)| {
         quote! { #name: #ty }
     });
 
     let fname_ident = sig.ident.clone();
     let vis = quote! { pub };
 
+    // P5-b₂ minimum: fixed 4096-byte return buffer. P5-b₃ adds a
+    // grow-on-LEO4_ERR_RETURN_BUF_TOO_SMALL retry loop.
     Ok(quote! {
         #vis fn #fname_ident(
             #lean: &::leo4::Lean,
             #(#arg_decls),*
         ) -> ::core::result::Result<#ret_ty, ::leo4::LeanError> {
-            let mut args: ::std::vec::Vec<u8> = ::std::vec::Vec::with_capacity(#in_size);
+            let mut args: ::std::vec::Vec<u8> = ::std::vec::Vec::new();
             #(#encode_stmts)*
-            let mut ret: [u8; #out_size] = [0u8; #out_size];
-            #lean.call_shim(#mangled_body, &args, &mut ret)?;
-            ::core::result::Result::Ok(#from_bytes)
+            let mut ret: ::std::vec::Vec<u8> = ::std::vec::Vec::with_capacity(4096);
+            ret.resize(4096, 0u8);
+            let written = #lean.call_shim(#mangled_body, &args, &mut ret)?;
+            ret.truncate(written);
+            let (value, _consumed) =
+                <#ret_ty as ::leo4::LeanMarshal>::canonical_decode(&ret, 0)?;
+            ::core::result::Result::Ok(value)
         }
     })
 }
@@ -245,118 +227,3 @@ fn lookup_mangled_body(mangling: &serde_json::Value, fname: &str) -> Result<Stri
     }
 }
 
-/// P5-b₂'s supported scalar set.
-#[derive(Copy, Clone, Debug)]
-enum ScalarKind {
-    U8,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
-    F32,
-    F64,
-    Bool,
-    Char,
-}
-
-impl ScalarKind {
-    fn wire_size(self) -> usize {
-        use ScalarKind::*;
-        match self {
-            U8 | I8 | Bool => 1,
-            U16 | I16 => 2,
-            U32 | I32 | F32 | Char => 4,
-            U64 | I64 | F64 => 8,
-        }
-    }
-
-    fn rust_type(self) -> TokenStream {
-        use ScalarKind::*;
-        match self {
-            U8 => quote!(u8),
-            U16 => quote!(u16),
-            U32 => quote!(u32),
-            U64 => quote!(u64),
-            I8 => quote!(i8),
-            I16 => quote!(i16),
-            I32 => quote!(i32),
-            I64 => quote!(i64),
-            F32 => quote!(f32),
-            F64 => quote!(f64),
-            Bool => quote!(bool),
-            Char => quote!(char),
-        }
-    }
-
-    /// Call-site code that turns the named value into `[u8; N]`
-    /// suitable for `extend_from_slice`. Booleans are emitted as
-    /// `[0u8]` / `[1u8]` per SPEC/canonical-abi.md §1. `char` is
-    /// emitted as `u32::to_le_bytes(codepoint)`.
-    fn to_le_bytes_call(self, ident: &syn::Ident) -> TokenStream {
-        use ScalarKind::*;
-        match self {
-            Bool => quote! { [if #ident { 1u8 } else { 0u8 }] },
-            Char => quote! { (#ident as u32).to_le_bytes() },
-            U8 => quote! { [#ident] },
-            I8 => quote! { [#ident as u8] },
-            _ => quote! { #ident.to_le_bytes() },
-        }
-    }
-
-    /// Construction expression: take the buffer `[u8; N]` (named via
-    /// the caller-supplied token) and produce a value of `self`'s
-    /// Rust type.
-    fn from_le_bytes_call(self, buf: TokenStream) -> TokenStream {
-        use ScalarKind::*;
-        match self {
-            Bool => quote! { (#buf[0] != 0u8) },
-            Char => quote! {
-                core::char::from_u32(u32::from_le_bytes(#buf))
-                    .ok_or_else(|| ::leo4::LeanError {
-                        code: 1,
-                        detail: "invalid char codepoint on the wire".into(),
-                    })?
-            },
-            U8 => quote! { #buf[0] },
-            I8 => quote! { #buf[0] as i8 },
-            U16 => quote! { u16::from_le_bytes(#buf) },
-            I16 => quote! { i16::from_le_bytes(#buf) },
-            U32 => quote! { u32::from_le_bytes(#buf) },
-            I32 => quote! { i32::from_le_bytes(#buf) },
-            U64 => quote! { u64::from_le_bytes(#buf) },
-            I64 => quote! { i64::from_le_bytes(#buf) },
-            F32 => quote! { f32::from_le_bytes(#buf) },
-            F64 => quote! { f64::from_le_bytes(#buf) },
-        }
-    }
-}
-
-fn classify_scalar(ty: &Type) -> Option<ScalarKind> {
-    let Type::Path(p) = ty else { return None };
-    if p.qself.is_some() || p.path.segments.len() != 1 {
-        return None;
-    }
-    let ident = p.path.segments[0].ident.to_string();
-    use ScalarKind::*;
-    Some(match ident.as_str() {
-        "u8" => U8,
-        "u16" => U16,
-        "u32" => U32,
-        "u64" => U64,
-        "i8" => I8,
-        "i16" => I16,
-        "i32" => I32,
-        "i64" => I64,
-        "f32" => F32,
-        "f64" => F64,
-        "bool" => Bool,
-        "char" => Char,
-        _ => return None,
-    })
-}
-
-#[allow(dead_code)]
-fn _itemfn_doc_anchor(_: ItemFn) {}

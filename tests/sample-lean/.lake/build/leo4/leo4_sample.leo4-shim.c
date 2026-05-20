@@ -1307,7 +1307,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__listSumU64__L_u64_l__h4
 }
 
 // hello :: () -> lean_object*
-extern lean_object * leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs(void);
+extern lean_object * leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs(lean_object *);
 LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs(
     leo4_arena_t* arena,
     const uint8_t* args_ptr, size_t args_len,
@@ -1316,7 +1316,7 @@ LEO4_EXPORT int32_t leo4_call_leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs
     (void)arena;
     size_t off = 0;
     if (off != args_len) { *ret_len = 0; return LEO4_ERR_DECODE; }
-    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs();
+    lean_object * r = leo4_lean__leo4__leo4_sample__Sample__hello____h4apuhe7gzvtzs(lean_box(0));
     size_t out_off = 0;
     {
         size_t need = leo4_encoded_size_string(r);

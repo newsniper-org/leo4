@@ -59,6 +59,20 @@ impl std::fmt::Display for LeanError {
 
 impl std::error::Error for LeanError {}
 
+/// Lift a `leo4_abi::LeanError` (raised by `canonical_decode` /
+/// `canonical_encode` failures) into the loader-flavoured `LeanError`
+/// so `leo4::import!`-generated wrappers can use a single `?` to
+/// propagate both decode errors and dispatch errors.
+impl From<leo4_abi::LeanError> for LeanError {
+    fn from(e: leo4_abi::LeanError) -> Self {
+        Self {
+            #[allow(clippy::cast_possible_wrap)]
+            code: e.code as i32,
+            detail: e.message,
+        }
+    }
+}
+
 /// Parsed contents of `<pkg>.leo4-handshake`. Held privately on
 /// [`Lean`] so the loader can re-use them across multiple scopes.
 #[derive(Debug, Clone)]
