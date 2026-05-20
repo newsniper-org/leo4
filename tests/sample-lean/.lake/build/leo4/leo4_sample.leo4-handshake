@@ -5,7 +5,7 @@
  "leo4_plugin_version": "0.1.0",
  "lean_toolchain": "leanprover/lean4:v4.29.1",
  "interfaces": [{"resource_count": 1, "name": "Sample", "function_count": 15}],
- "emitted_at": "2026-05-20T00:34:04Z",
+ "emitted_at": "2026-05-20T00:40:37Z",
  "constraint_universe":
  {"scalar":
   ["u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64"],

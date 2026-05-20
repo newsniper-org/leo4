@@ -238,14 +238,15 @@ partial def exprToIDLSubst
 
 /-! ## Walking structures and inductives -/
 
-/-- Pull the user-facing names of `iv`'s first `numParams` type
-parameters by reducing the inductive's `type` field. Generic-aware
-field walks need these so a type-variable reference can be lowered
-to a placeholder `IDLType` token that `Subst.substIDL` later resolves. -/
+/-- Synthesise ASCII-safe positional names (`T0`, `T1`, …) for `iv`'s
+first `numParams` type parameters. The Lean-source binders may be
+Greek letters like `α / β`, which `schema-idl`'s grammar
+(`SPEC/idl-grammar.ebnf` `ident`) rejects. Positional names keep the
+wire form pure ASCII while preserving binder *count*; original
+Lean-source names remain recoverable from the inductive's `type`
+field if a downstream tool needs them. -/
 private def paramBinderNames (iv : InductiveVal) : MetaM (Array Name) :=
-  Meta.forallTelescopeReducing iv.type fun args _ => do
-    let params := args.extract 0 iv.numParams
-    params.mapM fun fv => fv.fvarId!.getUserName
+  pure <| (Array.range iv.numParams).map fun i => Name.mkSimple s!"T{i}"
 
 /-- Substitution function for `exprToIDLSubst` that recognises one of
 `iv`'s declared type parameters by FVarId and lowers it to a nullary
@@ -310,9 +311,9 @@ partial def walkUserDecl
       match Lean.getStructureInfo? env declName with
       | some info => info.fieldNames
       | none => (Array.range cv.numFields).map fun i => Name.mkSimple s!"_{i}"
+    let genNames ← paramBinderNames iv
     let res ← Meta.forallTelescopeReducing cv.type fun args _body => do
       let typeParams := args.extract 0 iv.numParams
-      let genNames ← typeParams.mapM fun fv => fv.fvarId!.getUserName
       let subst := paramSubst typeParams genNames
       let fieldArgs := args.extract iv.numParams args.size
       let mut acc : Array (Name × IDLType) := #[]
@@ -322,10 +323,10 @@ partial def walkUserDecl
         match exprToIDLSubst env (some declName) subst argTy with
         | some idl => acc := acc.push (fieldNames[i]!, idl)
         | none => return none
-      return some (genNames, acc)
+      return some acc
     match res with
     | none => return none
-    | some (genNames, fields) => return some (.record fqn genNames fields)
+    | some fields => return some (.record fqn genNames fields)
   -- Mixed multi-ctor → variant. Gather generic names from the first
   -- ctor (every ctor shares the same enclosing binders).
   let genNames ← paramBinderNames iv
@@ -335,8 +336,7 @@ partial def walkUserDecl
     let caseName := cname.componentsRev.head!
     let payload ← Meta.forallTelescopeReducing cv.type fun args _body => do
       let typeParams := args.extract 0 iv.numParams
-      let names ← typeParams.mapM fun fv => fv.fvarId!.getUserName
-      let subst := paramSubst typeParams names
+      let subst := paramSubst typeParams genNames
       let fieldArgs := args.extract iv.numParams args.size
       let mut acc : Array IDLType := #[]
       for arg in fieldArgs do
