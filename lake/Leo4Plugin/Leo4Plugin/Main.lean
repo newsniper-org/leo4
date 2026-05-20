@@ -1158,6 +1158,22 @@ private def findUserDecl (decls : Array UserDecl) (fqn : String) : Option UserDe
   let leaves : Array UserDecl := decls.flatMap (·.leaves)
   leaves.find? fun d => d.fqn == fqn
 
+/-- Phase 6: if `fqn` is a member of any `UserDecl.mutual` cluster,
+return the cluster's member helper-suffixes in source order; otherwise
+return `#[]`. Used by `renderVariantHelpers` to resolve a payload's
+`Cyc<i>` token to the matching peer's `leo4_enc_/dec_` helper. Today
+this only handles monomorphic clusters (no generic args at the member
+level) — generic-mutual clusters arrive with Phase 6-5. -/
+private def findMutualPeers (decls : Array UserDecl) (fqn : String) : Array String :=
+  Id.run do
+    for d in decls do
+      match d with
+      | .mutual members =>
+        if members.any (fun m => m.fqn == fqn) then
+          return members.map (fun m => fqnSeg m.fqn)
+      | _ => pure ()
+    return #[]
+
 /-- True iff the given variant case is in the F-step "minimum-viable"
 shape that `renderVariantHelpers` knows how to emit:
 
@@ -1166,21 +1182,26 @@ shape that `renderVariantHelpers` knows how to emit:
   * single field of `Self`            — recursive helper call (subsumed above)
   * single field of a scalar          — wire-format memcpy + ctor scalar slot
   * single field of `string`          — `leo4_decode_string` + ctor object slot
+  * single field of `Cyc<i>` (mutual) — cross-call to peer's helper
+    (`leo4_enc_<peerSuffix>` / `leo4_dec_<peerSuffix>`), Phase 6.
 
 Everything richer (multi-field with non-Self payloads, single
 composite like list/option/record, etc.) still falls back to the
-LEO4_ERR_UNIMPLEMENTED stub. -/
-private def variantCaseSupported (fields : Array IDLType) : Bool :=
+LEO4_ERR_UNIMPLEMENTED stub. `peers` lists the helper suffix of each
+member of the current mutual cluster (or empty for non-mutual). -/
+private def variantCaseSupported (fields : Array IDLType) (peers : Array String) : Bool :=
   if fields.isEmpty then true
   else if fields.all (fun t => match t with | .self => true | _ => false) then true
   else if fields.size == 1 then
     match fields[0]! with
     | .string => true
+    | .cyc i => i.toNat < peers.size
     | t       => (scalarCType t).isSome
   else false
 
-private def variantAllCasesSupported (cases : Array (Name × Array IDLType)) : Bool :=
-  cases.all fun (_, fields) => variantCaseSupported fields
+private def variantAllCasesSupported
+    (cases : Array (Name × Array IDLType)) (peers : Array String) : Bool :=
+  cases.all fun (_, fields) => variantCaseSupported fields peers
 
 /-- C-safe suffix encoding for a list of `IDLType` arguments. Reuses
 the leo4-mangling type encoding (`SPEC/mangling.md` §2) so the
@@ -1197,15 +1218,19 @@ private inductive CaseKind
   | allSelf (n : Nat)           -- n Self fields (subsumes single Self)
   | scalar (c : String) (sz : Nat) (kind : String)  -- single scalar (cType, wire size, ctor accessor suffix)
   | str                         -- single `string`
+  | cyc (peerSuffix : String)   -- single `Cyc<i>` field, resolved to a peer's helper suffix
 deriving Inhabited
 
-private def classifyCase (fields : Array IDLType) : Option CaseKind :=
+private def classifyCase
+    (fields : Array IDLType) (peers : Array String) : Option CaseKind :=
   if fields.isEmpty then some .empty
   else if fields.all (fun t => match t with | .self => true | _ => false) then
     some (.allSelf fields.size)
   else if h : fields.size = 1 then
     match fields[0] with
     | .string => some .str
+    | .cyc i =>
+        if h : i.toNat < peers.size then some (.cyc peers[i.toNat]) else none
     | t       =>
       match scalarCType t with
       | some sc => some (.scalar sc.c sc.size (scalarCtorKind sc.c))
@@ -1216,11 +1241,16 @@ private def classifyCase (fields : Array IDLType) : Option CaseKind :=
 encoder/decoder helpers of one variant declaration. F-step shape
 predicate above (`variantCaseSupported`) governs which variants
 qualify; `none` is returned for anything richer (mixed-field
-payload with non-Self entries, single composite field, etc.). -/
+payload with non-Self entries, single composite field, etc.).
+
+`peers` is the helper-suffix array of the enclosing mutual cluster
+(empty for a non-mutual variant); `Cyc<i>` payload fields turn into
+cross-calls to `leo4_enc_<peers[i]>` / `leo4_dec_<peers[i]>`. -/
 private def renderVariantHelpers
     (fqn : String) (args : Array IDLType)
-    (cases : Array (Name × Array IDLType)) : Option String := Id.run do
-  if !variantAllCasesSupported cases then return none
+    (cases : Array (Name × Array IDLType))
+    (peers : Array String := #[]) : Option String := Id.run do
+  if !variantAllCasesSupported cases peers then return none
   let suffix := variantHelperSuffix fqn args
   let dec := s!"leo4_dec_{suffix}"
   let enc := s!"leo4_enc_{suffix}"
@@ -1234,7 +1264,7 @@ private def renderVariantHelpers
     "    uint8_t disc = buf[*off]; *off += 1u;\n"
   for i in [0 : cases.size] do
     let (_, fields) := cases[i]!
-    let kind := (classifyCase fields).get!
+    let kind := (classifyCase fields peers).get!
     decBody := decBody ++ s!"    if (disc == {i}u) " ++ lb ++ "\n"
     match kind with
     | .empty =>
@@ -1273,6 +1303,16 @@ private def renderVariantHelpers
         "        *out = r;\n" ++
         "        return LEO4_OK;\n" ++
         "    " ++ rb ++ "\n"
+    | .cyc peerSuffix =>
+      decBody := decBody ++
+        s!"        lean_object *f0;\n" ++
+        s!"        " ++ lb ++ s!" int32_t st = leo4_dec_{peerSuffix}(buf, buf_len, off, &f0);\n" ++
+        s!"          if (st) return st; " ++ rb ++ "\n" ++
+        s!"        lean_object *r = lean_alloc_ctor({i}, 1, 0);\n" ++
+        s!"        lean_ctor_set(r, 0, f0);\n" ++
+        "        *out = r;\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
   decBody := decBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
   -- Encoder.
   let mut encBody : String :=
@@ -1282,7 +1322,7 @@ private def renderVariantHelpers
     "    buf[*off] = (uint8_t)tag; *off += 1u;\n"
   for i in [0 : cases.size] do
     let (_, fields) := cases[i]!
-    let kind := (classifyCase fields).get!
+    let kind := (classifyCase fields peers).get!
     encBody := encBody ++ s!"    if (tag == {i}u) " ++ lb ++ "\n"
     match kind with
     | .empty =>
@@ -1310,12 +1350,30 @@ private def renderVariantHelpers
         "        leo4_write_string(f0, buf, off);\n" ++
         "        return LEO4_OK;\n" ++
         "    " ++ rb ++ "\n"
+    | .cyc peerSuffix =>
+      encBody := encBody ++
+        s!"        lean_object *f0 = lean_ctor_get(v, 0);\n" ++
+        s!"        " ++ lb ++ s!" int32_t st = leo4_enc_{peerSuffix}(f0, buf, cap, off, needed_out);\n" ++
+        s!"          if (st) return st; " ++ rb ++ "\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
   encBody := encBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
-  return some (
+  -- Forward decls: this decl's helpers + every peer's helpers in the
+  -- cluster. The peers' definitions come later in the same TU when
+  -- their own `renderVariantHelpers` runs; C requires the declaration
+  -- to be in scope at the cross-call site, so emit them upfront here.
+  let mut fwd : String :=
     s!"static int32_t {dec}(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out);\n" ++
-    s!"static int32_t {enc}(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out);\n" ++
-    "\n" ++ decBody ++ "\n" ++ encBody ++ "\n"
-  )
+    s!"static int32_t {enc}(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out);\n"
+  for peerSuffix in peers do
+    let pdec := s!"leo4_dec_{peerSuffix}"
+    let penc := s!"leo4_enc_{peerSuffix}"
+    -- Skip self-reference (already emitted above).
+    if pdec != dec then
+      fwd := fwd ++
+        s!"static int32_t {pdec}(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out);\n" ++
+        s!"static int32_t {penc}(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out);\n"
+  return some (fwd ++ "\n" ++ decBody ++ "\n" ++ encBody ++ "\n")
 
 /-- `variant V` per SPEC §9, with F-step shape support. Delegates
 to the per-instantiation `leo4_dec_<safe-fqn>_<args-mangle>` /
@@ -1411,7 +1469,8 @@ private partial def handlerFor (userDecls : Array UserDecl) : IDLType → Option
           -- shape — check support against the substituted form, not
           -- the original.
           let cases' := cases.map fun (n, fs) => (n, fs.map (Subst.substIDL env))
-          if !variantAllCasesSupported cases' then none
+          let peers := findMutualPeers userDecls fqn
+          if !variantAllCasesSupported cases' peers then none
           else some (variantHandler fqn args)
         | _ => none
       | _      => none
@@ -1669,7 +1728,8 @@ def renderShimSource
       match Subst.mkEnv generics args with
       | some env =>
         let cases' := cases.map fun (n, fs) => (n, fs.map (Subst.substIDL env))
-        if let some hs := renderVariantHelpers fqn args cases' then
+        let peers := findMutualPeers userDecls fqn
+        if let some hs := renderVariantHelpers fqn args cases' peers then
           variantHelpers := variantHelpers ++ hs
       | none => ()
     | _ => ()

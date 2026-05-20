@@ -45,7 +45,7 @@ nominal_flags_decl     = "flags"    , fqn , [ generic_params ] , "{" , ident , {
    other via the `Cyc<i>` cycle-breaker token (see `cyc_type` below) instead of
    FQN; the index `i` is 0-based and scoped to the immediately enclosing block.
    A singleton mutual block is a parse error — authors keep using `Self`.       *)
-mutual_decl     = "mutual" , "{" , nominal_decl , nominal_decl , { nominal_decl } , "}" ;  (* [leo4] *)
+mutual_decl     = "mutual" , "{" , nominal_decl , nominal_decl , { nominal_decl } , "}" , ";" ;  (* [leo4] *)
 
 generic_params  = "<" , generic_param , { "," , generic_param } , ">" ;            (* [leo4] *)
 generic_param   = type_param | value_param ;                                       (* [leo4] *)

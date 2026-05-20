@@ -143,15 +143,16 @@ pub fn user_decl_to_idl(d: &UserDecl) -> String {
             )
         }
         UserDecl::Mutual { members } => {
-            // Phase 6: emit each member on a `; `-joined line wrapped
-            // in a `mutual { … }` block (SPEC/phase-6-mutual.md §1).
-            // `render_canonical` then re-decorates with newlines for
-            // pretty mode and collapses whitespace for the hash input.
+            // Phase 6 mutual block (SPEC/phase-6-mutual.md §1). Each
+            // inner nominal_decl carries its own terminating `;` to
+            // match the grammar's `nominal_decl = … , ";" ;` rule —
+            // the outer `render_canonical` then adds the mutual_decl's
+            // own `;` after the closing `}`.
             let inner = members
                 .iter()
-                .map(user_decl_to_idl)
+                .map(|m| format!("{};", user_decl_to_idl(m)))
                 .collect::<Vec<_>>()
-                .join("; ");
+                .join(" ");
             format!("mutual {{ {inner} }}")
         }
     }

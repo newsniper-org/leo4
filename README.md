@@ -5,13 +5,17 @@ toolchain version.
 
 ## Status
 
-**Phases 1–5 complete (2026-05-20).** The C shim emitter, Rust
-loader, `leo4::import!` macro, `#[derive(LeanMarshal)]`,
-`leo4-build` helper, and both end-to-end demos
-(`examples/01-hello/` + `examples/02-roundtrip/`) are green on
-Tier 1 (x86_64 Linux), including the handshake-mismatch exit check.
-See [`ROADMAP.md`](ROADMAP.md) for the full phase ladder. Phase 6
-(mutual recursion) is the next gate.
+**Phases 1–6 complete (2026-05-20).** Phase 5's pipeline (shim
+emitter, loader, `leo4::import!`, `#[derive(LeanMarshal)]`,
+`leo4-build`, `examples/01-hello/` + `examples/02-roundtrip/`)
+lands first; Phase 6 adds mutual recursion between nominal types
+via an explicit `mutual { … }` IDL block and a `Cyc<i>`
+cycle-breaker token (SPEC/phase-6-mutual.md). `examples/04-mutual-ast/`
+exercises a `Sample.Expr` / `Sample.Stmt` cluster end-to-end on
+Tier 1 (x86_64 Linux). `tests/mangling/` confirms cross-impl
+byte-identical mangling (61 names, schema_hash `gj6daa3oelheu`)
+between the Lean plugin and Rust `schema-idl`. Phase 7 (async
+`io<T>` lowering, gated on WASIp3 stability) is the next gate.
 
 What works today:
 

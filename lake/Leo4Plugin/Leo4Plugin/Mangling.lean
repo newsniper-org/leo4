@@ -282,8 +282,12 @@ partial def userDeclToIDL : UserDecl → String
   | .resource fqn generics =>
       "resource " ++ fqn ++ genericHeader generics
   | .mutual members =>
-      let memberStrs := members.toList.map userDeclToIDL
-      "mutual { " ++ String.intercalate "; " memberStrs ++ " }"
+      -- Each inner nominal_decl carries its own terminating `;`
+      -- (matching the grammar's `nominal_decl = … , ";" ;`); the
+      -- outer `renderCanonical` then adds the `mutual_decl`'s own
+      -- `;` on the closing `}`. SPEC/phase-6-mutual.md §1.
+      let memberStrs := members.toList.map (fun m => userDeclToIDL m ++ ";")
+      "mutual { " ++ String.intercalate " " memberStrs ++ " }"
 
 /-- Sort key tag for SPEC/handshake.md `<pkg>.leo4-schema` ordering:
 type decls first, then resources, then functions; lex by FQN within each band.

@@ -157,6 +157,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "leo4-example-04-mutual-ast"
+version = "0.0.0"
+dependencies = [
+ "leo4",
+ "leo4-build",
+]
+
+[[package]]
 name = "leo4-idl"
 version = "0.0.0"
 dependencies = [

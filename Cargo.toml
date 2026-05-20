@@ -13,6 +13,7 @@ members = [
     "crates/leo4c",
     "examples/01-hello",
     "examples/02-roundtrip",
+    "examples/04-mutual-ast",
 ]
 
 [workspace.package]

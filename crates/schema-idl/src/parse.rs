@@ -1215,6 +1215,11 @@ impl<'a> Parser<'a> {
             members.push(self.parse_nominal_decl()?);
         }
         self.expect_char('}')?;
+        // Trailing `;` matches the SPEC `mutual_decl = … "}" ";"` rule —
+        // canonical IDL has the closing `};` after the cluster, just
+        // like a nominal_decl. Singleton-group rejection (`< 2 members`)
+        // happens later in `resolve_decl`.
+        self.expect_char(';')?;
         Ok(RawDecl::Mutual { members })
     }
 
@@ -1802,7 +1807,7 @@ mod tests {
             "package p; interface i { mutual { \
                variant p.Expr { lit(u64), neg(Cyc<0>), seq(Cyc<1>) }; \
                variant p.Stmt { nop, block(list<Cyc<1>>), call(Cyc<0>) }; \
-             } func dummy() -> u8; }",
+             }; func dummy() -> u8; }",
         )
         .unwrap();
         let group = match &s.user_decls[0] {
@@ -1824,7 +1829,7 @@ mod tests {
     #[test]
     fn mutual_group_singleton_rejected() {
         let err = parse(
-            "package p; interface i { mutual { variant p.X { a, b(Cyc<0>) }; } }",
+            "package p; interface i { mutual { variant p.X { a, b(Cyc<0>) }; }; }",
         )
         .unwrap_err();
         let msg = format!("{err}");
@@ -1847,7 +1852,7 @@ mod tests {
             "package p; interface i { mutual { \
                variant p.A { a, b(Cyc<5>) }; \
                variant p.B { x }; \
-             } }",
+             }; }",
         )
         .unwrap_err();
         let msg = format!("{err}");

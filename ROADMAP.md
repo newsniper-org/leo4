@@ -294,7 +294,7 @@ generic `listLen`) — pass.
 **Dependencies:** Phase 2 (mangling), Phase 4 (error paths). Phase 3
 (WIT) optional.
 
-## Phase 6 — Mutual recursion between nominal types
+## Phase 6 — Mutual recursion between nominal types — **DONE 2026-05-20**
 
 Lift the v0 ban (LEO4-DESIGN.md §4.3) on two nominal types referencing
 each other. Today `Self`/`Self<…>` covers *direct* self-recursion

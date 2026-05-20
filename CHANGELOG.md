@@ -80,6 +80,39 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — Phase 6 (2026-05-20)
+
+- **`SPEC/phase-6-mutual.md`** locks the four mutual-recursion
+  design decisions: explicit `mutual { … }` block, `Cyc<i>`
+  cycle-breaker token (0-based, scoped to the enclosing group),
+  group-shared decode-depth counter, and a single `mutual ... end`
+  block per cluster in the deriving handler.
+- **`SPEC/idl-grammar.ebnf`** grows `mutual_decl` and `cyc_type`.
+- **`crates/schema-idl`** — `IDLType::Cyc(u32)` + `UserDecl::Mutual {
+  members }` + parser / renderer / mangler / resolver coverage; new
+  diagnostics for out-of-scope / out-of-range Cyc and singleton
+  groups.
+- **`lake/Leo4Plugin`** mirrors the Rust schema-idl side: `IDLType.cyc`,
+  `UserDecl.mutual`, `walkMutualGroup` that pre-detects `iv.all`
+  clusters and rewrites peer references to `Cyc<i>`; shim emitter
+  resolves `Cyc<i>` payloads to peer helper cross-calls
+  (`leo4_enc_<peerSuffix>` / `leo4_dec_<peerSuffix>`) with forward
+  declarations at the top of each helper block.
+- **`lake/Leo4/Leo4/Deriving.lean`** detects a genuine mutual cluster
+  (`iv.all` matches across members) and emits one `mutual ... end`
+  block carrying every member's `partial def _leo4_encode /
+  _leo4_decode` pair, then one `instance` per member. Cross-decl
+  payload references route through direct function references
+  rather than typeclass-instance forward references.
+- **`tests/sample-lean/Sample.lean`** gains a `mutual inductive Expr
+  / Stmt end` cluster with two exports (`exprIsLit`, `stmtIsNop`).
+- **`examples/04-mutual-ast/`** — Rust mirror of `Sample.Expr` /
+  `Sample.Stmt` with hand-rolled `LeanMarshal` impls (`Box<T>` breaks
+  the Rust-side cycle). Exit demo for Phase 6.
+- **`tests/mangling/`** cross-impl harness picks up the new cluster
+  fixture; 61 mangled names + schema_hash `gj6daa3oelheu` are
+  byte-identical between the Lake plugin and `leo4c`.
+
 ### Pending
 
 - Plugin-side value-param erasure for implicit `{N : Nat}` binders
