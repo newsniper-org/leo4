@@ -151,6 +151,14 @@ pub enum RawDecl {
     Mutual {
         members: Vec<RawDecl>,
     },
+    /// `external <fqn>[<generics>];` — Phase 8 step 2. Type with a
+    /// custom `LeanMarshal` instance whose wire format is opaque to
+    /// the IDL layer. References to this type at usage sites
+    /// (`func f(_0: Foo) -> Foo`) parse as bare nominal refs.
+    ExternalMarshal {
+        fqn: String,
+        generics: Vec<String>,
+    },
 }
 
 impl RawDecl {
@@ -160,7 +168,8 @@ impl RawDecl {
             | RawDecl::Enum { fqn, .. }
             | RawDecl::Variant { fqn, .. }
             | RawDecl::Resource { fqn, .. }
-            | RawDecl::Flags { fqn, .. } => fqn,
+            | RawDecl::Flags { fqn, .. }
+            | RawDecl::ExternalMarshal { fqn, .. } => fqn,
             RawDecl::Mutual { .. } => "",
         }
     }
@@ -336,6 +345,7 @@ pub fn parse_raw(input: &str) -> Result<RawSchema, ParseError> {
             || p.peek_keyword("resource")
             || p.peek_keyword("flags")
             || p.peek_keyword("mutual")
+            || p.peek_keyword("external")
         {
             top_nominal_decls.push(p.parse_nominal_decl()?);
         } else {
@@ -452,6 +462,12 @@ fn insert_shape_entries(map: &mut HashMap<String, Shape>, d: &RawDecl) {
         }
         RawDecl::Flags { fqn, .. } => {
             map.insert(fqn.clone(), Shape::Flags);
+        }
+        // External-marshal nominal: type references at function
+        // sites resolve as Record-shaped IDLType refs (the IDL
+        // doesn't carry layout info). Shape tag mirrors that.
+        RawDecl::ExternalMarshal { fqn, .. } => {
+            map.insert(fqn.clone(), Shape::Record);
         }
         // Mutual groups: register each member's FQN/shape under the
         // top-level shape map so peer references via FQN (when the
@@ -594,6 +610,10 @@ fn resolve_decl(
             fqn: fqn.clone(),
             generics: generics.clone(),
             members: members.clone(),
+        }),
+        RawDecl::ExternalMarshal { fqn, generics } => Ok(UserDecl::ExternalMarshal {
+            fqn: fqn.clone(),
+            generics: generics.clone(),
         }),
         RawDecl::Mutual { members } => {
             if members.len() < 2 {
@@ -1141,6 +1161,7 @@ impl<'a> Parser<'a> {
                 || self.peek_keyword("resource")
                 || self.peek_keyword("flags")
                 || self.peek_keyword("mutual")
+                || self.peek_keyword("external")
             {
                 decls.push(self.parse_nominal_decl()?);
             } else if self.peek_keyword("type") {
@@ -1207,12 +1228,25 @@ impl<'a> Parser<'a> {
             self.parse_flags_decl()
         } else if self.peek_keyword("mutual") {
             self.parse_mutual_decl()
+        } else if self.peek_keyword("external") {
+            self.parse_external_decl()
         } else {
             Err(ParseError::Expected {
                 at: self.pos,
                 what: "nominal decl keyword".into(),
             })
         }
+    }
+
+    /// `external <fqn>[<generic_params>];` — Phase 8 step 2.
+    /// External-marshal nominal: the wire format lives in a custom
+    /// `LeanMarshal` instance, not in the IDL.
+    fn parse_external_decl(&mut self) -> Result<RawDecl, ParseError> {
+        self.expect_keyword("external")?;
+        let fqn = self.parse_fqn()?;
+        let generics = self.parse_generic_param_names()?;
+        self.expect_char(';')?;
+        Ok(RawDecl::ExternalMarshal { fqn, generics })
     }
 
     /// `mutual { nominal_decl nominal_decl … }` — Phase 6 cluster.

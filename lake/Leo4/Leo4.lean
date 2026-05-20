@@ -26,3 +26,11 @@ import Leo4.Resource
 import Leo4.Builtins
 import Leo4.Deriving
 import Leo4.Build
+-- Phase 8 step 2: re-enable auto-import of MathlibSubset.
+-- The plugin now recognises types with proof-carrying fields as
+-- `UserDecl.externalMarshal` instead of choking, so `LeanMarshal Rat`
+-- being in scope no longer breaks `walkUserDecl`. The shim helpers
+-- (`leo4_marshal_<T>_dec/enc`) land in step 2b — until then,
+-- boundary calls of external-marshal types return
+-- `LEO4_ERR_UNIMPLEMENTED` cleanly rather than failing at IDL parse.
+import Leo4.MathlibSubset

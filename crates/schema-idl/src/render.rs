@@ -34,6 +34,8 @@ fn decl_band(d: &UserDecl) -> u8 {
         // so cross-band reordering must not break group integrity —
         // the band sort treats each `Mutual` block as one unit.
         UserDecl::Mutual { .. } => 0,
+        // External-marshal decls sort with value-band records.
+        UserDecl::ExternalMarshal { .. } => 0,
     }
 }
 
@@ -154,6 +156,13 @@ pub fn user_decl_to_idl(d: &UserDecl) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!("mutual {{ {inner} }}")
+        }
+        UserDecl::ExternalMarshal { fqn, generics } => {
+            // Phase 8 step 2: `external <fqn>[<generics>]`. The shim
+            // routes the wire format through C-callable Lean helpers
+            // (step 2b); the IDL form just declares the FQN as a
+            // known nominal so refs from func params parse.
+            format!("external {fqn}{}", generic_header(generics))
         }
     }
 }

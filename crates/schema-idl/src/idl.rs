@@ -86,6 +86,20 @@ pub enum UserDecl {
     Mutual {
         members: Vec<UserDecl>,
     },
+    /// Phase 8 step 2: a nominal type with a custom `LeanMarshal`
+    /// instance whose fields the plugin can't (or shouldn't) lower
+    /// — proof-carrying invariants (`Rat`'s `den_nz`, `reduced`),
+    /// opaque wrappers, etc. The shim routes encode/decode through
+    /// C-callable Lean helpers (`leo4_marshal_<T>_dec/enc`) emitted
+    /// in step 2b; at the *type-reference* level (function params /
+    /// return), the IDL still uses `IDLType::Record { fqn, args }`,
+    /// so the mangling and IDL form for refs match a regular record.
+    /// The distinction lives at this `UserDecl` level and is what
+    /// the shim emitter dispatches on.
+    ExternalMarshal {
+        fqn: String,
+        generics: Vec<String>,
+    },
 }
 
 impl UserDecl {
@@ -98,7 +112,8 @@ impl UserDecl {
             | UserDecl::Enum { fqn, .. }
             | UserDecl::Variant { fqn, .. }
             | UserDecl::Resource { fqn, .. }
-            | UserDecl::Flags { fqn, .. } => fqn,
+            | UserDecl::Flags { fqn, .. }
+            | UserDecl::ExternalMarshal { fqn, .. } => fqn,
             UserDecl::Mutual { .. } => "",
         }
     }

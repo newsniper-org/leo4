@@ -281,6 +281,12 @@ partial def userDeclToIDL : UserDecl → String
         ++ String.intercalate ", " caseStrs.toList ++ " }"
   | .resource fqn generics =>
       "resource " ++ fqn ++ genericHeader generics
+  | .externalMarshal fqn generics =>
+      -- Phase 8 step 2: opaque-marshal nominal. The wire format is
+      -- whatever the user's custom `LeanMarshal` impl produces;
+      -- the IDL declares it so cross-impl renderers know the FQN
+      -- is a valid nominal head.
+      "external " ++ fqn ++ genericHeader generics
   | .mutual members =>
       -- Each inner nominal_decl carries its own terminating `;`
       -- (matching the grammar's `nominal_decl = … , ";" ;`); the
@@ -299,6 +305,7 @@ private def declBand : UserDecl → Nat
   | .variant _ _ _ => 0
   | .resource _ _  => 1
   | .mutual _      => 0
+  | .externalMarshal _ _ => 0
 
 /--
 Render the canonical IDL form for the discovered export set + user-type

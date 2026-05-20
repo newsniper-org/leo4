@@ -1,6 +1,7 @@
 package leo4-sample;
 interface Sample {
   mutual { variant Sample.Expr { lit(u64), seq(Cyc<1>) }; variant Sample.Stmt { nop, block(Cyc<0>) }; };
+  external Rat;
   enum Sample.Color { red, green, blue };
   variant Sample.Either<T0, T1> { left(T0), right(T1) };
   record Sample.Pair<T0, T1> { fst: T0, snd: T1 };

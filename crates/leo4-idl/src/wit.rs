@@ -302,6 +302,14 @@ fn render_user_decl(d: &UserDecl, needs: &mut BTreeSet<SideAlias>) -> String {
                 "Mutual group reached WIT lowering without being flattened to its members"
             )
         }
+        UserDecl::ExternalMarshal { fqn, .. } => {
+            // Phase 8 step 2: external-marshal types lower to an
+            // opaque `resource` in WIT — Component Model consumers
+            // see them as handles. The Lean-side custom LeanMarshal
+            // is invisible across the wasm boundary.
+            let name = kebab_case(fqn);
+            format!("  resource {name};")
+        }
     }
 }
 

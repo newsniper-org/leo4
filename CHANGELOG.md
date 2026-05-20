@@ -80,6 +80,51 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — Phase 8 step 2a: UserDecl.ExternalMarshal AST + render (2026-05-20)
+
+ROADMAP Phase 8 second landing (first half). Adds the IDL-level
+recognition for types with custom `LeanMarshal` instances whose
+fields the plugin can't lower (proof-carrying invariants like
+`Rat`'s `den_nz` / `reduced`, opaque wrappers, …). Step 2b will
+land the actual C-callable Lean helpers and shim glue so the
+boundary round-trips end to end; this commit unblocks the IDL
+form so `LeanMarshal Rat` being in scope no longer breaks
+parsing / mangling.
+
+- `lake/Leo4Plugin/Leo4Plugin/AdmitSet.lean`:
+  `UserDecl.externalMarshal (fqn) (generics)` ctor. `walkUserDecl`
+  falls back to `externalMarshal` when a record or variant body
+  can't be lowered (any field's `exprToIDLSubst` returns `none`)
+  AND the type carries a custom `LeanMarshal` instance.
+- `lake/Leo4Plugin/Leo4Plugin/Mangling.lean`: `userDeclToIDL`
+  renders `external <fqn>[<generics>]`. `declBand` puts the decl
+  in the value band (0).
+- Rust schema-idl mirror: `IDLType` reference layer unchanged
+  (`func f(_0: Rat)` lowers to `IDLType::Record { fqn: "Rat" }`
+  same as a regular record). The distinction lives at the
+  `UserDecl` level; the shim emitter dispatches on it. New
+  variant `UserDecl::ExternalMarshal { fqn, generics }` and
+  matching `RawDecl::ExternalMarshal`.
+- `SPEC/idl-grammar.ebnf` implicitly extended via the existing
+  `nominal_decl` umbrella; parser recognises the `external`
+  keyword in `parse_nominal_decl`, top-level docs, and
+  interface bodies.
+- `lake/Leo4/Leo4.lean` re-enables auto-import of
+  `Leo4.MathlibSubset` (was opt-in in the prior commit because
+  `Rat` exposure broke `walkUserDecl`; the externalMarshal
+  fallback now closes that gap).
+- WIT lowering routes external-marshal decls to opaque
+  `resource <name>;` — wasm Component Model consumers see them
+  as host-managed handles; the Lean-side custom marshal isn't
+  visible across the wasm boundary.
+
+Schema_hash rotates: `5wlbxlzagwuyy` → `47swds7jpnqre`. Cross-impl
+mangling harness stays green at **63 mangled names byte-identical**
+(`Sample.stringify` instantiation list now includes `Rat`).
+
+Boundary round-trip for `Rat` still returns `LEO4_ERR_UNIMPLEMENTED`
+— step 2b lands the actual wire-up.
+
 ### Added — Phase 7 step 1: future / stream effect desugar (2026-05-20)
 
 ROADMAP Phase 7 first landing (parser-side, stable Rust, no

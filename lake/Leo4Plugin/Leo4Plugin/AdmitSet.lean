@@ -66,6 +66,13 @@ inductive UserDecl where
   ≥ 2 members; singleton groups should be ordinary `record` /
   `variant` / `enumT` decls with `Self` recursion. -/
   | mutual   (members : Array UserDecl)
+  /-- Phase 8 step 2: a nominal type with a custom `LeanMarshal`
+  instance whose fields the plugin can't (or shouldn't) lower —
+  proof-carrying invariants (`Rat`'s `den_nz`, `reduced`), opaque
+  wrapper structs, etc. The shim treats the wire format as opaque
+  and routes through C-callable Lean helpers
+  (`leo4_marshal_<T>_dec/enc`, emitted in step 2b). -/
+  | externalMarshal (fqn : String) (generics : Array Name)
   deriving Repr, Inhabited
 
 namespace UserDecl
@@ -76,6 +83,7 @@ partial def fqn : UserDecl → String
   | .enumT    f _   => f
   | .variant  f _ _ => f
   | .resource f _   => f
+  | .externalMarshal f _ => f
   | .mutual   _     => ""
 
 /-- Flatten a `UserDecl` to its leaves: a non-mutual decl yields a
@@ -371,7 +379,11 @@ partial def walkUserDecl
         | none => return none
       return some acc
     match res with
-    | none => return none
+    -- Phase 8 step 2 fallback: a structure with proof / unlowerable
+    -- fields *but* a custom `LeanMarshal` instance becomes
+    -- `externalMarshal`. The shim treats the wire format as opaque
+    -- and routes through C-callable Lean helpers (Phase 8 step 2b).
+    | none => return some (.externalMarshal fqn genNames)
     | some fields => return some (.record fqn genNames fields)
   -- Mixed multi-ctor → variant. Gather generic names from the first
   -- ctor (every ctor shares the same enclosing binders).
@@ -392,7 +404,8 @@ partial def walkUserDecl
         | none => return none
       return some acc
     match payload with
-    | none => return none
+    -- Phase 8 step 2 fallback for variants too.
+    | none => return some (.externalMarshal fqn genNames)
     | some p => cases := cases.push (caseName, p)
   return some (.variant fqn genNames cases)
 
