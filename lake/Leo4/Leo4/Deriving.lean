@@ -158,7 +158,29 @@ instance {instBinders}: Leo4.LeanMarshal {head} where
 
 /-! ## Mixed inductive (variant) -/
 
-private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : CommandElabM Unit := do
+/-- One variant member's elaborated rendering pieces. The `header`
+strings cover the rendered Lean source for `(<head> : ByteArray …)`
+parts of the synthesised partial defs; `encArms` / `decArms` are the
+per-ctor match arms. Used by both the standalone variant emitter
+and the Phase 6 mutual-cluster emitter. -/
+private structure VariantPieces where
+  encFn       : String
+  decFn       : String
+  head        : String
+  instBinders : String
+  defBinders  : String
+  encArms     : String
+  decArms     : String
+  declName    : Name
+
+/-- Build a `VariantPieces` for `declName` (a multi-ctor inductive),
+routing every cluster-peer reference inside payload fields to a
+direct `<peer>._leo4_encode/decode` call. `peers` lists every peer
+declaration (including `declName` itself). For a non-mutual variant
+this is just `#[declName]`. -/
+private def buildVariantPieces
+    (peers : Array Name) (declName : Name) (indVal : InductiveVal)
+    : CommandElabM VariantPieces := do
   let env := (← getEnv)
   let qname := qualified declName
   let ctors := indVal.ctors.toArray
@@ -166,7 +188,7 @@ private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : Comman
   let decFn := s!"{declName.toString}._leo4_decode"
   let params ← liftTermElabM (getParamBinders indVal)
   let (head, instBinders, defBinders) := renderGenericFragments qname params
-  -- Encode arms.
+  -- Encode / decode arms.
   let mut encArms : String := ""
   let mut decArms : String := ""
   for i in [0:ctors.size] do
@@ -174,15 +196,19 @@ private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : Comman
     let cq    := qualified cname
     let some (.ctorInfo cv) := env.find? cname
       | throwError s!"deriving LeanMarshal: ctor info missing for {cname}"
-    -- Per-field "is the type the enclosing inductive itself?" mask.
-    -- Self-typed fields call the partial-def aux directly so that
-    -- instance synthesis doesn't recurse on the unfinished instance.
-    let selfMask : Array Bool ← liftTermElabM <|
+    -- Per-field index in `peers` (some idx) or none (non-cluster).
+    -- Cluster fields route directly to `<peer>._leo4_encode/decode`
+    -- so instance synthesis doesn't recurse on the unfinished
+    -- instances. The `declName == peers[i]` case is just the
+    -- v0-style self-recursion fast path; cross-decl peers use the
+    -- same mechanism, lifted to the whole `iv.all` cluster.
+    let crossIdx : Array (Option Nat) ← liftTermElabM <|
       Meta.forallTelescopeReducing cv.type fun args _ => do
         let fieldArgs := args.extract indVal.numParams args.size
         fieldArgs.mapM fun a => do
           let argTy ← Meta.inferType a
-          return argTy.getAppFn.isConstOf declName
+          let head := argTy.getAppFn
+          return peers.findIdx? (fun p => head.isConstOf p)
     let argNames : List String :=
       (List.range cv.numFields).map fun k => s!"a{k}"
     let pat :=
@@ -192,18 +218,22 @@ private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : Comman
       s!"      let buf := Leo4.LeanMarshal.canonicalEncode (T := UInt32) ({i} : UInt32) buf\n"
     for j in [0:argNames.length] do
       let an := argNames[j]!
-      if selfMask[j]! then
-        encBody := encBody ++ s!"      let buf := {encFn} {an} buf\n"
-      else
+      match crossIdx[j]! with
+      | some idx =>
+        let peer := peers[idx]!
+        encBody := encBody ++ s!"      let buf := {peer.toString}._leo4_encode {an} buf\n"
+      | none =>
         encBody := encBody ++ s!"      let buf := Leo4.LeanMarshal.canonicalEncode {an} buf\n"
     encArms := encArms ++
       s!"    | {pat} => Id.run do\n{encBody}      return buf\n"
     let mut decBody : String := ""
     for j in [0:argNames.length] do
       let an := argNames[j]!
-      if selfMask[j]! then
-        decBody := decBody ++ s!"      let ({an}, off) ← {decFn} buf off\n"
-      else
+      match crossIdx[j]! with
+      | some idx =>
+        let peer := peers[idx]!
+        decBody := decBody ++ s!"      let ({an}, off) ← {peer.toString}._leo4_decode buf off\n"
+      | none =>
         decBody := decBody ++ s!"      let ({an}, off) ← Leo4.LeanMarshal.canonicalDecode buf off\n"
     let ret :=
       if argNames.isEmpty then cq
@@ -212,26 +242,105 @@ private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : Comman
       s!"    | {i} => do\n{decBody}      return ({ret}, off)\n"
   decArms := decArms ++
     s!"    | t => throw (Leo4.LeanError.mk' Leo4.LeanError.decodeError s!\"{declName.toString}: invalid tag \{t.toNat}\")\n"
+  return {
+    encFn, decFn, head, instBinders, defBinders, encArms, decArms, declName
+  }
 
+/-- Render `partial def {encFn}` for one variant member. Returns a
+self-contained Lean command string. -/
+private def renderEncodePartialDef (p : VariantPieces) : String :=
+  s!"partial def {p.encFn} {p.defBinders}(v : {p.head}) (buf : ByteArray) : ByteArray :=\n" ++
+  s!"  match v with\n{p.encArms}"
+
+/-- Render `partial def {decFn}` for one variant member. Self-contained
+Lean command string. -/
+private def renderDecodePartialDef (p : VariantPieces) : String :=
+  s!"partial def {p.decFn} {p.defBinders}(buf : ByteArray) (off : Nat) :\n" ++
+  s!"    Except Leo4.LeanError ({p.head} × Nat) := do\n" ++
+  s!"  let (tag, off) ← Leo4.LeanMarshal.canonicalDecode (T := UInt32) buf off\n" ++
+  s!"  match tag with\n{p.decArms}"
+
+private def mkVariantInstance (declName : Name) (indVal : InductiveVal) : CommandElabM Unit := do
+  let p ← buildVariantPieces #[declName] declName indVal
+  runSyntheticCommand (renderEncodePartialDef p)
+  runSyntheticCommand (renderDecodePartialDef p)
   runSyntheticCommand s!"\
-partial def {encFn} {defBinders}(v : {head}) (buf : ByteArray) : ByteArray :=
-  match v with
-{encArms}"
-  runSyntheticCommand s!"\
-partial def {decFn} {defBinders}(buf : ByteArray) (off : Nat) :
-    Except Leo4.LeanError ({head} × Nat) := do
-  let (tag, off) ← Leo4.LeanMarshal.canonicalDecode (T := UInt32) buf off
-  match tag with
-{decArms}"
-  runSyntheticCommand s!"\
-instance {instBinders}: Leo4.LeanMarshal {head} where
-  canonicalEncode := {encFn}
-  canonicalDecode := {decFn}"
+instance {p.instBinders}: Leo4.LeanMarshal {p.head} where
+  canonicalEncode := {p.encFn}
+  canonicalDecode := {p.decFn}"
+
+/-- Phase 6 mutual-cluster deriving handler. Emits one `mutual ... end`
+block carrying every member's `partial def _leo4_encode / _leo4_decode`
+pair, then one `instance` per member. Peers in the same `iv.all`
+group cross-call each other's partial defs directly, breaking the
+typeclass-instance dependency cycle. Variant members only — a
+cluster containing a record / enum member falls back to the
+per-decl loop (and will trip Lean's instance-synthesis if it tries
+to forward-reference a peer's marshal instance, surfacing as a
+deriving error rather than a silent wrong encoding). -/
+private def mkMutualVariantCluster (members : Array Name) : CommandElabM Unit := do
+  let env ← getEnv
+  -- Gather pieces for every member. Each member must be a multi-ctor
+  -- inductive with payload (variant shape).
+  let mut pieces : Array VariantPieces := #[]
+  for declName in members do
+    let some (.inductInfo iv) := env.find? declName
+      | throwError s!"deriving LeanMarshal (mutual cluster): not an inductive: {declName}"
+    let p ← buildVariantPieces members declName iv
+    pieces := pieces.push p
+  -- One `mutual ... end` block carrying all 2N partial defs. Lean
+  -- requires every member of a `mutual` block to be either a `def` or
+  -- a `partial def`, and parses the whole block as one command.
+  let body : String :=
+    String.intercalate "\n"
+      (pieces.toList.flatMap fun p =>
+        [renderEncodePartialDef p, renderDecodePartialDef p])
+  runSyntheticCommand s!"mutual\n{body}\nend"
+  -- One instance per member.
+  for p in pieces do
+    runSyntheticCommand s!"\
+instance {p.instBinders}: Leo4.LeanMarshal {p.head} where
+  canonicalEncode := {p.encFn}
+  canonicalDecode := {p.decFn}"
 
 /-! ## Handler entry point -/
 
+/-- True iff `declNames` is a genuine Lean mutual cluster: every member's
+`iv.all` array matches the input set verbatim and has size > 1. A
+`deriving instance` of independent inductives passes them in one
+batch too, but their `iv.all` is each singleton, so they slip through
+the per-decl branch below. -/
+private def isMutualCluster (env : Environment) (declNames : Array Name) : Bool :=
+  declNames.size > 1 &&
+  declNames.all fun n =>
+    match env.find? n with
+    | some (.inductInfo iv) =>
+      iv.all.length == declNames.size &&
+      iv.all.all fun m => declNames.contains m
+    | _ => false
+
+/-- True iff every member of the cluster is a variant inductive (≥ 2
+ctors, not all-nullary, not a structure). The Phase 6-3c emitter only
+covers variant-only clusters; record / enum members in a mutual
+cluster fall back to the per-decl loop (which will fail Lean
+elaboration with a clear "missing instance" error rather than
+silently emit a wrong encoding). -/
+private def isAllVariantCluster (env : Environment) (declNames : Array Name) : Bool :=
+  declNames.all fun n =>
+    match env.find? n with
+    | some (.inductInfo iv) =>
+      iv.ctors.length > 1 ∧ !isStructureLike env n ∧ !isAllNullary env iv
+    | _ => false
+
 private def mkLeanMarshalHandler (declNames : Array Name) : CommandElabM Bool := do
   let env ← getEnv
+  -- Phase 6 fast path: every member of a genuine `mutual ... end`
+  -- inductive cluster gets a single `mutual { partial def … }` block
+  -- so cross-decl encode / decode can recurse through direct function
+  -- references rather than forward-undefined typeclass instances.
+  if isMutualCluster env declNames && isAllVariantCluster env declNames then
+    mkMutualVariantCluster declNames
+    return true
   for declName in declNames do
     let some (.inductInfo indVal) := env.find? declName | return false
     if isStructureLike env declName then

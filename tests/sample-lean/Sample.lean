@@ -157,4 +157,35 @@ def eitherTaggedU64String (e : Either UInt64 String) : Bool :=
   | .left  _ => false
   | .right _ => true
 
+-- Phase 6 fixture: mutual recursion between two nominal types
+-- (`SPEC/phase-6-mutual.md` §1). Lean's `mutual ... end` block ties
+-- Expr / Stmt into one `iv.all` group; the plugin emits one
+-- `mutual { variant Sample.Expr { … }; variant Sample.Stmt { … }; }`
+-- block where peer references use `Cyc<i>` instead of FQN, and the
+-- deriving handler emits one `mutual { partial def … }` block so
+-- cross-decl marshalling routes through direct function references
+-- rather than typeclass-instance forward references.
+mutual
+  inductive Expr where
+    | lit  (n : UInt64)
+    | seq  (s : Stmt)
+    deriving LeanMarshal
+  inductive Stmt where
+    | nop
+    | block (e : Expr)
+    deriving LeanMarshal
+end
+
+@[leo4_export]
+def exprIsLit (e : Expr) : Bool :=
+  match e with
+  | .lit _ => true
+  | .seq _ => false
+
+@[leo4_export]
+def stmtIsNop (s : Stmt) : Bool :=
+  match s with
+  | .nop     => true
+  | .block _ => false
+
 end Sample
