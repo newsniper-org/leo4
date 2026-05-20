@@ -38,6 +38,12 @@ pub enum IDLType {
     /// `Self<T1, …, Tn>` — explicit substitution at a self-reference.
     /// Mangles as `self_<…>_x` per SPEC/mangling.md §"Self and Self<…>".
     SelfApp(Vec<IDLType>),
+    /// `Cyc<i>` — cycle-breaker reference to the `i`-th member of the
+    /// enclosing mutual group (Phase 6, `SPEC/phase-6-mutual.md` §2).
+    /// `i` is 0-based and scoped to the immediately enclosing
+    /// `mutual { … }` block; resolvers reject `Cyc<i>` references that
+    /// escape their group or that point past the group's last member.
+    Cyc(u32),
 }
 
 /// User-defined nominal type declarations the plugin discovers by walking
@@ -71,9 +77,20 @@ pub enum UserDecl {
         generics: Vec<String>,
         members: Vec<String>,
     },
+    /// `mutual { … }` block — Phase 6 cross-decl recursion cluster
+    /// (`SPEC/phase-6-mutual.md` §1). Members share a `Cyc<i>`
+    /// namespace, i.e. `IDLType::Cyc(i)` references inside any
+    /// member resolve to `members[i as usize]`. A `Mutual` group
+    /// must have ≥ 2 members; the singleton case is a parse error
+    /// and authors keep using `Self`.
+    Mutual {
+        members: Vec<UserDecl>,
+    },
 }
 
 impl UserDecl {
+    /// Member FQN for non-mutual decls. Returns `""` for a `Mutual`
+    /// group — call `members()` and pick the desired index instead.
     #[must_use]
     pub fn fqn(&self) -> &str {
         match self {
@@ -82,6 +99,18 @@ impl UserDecl {
             | UserDecl::Variant { fqn, .. }
             | UserDecl::Resource { fqn, .. }
             | UserDecl::Flags { fqn, .. } => fqn,
+            UserDecl::Mutual { .. } => "",
+        }
+    }
+
+    /// Iterator over the leaf decls — a non-mutual decl yields just
+    /// itself; a `Mutual` group yields its member decls in source
+    /// order. Other passes that need a flat list of nominal types
+    /// (e.g. handler resolution) should iterate through this.
+    pub fn leaves(&self) -> Box<dyn Iterator<Item = &UserDecl> + '_> {
+        match self {
+            UserDecl::Mutual { members } => Box::new(members.iter()),
+            other => Box::new(std::iter::once(other)),
         }
     }
 }

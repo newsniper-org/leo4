@@ -59,6 +59,7 @@ pub fn mangle_type(t: &IDLType) -> String {
         Io(t) => format!("I_{}_i", mangle_type(t)),
         Self_ => "self".into(),
         SelfApp(args) => format!("self_{}_x", join_underscore(args)),
+        Cyc(i) => format!("c{i}c"),
     }
 }
 
@@ -98,6 +99,15 @@ mod tests {
         assert_eq!(mangle_type(&IDLType::String), "str");
         assert_eq!(mangle_type(&IDLType::BigInt), "bI");
         assert_eq!(mangle_type(&IDLType::BigNat), "bN");
+    }
+
+    #[test]
+    fn cyc_token() {
+        // Phase 6 cycle-breaker mangling: `Cyc<i>` → `c<i>c`. Indices
+        // are 0-based and have no leading zeros.
+        assert_eq!(mangle_type(&IDLType::Cyc(0)), "c0c");
+        assert_eq!(mangle_type(&IDLType::Cyc(1)), "c1c");
+        assert_eq!(mangle_type(&IDLType::Cyc(42)), "c42c");
     }
 
     #[test]

@@ -29,6 +29,11 @@ fn decl_band(d: &UserDecl) -> u8 {
         | UserDecl::Variant { .. }
         | UserDecl::Flags { .. } => 0,
         UserDecl::Resource { .. } => 1,
+        // Mutual groups sort between value bands and resource bands.
+        // The group's *order* is source-significant (Cyc<i> resolution),
+        // so cross-band reordering must not break group integrity —
+        // the band sort treats each `Mutual` block as one unit.
+        UserDecl::Mutual { .. } => 0,
     }
 }
 
@@ -82,6 +87,7 @@ pub fn idl_form(t: &IDLType) -> String {
             "Self<{}>",
             args.iter().map(idl_form).collect::<Vec<_>>().join(", ")
         ),
+        Cyc(i) => format!("Cyc<{i}>"),
     }
 }
 
@@ -135,6 +141,18 @@ pub fn user_decl_to_idl(d: &UserDecl) -> String {
                 generic_header(generics),
                 members.join(", ")
             )
+        }
+        UserDecl::Mutual { members } => {
+            // Phase 6: emit each member on a `; `-joined line wrapped
+            // in a `mutual { … }` block (SPEC/phase-6-mutual.md §1).
+            // `render_canonical` then re-decorates with newlines for
+            // pretty mode and collapses whitespace for the hash input.
+            let inner = members
+                .iter()
+                .map(user_decl_to_idl)
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!("mutual {{ {inner} }}")
         }
     }
 }

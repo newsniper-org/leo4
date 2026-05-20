@@ -162,6 +162,16 @@ fn lower_type(
         Self_ | SelfApp(_) => self_name
             .expect("Self / Self<…> used outside a variant/record body")
             .to_string(),
+        Cyc(_) => {
+            // Phase 6 cycle-breaker tokens never reach WIT lowering: the
+            // plugin resolves each `Cyc<i>` to its peer member's FQN
+            // before calling the WIT emitter so the resulting `.wit`
+            // file uses ordinary nominal references (WIT has no notion
+            // of mutual-group brackets).
+            unreachable!(
+                "Cyc<i> token escaped resolution into the WIT lowering pass"
+            )
+        }
     }
 }
 
@@ -281,6 +291,16 @@ fn render_user_decl(d: &UserDecl, needs: &mut BTreeSet<SideAlias>) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("  flags {name} {{ {body} }}")
+        }
+        UserDecl::Mutual { .. } => {
+            // Phase 6 mutual groups should be flattened to per-member
+            // decls by the caller before reaching WIT lowering — WIT
+            // expresses cycles via plain forward references in the
+            // same interface, no bracketing. If a `Mutual` decl gets
+            // here it means the upstream pass forgot to flatten.
+            unreachable!(
+                "Mutual group reached WIT lowering without being flattened to its members"
+            )
         }
     }
 }
