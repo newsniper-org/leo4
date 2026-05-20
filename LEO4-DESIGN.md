@@ -32,7 +32,7 @@ written justification.
 | D1 | Project name | `leo4` |
 | D2 | Schema IDL | Strict superset of WIT; lowering to WIT when WASM target requires it |
 | D3 | Generic strategy | **(α′)** Specialize-both with **constraint-driven** instantiation enumeration |
-| D4 | Async model | Sync only until WASIp3 stabilizes; `io<T>` lowers to `result<T, error>` for now |
+| D4 | Async model | Sync only until WASIp3 stabilizes; `io<T>` lowers to `result<T, error>` for now. **Surface form when lifted (decided 2026-05-19):** asynchrony is a *function-level effect flag* (`is_async` boolean, or equivalent enum if `stream<T>` also lifts), **not** an `IDLType` variant. `future<T>` / `stream<T>` in source IDL are syntactic sugar that the parser folds into the function's effect + payload type `T`. Rationale: keeps `IDLType` free of effect coloration, avoids effect-wrappers leaking into record/variant payloads, and matches the WIT-component-model "function ABI carries the future, not the value" mental model. |
 | D5 | `leo4_specialize_when` syntax on Lean side | Lean metaprogram quotation via a dedicated `leo4_constraint` syntax category |
 | D6 | Rust `extern` representation | `extern "C"` plus a macro layer (`#[leo4::import]`) on stable Rust; no new calling convention |
 | D7 | Repository structure | Monorepo (Cargo workspace + Lake workspace, side by side) |

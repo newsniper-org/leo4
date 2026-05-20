@@ -738,7 +738,7 @@ private def listHandler (ih : TyHandler) : TyHandler :=
     ctorScalarSz := 0
     decodeBlock  := fun var cleanup =>
       let inner := innerName var
-      let innerCleanup := s!" lean_dec_ref({var}_arr);" ++ cleanup
+      let innerCleanup := s!" lean_dec({var}_arr);" ++ cleanup
       s!"    lean_object *{var} = NULL;\n" ++
       "    " ++ lb ++ "\n" ++
       s!"        if (args_len - off < 4u) " ++ lb ++
@@ -810,7 +810,7 @@ private def binaryTupleHandler (ih1 : TyHandler) (ih2 : TyHandler) : TyHandler :
       let v1 := s!"{var}_fst"
       let v2 := s!"{var}_snd"
       let cleanupAfterFirst :=
-        (if ih1.ownsRef then s!" lean_dec_ref({v1});" else "") ++ cleanup
+        (if ih1.ownsRef then s!" lean_dec({v1});" else "") ++ cleanup
       s!"    lean_object *{var} = NULL;\n" ++
       "    " ++ lb ++ "\n" ++
       ih1.decodeBlock v1 cleanup ++
@@ -973,7 +973,255 @@ private def bigintHandler : TyHandler :=
     unboxExpr    := id
   }
 
-private partial def handlerFor : IDLType → Option TyHandler
+/-- `enum F { c₀, c₁, … }` per SPEC §10: `u32 tag`. Lean represents
+    no-field constructors as immediate boxed scalars (`Color.red = lean_box(0)`,
+    etc.), so the encoder reads `lean_obj_tag` and the decoder boxes the
+    wire tag. Rejects tags ≥ `numCases`. -/
+private def enumHandler (numCases : Nat) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      "        if (args_len - off < 4u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint32_t {var}_tag;\n" ++
+      s!"        leo4_memcpy(&{var}_tag, args_ptr + off, 4);\n" ++
+      "        off += 4u;\n" ++
+      s!"        if ({var}_tag >= {numCases}u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        {var} = lean_box((size_t){var}_tag);\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      "    " ++ lb ++ "\n" ++
+      "        if (ret_cap - out_off < 4u) " ++ lb ++
+        s!" *ret_len = out_off + 4u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"        uint32_t _tag = (uint32_t)lean_obj_tag({var});\n" ++
+      "        leo4_memcpy(ret_ptr + out_off, &_tag, 4);\n" ++
+      "        out_off += 4u;\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `record R { f₁: T₁, … }` per SPEC §8: fields concatenated in
+    declaration order. Lean ctor layout: object fields first (indexed
+    by appearance order among objects), then scalar fields packed in
+    declaration order at running byte offsets. -/
+private def recordHandler (fields : Array TyHandler) : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  -- Compute ctor layout: per-field (objSlot, scalarOff).
+  let layout : Array (Nat × Nat) := Id.run do
+    let mut objIdx : Nat := 0
+    let mut scalarOff : Nat := 0
+    let mut out : Array (Nat × Nat) := #[]
+    for h in fields do
+      if h.ownsRef then
+        out := out.push (objIdx, 0)
+        objIdx := objIdx + 1
+      else
+        out := out.push (0, scalarOff)
+        scalarOff := scalarOff + h.ctorScalarSz
+    return out
+  let numObjs := fields.foldl (init := 0) fun acc h => acc + (if h.ownsRef then 1 else 0)
+  let scalarSz := fields.foldl (init := 0) fun acc h => acc + h.ctorScalarSz
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup => Id.run do
+      let mut body : String := s!"    lean_object *{var} = NULL;\n    " ++ lb ++ "\n"
+      -- LIFO cleanup of fields already decoded into local temporaries.
+      let mut localCleanup : String := cleanup
+      for i in [0 : fields.size] do
+        let h := fields[i]!
+        let v := s!"{var}_f{i}"
+        body := body ++ h.decodeBlock v localCleanup
+        if h.ownsRef then
+          localCleanup := s!" lean_dec({v});" ++ localCleanup
+      body := body ++ s!"        {var} = lean_alloc_ctor(0, {numObjs}, {scalarSz});\n"
+      for i in [0 : fields.size] do
+        let h := fields[i]!
+        let (oslot, soff) := layout[i]!
+        let v := s!"{var}_f{i}"
+        body := body ++ s!"        {ctorSetCall h oslot soff var v};\n"
+      body := body ++ "    " ++ rb ++ "\n"
+      return body
+    encodeBlock  := fun var cleanup => Id.run do
+      let mut body : String := "    " ++ lb ++ "\n"
+      for i in [0 : fields.size] do
+        let h := fields[i]!
+        let (oslot, soff) := layout[i]!
+        let v := s!"{var}_f{i}"
+        body := body ++ s!"        {h.cType} {v} = ({h.cType}){ctorGetCall h oslot soff var};\n"
+        body := body ++ h.encodeBlock v ""
+      body := body ++ "    " ++ rb ++ "\n" ++ cleanup
+      return body
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- `resource R` per SPEC §12: opaque `u64` handle. Lean represents
+    a `@[leo4_resource] structure R { raw : UInt64 }` as a one-field
+    ctor with the `u64` in the scalar area at offset 0. -/
+private def resourceHandler : TyHandler :=
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      "        if (args_len - off < 8u) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
+      s!"        uint64_t {var}_h;\n" ++
+      s!"        leo4_memcpy(&{var}_h, args_ptr + off, 8);\n" ++
+      "        off += 8u;\n" ++
+      s!"        {var} = lean_alloc_ctor(0, 0, 8);\n" ++
+      s!"        lean_ctor_set_uint64({var}, 0, {var}_h);\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      "    " ++ lb ++ "\n" ++
+      "        if (ret_cap - out_off < 8u) " ++ lb ++
+        s!" *ret_len = out_off + 8u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+      s!"        uint64_t _h = lean_ctor_get_uint64({var}, 0);\n" ++
+      "        leo4_memcpy(ret_ptr + out_off, &_h, 8);\n" ++
+      "        out_off += 8u;\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+/-- Look up a `UserDecl` by FQN. Linear scan — sample sets have a
+handful of decls; if real consumers ship hundreds, swap in a
+`Std.HashMap`. -/
+private def findUserDecl (decls : Array UserDecl) (fqn : String) : Option UserDecl :=
+  decls.find? fun d => d.fqn == fqn
+
+/-- Predicate: every case of the variant has either zero fields or
+fields that are all `Self`. The W7-2d-ii helper-function emitter only
+supports this shape; anything richer falls back to the unimplemented
+stub. -/
+private def variantIsSelfOnly (cases : Array (Name × Array IDLType)) : Bool :=
+  cases.all fun (_, fields) =>
+    fields.all fun t => match t with | .self => true | _ => false
+
+/-- Emit forward decls + definitions for the self-recursive
+encoder/decoder helpers of one variant declaration. Returns `none`
+when the variant doesn't fit the W7-2d-ii restriction. -/
+private def renderVariantHelpers
+    (fqn : String) (cases : Array (Name × Array IDLType)) : Option String := Id.run do
+  if !variantIsSelfOnly cases then return none
+  let safe := fqnSeg fqn
+  let dec := s!"leo4_dec_{safe}"
+  let enc := s!"leo4_enc_{safe}"
+  let lb := "{"
+  let rb := "}"
+  -- Decoder.
+  let mut decBody : String :=
+    s!"static int32_t {dec}(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out) " ++ lb ++ "\n" ++
+    "    *out = NULL;\n" ++
+    "    if (buf_len - *off < 1u) return LEO4_ERR_DECODE;\n" ++
+    "    uint8_t disc = buf[*off]; *off += 1u;\n"
+  for i in [0 : cases.size] do
+    let (_, fields) := cases[i]!
+    let n := fields.size
+    decBody := decBody ++ s!"    if (disc == {i}u) " ++ lb ++ "\n"
+    if n == 0 then
+      decBody := decBody ++ s!"        *out = lean_box({i});\n" ++
+                "        return LEO4_OK;\n" ++
+                "    " ++ rb ++ "\n"
+    else
+      -- Recursive Self payloads.
+      let mut accCleanup : String := ""
+      for j in [0 : n] do
+        decBody := decBody ++ s!"        lean_object *f{j};\n" ++
+          s!"        " ++ lb ++ s!" int32_t st = {dec}(buf, buf_len, off, &f{j});\n" ++
+          s!"          if (st) " ++ lb ++ accCleanup ++ s!" return st; " ++ rb ++ s!" " ++ rb ++ "\n"
+        accCleanup := s!" lean_dec(f{j});" ++ accCleanup
+      decBody := decBody ++ s!"        lean_object *r = lean_alloc_ctor({i}, {n}, 0);\n"
+      for j in [0 : n] do
+        decBody := decBody ++ s!"        lean_ctor_set(r, {j}, f{j});\n"
+      decBody := decBody ++ "        *out = r;\n" ++
+                "        return LEO4_OK;\n" ++
+                "    " ++ rb ++ "\n"
+  decBody := decBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
+  -- Encoder.
+  let mut encBody : String :=
+    s!"static int32_t {enc}(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out) " ++ lb ++ "\n" ++
+    "    if (cap - *off < 1u) " ++ lb ++ " *needed_out = *off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+    "    unsigned tag = lean_obj_tag(v);\n" ++
+    "    buf[*off] = (uint8_t)tag; *off += 1u;\n"
+  for i in [0 : cases.size] do
+    let (_, fields) := cases[i]!
+    let n := fields.size
+    encBody := encBody ++ s!"    if (tag == {i}u) " ++ lb ++ "\n"
+    if n == 0 then
+      encBody := encBody ++ "        return LEO4_OK;\n" ++
+                "    " ++ rb ++ "\n"
+    else
+      for j in [0 : n] do
+        encBody := encBody ++ s!"        lean_object *f{j} = lean_ctor_get(v, {j});\n" ++
+          s!"        " ++ lb ++ s!" int32_t st = {enc}(f{j}, buf, cap, off, needed_out);\n" ++
+          s!"          if (st) return st; " ++ rb ++ "\n"
+      encBody := encBody ++ "        return LEO4_OK;\n" ++
+                "    " ++ rb ++ "\n"
+  encBody := encBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
+  return some (
+    s!"static int32_t {dec}(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out);\n" ++
+    s!"static int32_t {enc}(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out);\n" ++
+    "\n" ++ decBody ++ "\n" ++ encBody ++ "\n"
+  )
+
+/-- `variant V` per SPEC §9, restricted to the W7-2d-ii shape
+(self-only payloads). Delegates to the per-variant
+`leo4_dec_<safe>` / `leo4_enc_<safe>` helpers emitted at the
+translation-unit level. -/
+private def variantHandler (fqn : String) : TyHandler :=
+  let safe := fqnSeg fqn
+  let dec := s!"leo4_dec_{safe}"
+  let enc := s!"leo4_enc_{safe}"
+  let lb := "{"
+  let rb := "}"
+  { cType        := "lean_object *"
+    externCType  := "lean_object *"
+    ownsRef      := true
+    scalarKind   := none
+    ctorScalarSz := 0
+    decodeBlock  := fun var cleanup =>
+      s!"    lean_object *{var} = NULL;\n" ++
+      "    " ++ lb ++ "\n" ++
+      s!"        int32_t st = {dec}(args_ptr, args_len, &off, &{var});\n" ++
+      s!"        if (st != LEO4_OK) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return st; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n"
+    encodeBlock  := fun var cleanup =>
+      "    " ++ lb ++ "\n" ++
+      "        size_t needed_after = 0;\n" ++
+      s!"        int32_t st = {enc}({var}, ret_ptr, ret_cap, &out_off, &needed_after);\n" ++
+      "        if (st == LEO4_ERR_RETURN_BUF_TOO_SMALL) " ++ lb ++
+        s!" *ret_len = needed_after;{cleanup} return st; " ++ rb ++ "\n" ++
+      "        if (st != LEO4_OK) " ++ lb ++
+        s!" *ret_len = 0;{cleanup} return st; " ++ rb ++ "\n" ++
+      "    " ++ rb ++ "\n" ++
+      cleanup
+    boxExpr      := id
+    unboxExpr    := id
+  }
+
+private partial def handlerFor (userDecls : Array UserDecl) : IDLType → Option TyHandler
   | t =>
     match scalarCType t with
     | some sc => some (scalarHandler sc.c sc.size)
@@ -981,38 +1229,70 @@ private partial def handlerFor : IDLType → Option TyHandler
       match t with
       | .string => some stringHandler
       | .option inner => do
-        let ih ← handlerFor inner
+        let ih ← handlerFor userDecls inner
         return optionHandler ih
       | .result tOk (some tErr) => do
-        let iho ← handlerFor tOk
-        let ihe ← handlerFor tErr
+        let iho ← handlerFor userDecls tOk
+        let ihe ← handlerFor userDecls tErr
         return resultHandler iho ihe
       | .list inner => do
-        let ih ← handlerFor inner
+        let ih ← handlerFor userDecls inner
         return listHandler ih
       | .tuple ts => do
         if h : ts.size = 2 then
-          let ih1 ← handlerFor ts[0]
-          let ih2 ← handlerFor ts[1]
+          let ih1 ← handlerFor userDecls ts[0]
+          let ih2 ← handlerFor userDecls ts[1]
           return binaryTupleHandler ih1 ih2
         else
           none
       | .bignat => some bignatHandler
       | .bigint => some bigintHandler
+      | .enumT fqn => do
+        match findUserDecl userDecls fqn with
+        | some (.enumT _ cases) => return enumHandler cases.size
+        | _ => none
+      | .record fqn args => do
+        match findUserDecl userDecls fqn with
+        | some (.record _ generics fields) =>
+          -- v0 limitation: generic record handlers require substituting
+          -- `args` into the field type expressions. The sample only
+          -- exercises generics-free records, so we punt to stub when
+          -- `args` is non-empty until the substitutor lands.
+          if !generics.isEmpty || !args.isEmpty then none
+          else do
+            let mut fieldHandlers : Array TyHandler := #[]
+            for (_, fty) in fields do
+              let fh ← handlerFor userDecls fty
+              fieldHandlers := fieldHandlers.push fh
+            return recordHandler fieldHandlers
+        | _ => none
+      | .resource fqn args => do
+        match findUserDecl userDecls fqn with
+        | some (.resource _ generics) =>
+          if !generics.isEmpty || !args.isEmpty then none
+          else some resourceHandler
+        | _ => none
+      | .variant fqn args => do
+        match findUserDecl userDecls fqn with
+        | some (.variant _ generics cases) =>
+          if !generics.isEmpty || !args.isEmpty then none
+          else if !variantIsSelfOnly cases then none
+          else some (variantHandler fqn)
+        | _ => none
       | _      => none
 
 /-- Render one shim entry point. Signatures whose every slot has a
 `TyHandler` get a real wire-format body; the rest fall back to the
 `LEO4_ERR_UNIMPLEMENTED` placeholder so the link table is complete. -/
 private def renderOneShim
-    (cfg : Config) (a : ExportAnalysis) (schemaHash : Hash)
+    (cfg : Config) (userDecls : Array UserDecl) (a : ExportAnalysis) (schemaHash : Hash)
     (params : Array Emit.ParamInfo) (ret : IDLType) : String := Id.run do
   let mangled := mangle cfg.pkg cfg.iface a.fname
                   (params.map (·.encoded)) schemaHash
   let entry  := s!"leo4_call_{mangled}"
   let helper := s!"leo4_lean__{mangled}"
-  let paramHs := params.map fun p => handlerFor p.encoded
-  let retH?   := handlerFor ret
+  let paramHs := params.map fun p => handlerFor userDecls p.encoded
+  let retH?   := handlerFor userDecls ret
   let allHandled := paramHs.all (·.isSome) && retH?.isSome
   let paramTyStr := String.intercalate ", "
     (params.toList.map (fun p => cTypeOfIDL p.encoded))
@@ -1049,7 +1329,7 @@ private def renderOneShim
     let h := phs[i]!
     decode := decode ++ h.decodeBlock s!"a{i}" cleanup
     if h.ownsRef then
-      cleanup := s!" lean_dec_ref(a{i});" ++ cleanup
+      cleanup := s!" lean_dec(a{i});" ++ cleanup
   -- After all decodes, the buffer must be fully consumed.
   let lenCheck :=
     "    if (off != args_len) " ++ lb ++
@@ -1062,7 +1342,7 @@ private def renderOneShim
   let invoke :=
     if phs.isEmpty then s!"{helper}()" else s!"{helper}({argApp})"
   -- Post-call cleanup for the return value (only owned types need it).
-  let retCleanup := if retH.ownsRef then " lean_dec_ref(r);" else ""
+  let retCleanup := if retH.ownsRef then " lean_dec(r);" else ""
   let body :=
     s!"LEO4_EXPORT int32_t {entry}(\n" ++
     "    leo4_arena_t* arena,\n" ++
@@ -1086,7 +1366,8 @@ contains every shim entry point for the package; the matching
 `leo4_lean__<mangled>` helpers live in the user's `.olean`-derived
 object files and are resolved at `leanc` link time (W7-2b). -/
 def renderShimSource
-    (cfg : Config) (analyses : Array ExportAnalysis) (schemaHash : Hash) : String := Id.run do
+    (cfg : Config) (userDecls : Array UserDecl)
+    (analyses : Array ExportAnalysis) (schemaHash : Hash) : String := Id.run do
   let banner : String :=
     "// Auto-generated by `leo4plugin` (W7-2a). Do not edit by hand.\n" ++
     "//\n" ++
@@ -1170,10 +1451,22 @@ def renderShimSource
     "    *off += plen;\n" ++
     "}\n" ++
     "\n"
+  -- Per-variant helper function pair (W7-2d-ii). Emitted at TU scope
+  -- so self-recursive payloads can call back into themselves. Variants
+  -- whose cases mix non-Self payloads with Self fall through to the
+  -- LEO4_ERR_UNIMPLEMENTED entry-point stub for now.
+  let mut variantHelpers : String := ""
+  for d in userDecls do
+    match d with
+    | .variant fqn _ cases =>
+      if let some hs := renderVariantHelpers fqn cases then
+        variantHelpers := variantHelpers ++ hs
+    | _ => ()
+  let banner := banner ++ variantHelpers
   let mut body := ""
   for a in analyses do
     for (_gargs, params, ret) in a.resolved do
-      body := body ++ renderOneShim cfg a schemaHash params ret ++ "\n"
+      body := body ++ renderOneShim cfg userDecls a schemaHash params ret ++ "\n"
   return banner ++ body
 
 def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
@@ -1321,7 +1614,7 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
   -- W7-2c/W7-2d). The `leanc`-driven compile of this source into
   -- `<pkg>.leo4-shim.so` lands in W7-2b.
   let shimPath := cfg.outDir / s!"{stem}.leo4-shim.c"
-  let shimText := renderShimSource cfg analyses schemaHash
+  let shimText := renderShimSource cfg userDecls analyses schemaHash
   IO.FS.writeFile shimPath shimText
   IO.println s!"wrote {shimPath}"
 

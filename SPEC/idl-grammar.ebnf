@@ -107,8 +107,8 @@ builtin_generic = "list" , "<" , type , ">"
                 | "option" , "<" , type , ">"
                 | "result" , "<" , type , [ "," , type ] , ">"
                 | "tuple" , "<" , type , { "," , type } , ">"
-                | "future" , "<" , type , ">"                                      (* [WIT, deferred to WASIp3] *)
-                | "stream" , "<" , type , ">" ;                                    (* [WIT, deferred to WASIp3] *)
+                | "future" , "<" , type , ">"                                      (* [WIT, deferred to WASIp3; LEO4-DESIGN.md D4 (2026-05-19): when lifted, this lowers to a function-level `effect` flag, NOT an IDLType variant — only valid at the boundary position of a `func_decl`'s return type, not inside records / variants ] *)
+                | "stream" , "<" , type , ">" ;                                    (* [WIT, deferred to WASIp3; same lifting decision as `future<T>` above ] *)
 
 named_type      = ident , [ "<" , type , { "," , type } , ">" ] ;                  (* [leo4] generic application *)
 

@@ -335,9 +335,16 @@ stable.
 
 **Deliverables:**
 
-- IDL grammar: re-enable `future<T>` and `stream<T>` in
-  `SPEC/idl-grammar.ebnf` `builtin_generic` (the productions are
-  already there, parked as "deferred to WASIp3").
+- IDL grammar: `future<T>` / `stream<T>` enter the IDL **as
+  function-level effect modifiers**, not as `IDLType` variants
+  (LEO4-DESIGN.md D4 decision, 2026-05-19). Concretely: extend
+  `func_decl` with an optional `async` / `stream` qualifier (or a
+  single `effect` enum field on `FuncDecl`) so that the source form
+  `func foo(x: T) -> future<U>;` parses into
+  `FuncDecl { effect: Async, params: [(x, T)], ret: U }`. The
+  parser desugars `future<T>` / `stream<T>` at the function-boundary
+  position only; their appearance inside record / variant payloads
+  remains a parse error (effects don't compose into values).
 - Lean side: `LeanMarshal Task α` / `LeanMarshal IO α` adapters for
   callers who want their `IO` actions visible as `future<T>` across
   the boundary. Decide: keep the Lean API blocking and only widen the

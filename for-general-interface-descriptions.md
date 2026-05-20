@@ -246,7 +246,55 @@ discovery hooks — is reused unmodified.
   tag on top of the hash for the *advisory* part of the answer while
   keeping the hash for the *normative* part.
 
-## 7. Recommendation
+## 7. Decisions recorded so far
+
+Use this section as the canonical source for "we already chose X, don't
+re-litigate." Update with the date and a one-line rationale; defer
+implementation when the schema-idl change isn't on the critical path
+of a current phase.
+
+### D-i (2026-05-19) — `future<T>` / `stream<T>` are function-level effects, not type variants
+
+When `D4` lifts (WASIp3 stabilises), `future<T>` and `stream<T>` enter
+the IDL **only at the boundary position of a function declaration's
+return type**, not as a new `IDLType` variant.
+
+- Surface form: `func foo(x: T) -> future<U>;` (no IDLType change),
+  or alternatively a leading qualifier `async func foo(x: T) -> U;`
+  (sugar that parses identically).
+- AST shape: `FuncDecl { effect: Sync | Async | Stream | …, params, ret }`.
+  `IDLType` itself does not gain a `Future` / `Stream` variant.
+- Parse error: `future<T>` / `stream<T>` inside record / variant
+  payloads or as a generic argument.
+- Rationale: keeps `IDLType` colourless (no effect-wrapper leakage
+  into payloads); matches the WIT "function ABI carries the future,
+  the value doesn't" mental model; downstream consumers that don't
+  need async (e.g. AI-block IDL) ignore the field for free.
+- Implementation deferred to leo4 Phase 7.
+
+### D-ii (2026-05-19) — Constraint sublanguage: typed AST with pluggable atom registry
+
+The constraint sublanguage (`constraint_atom` in
+`SPEC/idl-grammar.ebnf`) parses into a **typed AST in schema-idl**, not
+a raw string the way the current `ConstraintDeclRaw.body` does. The
+atom vocabulary itself is **pluggable**: schema-idl defines the
+`ConstraintExpr<Atom>` shape (Boolean combinators `∧ / ∨ / ¬`,
+`type: trait`, `type = type`, `oneof { … }`, etc.) generically over
+the atom set; each downstream consumer supplies its own atoms.
+
+- leo4 atoms: `scalar / ord / eq / hash / pod / marshal / resource`,
+  per the current grammar.
+- AI-IDL atoms (hypothetical example): `differentiable / quantizable
+  / broadcastable / sparse`.
+- The registry is a `trait` (or generic parameter) on the parser
+  entry point: `parse_with_atoms::<MyAtoms>(text) -> Schema<MyAtoms>`.
+- schema-idl ships a `NoAtoms` empty-set implementation so consumers
+  that don't use constraints don't take on the registry burden.
+- Implementation deferred to whenever the leo4 plugin reworks its
+  current "constraint elaboration is parametric-attribute-only"
+  state (LEO4-DESIGN.md D5).
+
+## 8. Recommendation
 
 Default to **option B (core split)** unless one of the following holds:
 
