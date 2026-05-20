@@ -1492,11 +1492,15 @@ def renderShimSource
     "#define LEO4_EXPORT\n" ++
     "#endif\n" ++
     "\n" ++
-    "/* Status codes per SPEC/canonical-abi.md §13. */\n" ++
-    "#define LEO4_OK                        0\n" ++
-    "#define LEO4_ERR_DECODE                0x00000001\n" ++
-    "#define LEO4_ERR_RETURN_BUF_TOO_SMALL  0x00000007\n" ++
-    "#define LEO4_ERR_UNIMPLEMENTED         0x00000064\n" ++
+    "/* Status codes per SPEC/canonical-abi.md sec 13. */\n" ++
+    "#define LEO4_OK                          0\n" ++
+    "#define LEO4_ERR_DECODE                  0x00000001\n" ++
+    "#define LEO4_ERR_HANDSHAKE_MISMATCH      0x00000005\n" ++
+    "#define LEO4_ERR_RETURN_BUF_TOO_SMALL    0x00000007\n" ++
+    "#define LEO4_ERR_UNIMPLEMENTED           0x00000064\n" ++
+    "\n" ++
+    "/* ABI version per SPEC/canonical-abi.md sec 14. */\n" ++
+    "#define LEO4_ABI_VERSION                 1u\n" ++
     "\n" ++
     "/* Opaque arena pointer; the W7-2a scalar path doesn't touch it,\n" ++
     "   but the §14 signature reserves the slot. */\n" ++
@@ -1537,7 +1541,44 @@ def renderShimSource
     "    leo4_memcpy(buf + *off, lean_string_cstr(s), plen);\n" ++
     "    *off += plen;\n" ++
     "}\n" ++
-    "\n"
+    "\n" ++
+    -- Schema handshake entry point per SPEC/canonical-abi.md sec 15.
+    -- Compiled-in 8-byte schema hash (big-endian view of the FNV-1a-64
+    -- digest, same byte order as the `schema_hash_bytes` field in
+    -- `<pkg>.leo4-handshake`).
+    "/* Schema handshake. SPEC/canonical-abi.md sec 15. The hash is\n" ++
+    "   the 8-byte big-endian view of the FNV-1a-64 digest baked in at\n" ++
+    "   shim build time; the loader passes the bytes it parsed from\n" ++
+    "   <pkg>.leo4-handshake. ABI-version mismatch and hash mismatch\n" ++
+    "   both report LEO4_ERR_HANDSHAKE_MISMATCH. mismatch_detail_out\n" ++
+    "   is reserved for human-readable explanation; for now we leave\n" ++
+    "   it untouched (loader formats its own error message). */\n" ++
+    (Id.run do
+      let bytes := (Array.range 8).map fun i =>
+        let shift : Nat := (7 - i) * 8
+        let b : Nat := (schemaHash.value >>> shift.toUInt64).toNat &&& 0xff
+        let hi := Nat.toDigits 16 (b >>> 4) |>.head!
+        let lo := Nat.toDigits 16 (b &&& 0xf) |>.head!
+        s!"0x{hi}{lo}"
+      let bytesStr := String.intercalate ", " bytes.toList
+      pure (
+        "static const uint8_t leo4_schema_hash_be[8] = {\n" ++
+        s!"    {bytesStr}\n" ++
+        "};\n" ++
+        "\n" ++
+        "LEO4_EXPORT int32_t leo4_handshake(\n" ++
+        "    const uint8_t *expected_schema_hash,\n" ++
+        "    uint32_t expected_abi_version,\n" ++
+        "    char *mismatch_detail_out, size_t detail_cap)\n" ++
+        "{\n" ++
+        "    (void)mismatch_detail_out; (void)detail_cap;\n" ++
+        "    if (expected_abi_version != LEO4_ABI_VERSION) return LEO4_ERR_HANDSHAKE_MISMATCH;\n" ++
+        "    for (int i = 0; i < 8; i++) {\n" ++
+        "        if (leo4_schema_hash_be[i] != expected_schema_hash[i]) return LEO4_ERR_HANDSHAKE_MISMATCH;\n" ++
+        "    }\n" ++
+        "    return LEO4_OK;\n" ++
+        "}\n" ++
+        "\n"))
   -- Per-(variant decl × generic instantiation) helper function pair
   -- (W7-2d-ii + F-step generalisation). Each (fqn, args) pair gets
   -- one helper, so substituted case payloads — different at each
@@ -1692,6 +1733,7 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
 
   let bundle : Emit.EmitBundle := {
     package            := cfg.pkg
+    targetModule       := cfg.target.toString
     schemaHash         := schemaHash
     leanToolchain      := ← findLeanToolchain
     pluginVersion      := pluginVersion

@@ -65,6 +65,11 @@ structure InterfaceSummary where
 to `emit` below. -/
 structure EmitBundle where
   package         : String
+  /-- Lean module name the user `@[leo4_export]`s live in (e.g.
+  `Sample`). leo4-native uses this at load time to know which
+  `initialize_<Module>` symbol to dlsym before any shim entry point
+  is called. (P5-a₂ wires this through to the Rust loader.) -/
+  targetModule    : String
   schemaHash      : Hash
   /-- `lean-toolchain` file contents, informational. -/
   leanToolchain   : String
@@ -137,6 +142,7 @@ private def handshakeJson (b : EmitBundle) : Json :=
   Json.mkObj [
     ("version",             Json.num (1 : Int)),
     ("package",             Json.str b.package),
+    ("target_module",       Json.str b.targetModule),
     ("schema_hash",         Json.str b.schemaHash.toBase32lc),
     ("schema_hash_bytes",   Json.str b.schemaHash.toHex),
     ("abi_version",         Json.num (1 : Int)),

@@ -34,11 +34,15 @@
 #define LEO4_EXPORT
 #endif
 
-/* Status codes per SPEC/canonical-abi.md §13. */
-#define LEO4_OK                        0
-#define LEO4_ERR_DECODE                0x00000001
-#define LEO4_ERR_RETURN_BUF_TOO_SMALL  0x00000007
-#define LEO4_ERR_UNIMPLEMENTED         0x00000064
+/* Status codes per SPEC/canonical-abi.md sec 13. */
+#define LEO4_OK                          0
+#define LEO4_ERR_DECODE                  0x00000001
+#define LEO4_ERR_HANDSHAKE_MISMATCH      0x00000005
+#define LEO4_ERR_RETURN_BUF_TOO_SMALL    0x00000007
+#define LEO4_ERR_UNIMPLEMENTED           0x00000064
+
+/* ABI version per SPEC/canonical-abi.md sec 14. */
+#define LEO4_ABI_VERSION                 1u
 
 /* Opaque arena pointer; the W7-2a scalar path doesn't touch it,
    but the §14 signature reserves the slot. */
@@ -78,6 +82,30 @@ static inline void leo4_write_string(
     *off += 4u;
     leo4_memcpy(buf + *off, lean_string_cstr(s), plen);
     *off += plen;
+}
+
+/* Schema handshake. SPEC/canonical-abi.md sec 15. The hash is
+   the 8-byte big-endian view of the FNV-1a-64 digest baked in at
+   shim build time; the loader passes the bytes it parsed from
+   <pkg>.leo4-handshake. ABI-version mismatch and hash mismatch
+   both report LEO4_ERR_HANDSHAKE_MISMATCH. mismatch_detail_out
+   is reserved for human-readable explanation; for now we leave
+   it untouched (loader formats its own error message). */
+static const uint8_t leo4_schema_hash_be[8] = {
+    0xe0, 0x1f, 0x43, 0x93, 0xe6, 0xcd, 0x67, 0x99
+};
+
+LEO4_EXPORT int32_t leo4_handshake(
+    const uint8_t *expected_schema_hash,
+    uint32_t expected_abi_version,
+    char *mismatch_detail_out, size_t detail_cap)
+{
+    (void)mismatch_detail_out; (void)detail_cap;
+    if (expected_abi_version != LEO4_ABI_VERSION) return LEO4_ERR_HANDSHAKE_MISMATCH;
+    for (int i = 0; i < 8; i++) {
+        if (leo4_schema_hash_be[i] != expected_schema_hash[i]) return LEO4_ERR_HANDSHAKE_MISMATCH;
+    }
+    return LEO4_OK;
 }
 
 static int32_t leo4_dec_Sample_Tree(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out);
