@@ -33,9 +33,10 @@ pub mod wit;
 // sites keep working. Downstream consumers may equivalently depend on
 // `schema-idl` directly.
 pub use schema_idl::{
-    collapse_whitespace, fqn_seg, idl_form, mangle, mangle_type, parse, parse_raw,
-    render_canonical, resolve, user_decl_to_idl, FuncDecl, Hash, IDLType, ParseError,
-    RawSchema, ResolveError, Schema, UserDecl,
+    collapse_whitespace, fqn_seg, idl_form, instantiate_record, instantiate_variant,
+    mangle, mangle_type, parse, parse_raw, render_canonical, resolve, substitute,
+    user_decl_to_idl, FuncDecl, Hash, IDLType, ParseError, RawSchema, ResolveError,
+    Schema, UserDecl,
 };
 
 pub use wit::{kebab_case, lower as lower_to_wit};

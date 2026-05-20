@@ -22,7 +22,7 @@
 | 1  | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | open     |
 | 2  | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | deferred |
 | 3  | `ConstraintExpr<Atom>` typed AST missing (D-ii decided 2026-05-19) | yes            | deferred |
-| 4  | Generic type-parameter substitution helper missing                 | no             | open     |
+| 4  | Generic type-parameter substitution helper missing                 | no             | schema-idl side landed 2026-05-20; plugin adoption pending |
 | 5  | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
 
 "Status" legend:
@@ -381,6 +381,25 @@ resource. The leo4 sample uses no such generics, so cross-impl
 mangling is unaffected. Real consumers — including any meaningful
 AI-IDL — will hit this immediately (`Tensor<dt, rank, shape>` is the
 canonical example).
+
+### Status (2026-05-20)
+
+- **schema-idl side: landed.** `crates/schema-idl/src/subst.rs`
+  exports `substitute(ty, env)`, `instantiate_record(decl, args)`,
+  `instantiate_variant(decl, args)`, with 11 unit tests covering
+  leaf substitution, nested composites, generic record application,
+  Self pass-through, and arity mismatches.
+- **leo4-idl re-exports them** at the crate root so existing
+  call sites can pick the new helpers up without an extra dependency.
+- **Plugin adoption is pending.** The Lean-side `handlerFor` in
+  `lake/Leo4Plugin/Leo4Plugin/Main.lean` still bails on non-empty
+  `generics` / `args`; lifting that restriction needs a Lean-side
+  mirror of `substitute` (currently the leo4 plugin does substitution
+  inline, but only in the trivial all-empty case). Tracking this as
+  a follow-up because (a) the leo4 sample exercises no generic
+  nominal types, so wire-up coverage doesn't change today, and
+  (b) a real verification fixture needs to land alongside the Lean
+  helper.
 
 ### Grammar impact
 
