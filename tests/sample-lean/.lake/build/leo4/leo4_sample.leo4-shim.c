@@ -115,8 +115,10 @@ static int32_t leo4_enc_Sample_Stmt(lean_object *v, uint8_t *buf, size_t cap, si
 
 static int32_t leo4_dec_Sample_Expr(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out) {
     *out = NULL;
-    if (buf_len - *off < 1u) return LEO4_ERR_DECODE;
-    uint8_t disc = buf[*off]; *off += 1u;
+    if (buf_len - *off < 4u) return LEO4_ERR_DECODE;
+    uint32_t disc;
+    leo4_memcpy(&disc, buf + *off, 4);
+    *off += 4u;
     if (disc == 0u) {
         if (buf_len - *off < 8u) return LEO4_ERR_DECODE;
         uint64_t f0; leo4_memcpy(&f0, buf + *off, 8); *off += 8u;
@@ -138,9 +140,10 @@ static int32_t leo4_dec_Sample_Expr(const uint8_t *buf, size_t buf_len, size_t *
 }
 
 static int32_t leo4_enc_Sample_Expr(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out) {
-    if (cap - *off < 1u) { *needed_out = *off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
-    unsigned tag = lean_obj_tag(v);
-    buf[*off] = (uint8_t)tag; *off += 1u;
+    if (cap - *off < 4u) { *needed_out = *off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
+    uint32_t tag = (uint32_t)lean_obj_tag(v);
+    leo4_memcpy(buf + *off, &tag, 4);
+    *off += 4u;
     if (tag == 0u) {
         if (cap - *off < 8u) { *needed_out = *off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
         uint64_t f0 = lean_ctor_get_uint64(v, 0);
@@ -163,8 +166,10 @@ static int32_t leo4_enc_Sample_Expr(lean_object *v, uint8_t *buf, size_t cap, si
 
 static int32_t leo4_dec_Sample_Stmt(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out) {
     *out = NULL;
-    if (buf_len - *off < 1u) return LEO4_ERR_DECODE;
-    uint8_t disc = buf[*off]; *off += 1u;
+    if (buf_len - *off < 4u) return LEO4_ERR_DECODE;
+    uint32_t disc;
+    leo4_memcpy(&disc, buf + *off, 4);
+    *off += 4u;
     if (disc == 0u) {
         *out = lean_box(0);
         return LEO4_OK;
@@ -182,9 +187,10 @@ static int32_t leo4_dec_Sample_Stmt(const uint8_t *buf, size_t buf_len, size_t *
 }
 
 static int32_t leo4_enc_Sample_Stmt(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out) {
-    if (cap - *off < 1u) { *needed_out = *off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
-    unsigned tag = lean_obj_tag(v);
-    buf[*off] = (uint8_t)tag; *off += 1u;
+    if (cap - *off < 4u) { *needed_out = *off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
+    uint32_t tag = (uint32_t)lean_obj_tag(v);
+    leo4_memcpy(buf + *off, &tag, 4);
+    *off += 4u;
     if (tag == 0u) {
         return LEO4_OK;
     }
@@ -202,8 +208,10 @@ static int32_t leo4_enc_Sample_Tree(lean_object *v, uint8_t *buf, size_t cap, si
 
 static int32_t leo4_dec_Sample_Tree(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out) {
     *out = NULL;
-    if (buf_len - *off < 1u) return LEO4_ERR_DECODE;
-    uint8_t disc = buf[*off]; *off += 1u;
+    if (buf_len - *off < 4u) return LEO4_ERR_DECODE;
+    uint32_t disc;
+    leo4_memcpy(&disc, buf + *off, 4);
+    *off += 4u;
     if (disc == 0u) {
         *out = lean_box(0);
         return LEO4_OK;
@@ -225,9 +233,10 @@ static int32_t leo4_dec_Sample_Tree(const uint8_t *buf, size_t buf_len, size_t *
 }
 
 static int32_t leo4_enc_Sample_Tree(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out) {
-    if (cap - *off < 1u) { *needed_out = *off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
-    unsigned tag = lean_obj_tag(v);
-    buf[*off] = (uint8_t)tag; *off += 1u;
+    if (cap - *off < 4u) { *needed_out = *off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
+    uint32_t tag = (uint32_t)lean_obj_tag(v);
+    leo4_memcpy(buf + *off, &tag, 4);
+    *off += 4u;
     if (tag == 0u) {
         return LEO4_OK;
     }
@@ -248,8 +257,10 @@ static int32_t leo4_enc_Sample_Either_u64_str(lean_object *v, uint8_t *buf, size
 
 static int32_t leo4_dec_Sample_Either_u64_str(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out) {
     *out = NULL;
-    if (buf_len - *off < 1u) return LEO4_ERR_DECODE;
-    uint8_t disc = buf[*off]; *off += 1u;
+    if (buf_len - *off < 4u) return LEO4_ERR_DECODE;
+    uint32_t disc;
+    leo4_memcpy(&disc, buf + *off, 4);
+    *off += 4u;
     if (disc == 0u) {
         if (buf_len - *off < 8u) return LEO4_ERR_DECODE;
         uint64_t f0; leo4_memcpy(&f0, buf + *off, 8); *off += 8u;
@@ -271,9 +282,10 @@ static int32_t leo4_dec_Sample_Either_u64_str(const uint8_t *buf, size_t buf_len
 }
 
 static int32_t leo4_enc_Sample_Either_u64_str(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out) {
-    if (cap - *off < 1u) { *needed_out = *off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
-    unsigned tag = lean_obj_tag(v);
-    buf[*off] = (uint8_t)tag; *off += 1u;
+    if (cap - *off < 4u) { *needed_out = *off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
+    uint32_t tag = (uint32_t)lean_obj_tag(v);
+    leo4_memcpy(buf + *off, &tag, 4);
+    *off += 4u;
     if (tag == 0u) {
         if (cap - *off < 8u) { *needed_out = *off + 8u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; }
         uint64_t f0 = lean_ctor_get_uint64(v, 0);

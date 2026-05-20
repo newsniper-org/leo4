@@ -1284,12 +1284,17 @@ private def renderVariantHelpers
   let enc := s!"leo4_enc_{suffix}"
   let lb := "{"
   let rb := "}"
-  -- Decoder.
+  -- Decoder. Per SPEC/canonical-abi.md §9 the discriminator is `u32`
+  -- LE on the wire; the spec permits a u8 fast path for ≤ 256 cases
+  -- but the canonical encoder MUST emit 4 bytes, so the decoder reads
+  -- 4 bytes for byte-identical cross-impl conformance.
   let mut decBody : String :=
     s!"static int32_t {dec}(const uint8_t *buf, size_t buf_len, size_t *off, lean_object **out) " ++ lb ++ "\n" ++
     "    *out = NULL;\n" ++
-    "    if (buf_len - *off < 1u) return LEO4_ERR_DECODE;\n" ++
-    "    uint8_t disc = buf[*off]; *off += 1u;\n"
+    "    if (buf_len - *off < 4u) return LEO4_ERR_DECODE;\n" ++
+    "    uint32_t disc;\n" ++
+    "    leo4_memcpy(&disc, buf + *off, 4);\n" ++
+    "    *off += 4u;\n"
   for i in [0 : cases.size] do
     let (_, fields) := cases[i]!
     let kind := (classifyCase fields peers).get!
@@ -1342,12 +1347,15 @@ private def renderVariantHelpers
         "        return LEO4_OK;\n" ++
         "    " ++ rb ++ "\n"
   decBody := decBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
-  -- Encoder.
+  -- Encoder. SPEC/canonical-abi.md §9 mandates u32 LE disc on the
+  -- wire ("encoders MUST emit 4 bytes"); we write 4 bytes here so
+  -- byte-identical cross-impl conformance lines up.
   let mut encBody : String :=
     s!"static int32_t {enc}(lean_object *v, uint8_t *buf, size_t cap, size_t *off, size_t *needed_out) " ++ lb ++ "\n" ++
-    "    if (cap - *off < 1u) " ++ lb ++ " *needed_out = *off + 1u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
-    "    unsigned tag = lean_obj_tag(v);\n" ++
-    "    buf[*off] = (uint8_t)tag; *off += 1u;\n"
+    "    if (cap - *off < 4u) " ++ lb ++ " *needed_out = *off + 4u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
+    "    uint32_t tag = (uint32_t)lean_obj_tag(v);\n" ++
+    "    leo4_memcpy(buf + *off, &tag, 4);\n" ++
+    "    *off += 4u;\n"
   for i in [0 : cases.size] do
     let (_, fields) := cases[i]!
     let kind := (classifyCase fields peers).get!

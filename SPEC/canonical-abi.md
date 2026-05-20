@@ -139,8 +139,12 @@ payload (per case encoding)
 ```
 - Discriminator is a 32-bit LE index into the case list.
 - Cases without payload have no bytes after the discriminator.
-- For variants with ≤ 256 cases, decoders MAY accept a 1-byte discriminator
-  when reading, but encoders MUST emit 4 bytes.
+- Both encoders **and** decoders in tree (Lake plugin shim emitter +
+  Rust `#[derive(LeanMarshal)]`) emit / read 4 bytes for byte-identical
+  cross-impl conformance, as of 2026-05-20. A permissive 1-byte
+  decoder is still allowed by this SPEC for variants with ≤ 256 cases,
+  but no in-tree decoder uses it — every wire payload that needs
+  cross-impl validation must use the 4-byte form.
 
 ## 10. Enums
 

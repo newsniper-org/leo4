@@ -842,16 +842,20 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
     let (impl_g, ty_g, where_g) = bounded.split_for_impl();
     let mut enc_arms = TokenStream::new();
     let mut dec_arms = TokenStream::new();
+    // SPEC/canonical-abi.md §9: variant discriminator is `u32 LE` on
+    // the wire. Encoders MUST emit 4 bytes; permissive decoders MAY
+    // accept a 1-byte form (we don't — strict 4-byte for byte-identical
+    // cross-impl conformance).
     for (i, v) in e.variants.iter().enumerate() {
         let vn = &v.ident;
-        let disc = i as u8;
+        let disc = i as u32;
         match &v.fields {
             syn::Fields::Unit => {
                 enc_arms.extend(quote! {
-                    Self::#vn => { buf.push(#disc); }
+                    Self::#vn => { buf.extend_from_slice(&(#disc).to_le_bytes()); }
                 });
                 dec_arms.extend(quote! {
-                    #disc => ::core::result::Result::Ok((Self::#vn, off + 1)),
+                    #disc => ::core::result::Result::Ok((Self::#vn, off + 4)),
                 });
             }
             syn::Fields::Unnamed(unnamed) => {
@@ -865,7 +869,7 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
                 });
                 enc_arms.extend(quote! {
                     Self::#vn(#(#temps),*) => {
-                        buf.push(#disc);
+                        buf.extend_from_slice(&(#disc).to_le_bytes());
                         #(#enc_steps)*
                     }
                 });
@@ -877,7 +881,7 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
                 });
                 dec_arms.extend(quote! {
                     #disc => {
-                        let mut __off = off + 1;
+                        let mut __off = off + 4;
                         #(#dec_steps)*
                         ::core::result::Result::Ok((Self::#vn(#(#temps),*), __off))
                     }
@@ -891,7 +895,7 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
                 });
                 enc_arms.extend(quote! {
                     Self::#vn { #(#names),* } => {
-                        buf.push(#disc);
+                        buf.extend_from_slice(&(#disc).to_le_bytes());
                         #(#enc_steps)*
                     }
                 });
@@ -903,7 +907,7 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
                 });
                 dec_arms.extend(quote! {
                     #disc => {
-                        let mut __off = off + 1;
+                        let mut __off = off + 4;
                         #(#dec_steps)*
                         ::core::result::Result::Ok((Self::#vn { #(#names),* }, __off))
                     }
@@ -921,13 +925,15 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
             fn canonical_decode(buf: &[u8], off: usize)
                 -> ::core::result::Result<(Self, usize), ::leo4::AbiError>
             {
-                if buf.len() < off + 1 {
+                if buf.len() < off + 4 {
                     return ::core::result::Result::Err(::leo4::AbiError::new(
                         ::leo4::error_codes::DECODE_ERROR,
-                        "leo4 variant: not enough bytes for u8 discriminator",
+                        "leo4 variant: not enough bytes for u32 discriminator",
                     ));
                 }
-                let disc = buf[off];
+                let disc = u32::from_le_bytes(
+                    buf[off..off + 4].try_into().expect("4-byte slice"),
+                );
                 match disc {
                     #dec_arms
                     _ => ::core::result::Result::Err(::leo4::AbiError::new(

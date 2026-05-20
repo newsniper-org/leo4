@@ -80,6 +80,21 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Changed — Variant discriminator 4-byte canonical (2026-05-20)
+
+- Shim emitter (`lake/Leo4Plugin/Leo4Plugin/Main.lean`'s
+  `renderVariantHelpers`) and Rust `#[derive(LeanMarshal)]`'s
+  `expand_derive_variant` both flip variant disc encode/decode from
+  `u8` to `u32 LE`. Matches `SPEC/canonical-abi.md` §9 ("encoders
+  MUST emit 4 bytes"); the previous u8 fast path was a SPEC
+  violation that both sides shared so the wire still round-tripped.
+- Coordinated change — wire format is byte-incompatible with
+  pre-2026-05-20 callers. Cross-impl mangling harness re-runs
+  unchanged (62 names byte-identical, schema_hash unchanged because
+  it covers the IDL canonical form, not the ABI wire).
+- `examples/04-mutual-ast` round-trip bytes 12 → 24, matching the
+  expected 4-byte-per-disc widening across 3 levels of nesting.
+
 ### Added — Plugin value-param erasure (2026-05-20)
 
 - `analyzeExport` recognises implicit value-typed binders
