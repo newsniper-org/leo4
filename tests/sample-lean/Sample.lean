@@ -112,10 +112,40 @@ def listConcat (xs : List String) : String :=
 def pairAdd (p : UInt64 × UInt32) : UInt64 :=
   p.1 + p.2.toUInt64
 
--- (Generic-record fixture deferred — see schema-idl-shortcomings.md.
--- Pair / Either definitions and their monomorphic exports hit a
--- cascade of limitations down-stack: schema-idl parser's ASCII-only
--- identifiers, plugin nominal-decl render missing generic_params,
--- admit-set HK guard. Re-enable once that stack is unblocked.)
+-- Generic user nominal types (re-enabled 2026-05-20 after the A/A+/A++
+-- chain landed: deriving generic-inductive, walkUserDecl generic-aware,
+-- idlToLeanType nominal application, ASCII-positional binder
+-- normaliser, render generic_params header, and the resolver
+-- TypeVar shape).
+--
+-- `Pair` exercises the record substitution path end-to-end (record
+-- handler builds field handlers via Subst.substIDL). `Either`
+-- exercises the variant-decl emission with generic params; its
+-- monomorphic export remains stubbed at the shim entry point because
+-- variant `non-Self` payloads are gated by #12 (W7-2d-iii) —
+-- record wire-up vs. variant wire-up split is the intended demo
+-- of where the cascade currently stops.
+
+structure Pair (α : Type) (β : Type) where
+  fst : α
+  snd : β
+  deriving LeanMarshal
+
+@[leo4_export]
+def pairFstU64U32 (p : Pair UInt64 UInt32) : UInt64 := p.fst
+
+@[leo4_export]
+def pairSndU64U32 (p : Pair UInt64 UInt32) : UInt32 := p.snd
+
+inductive Either (α : Type) (β : Type) where
+  | left  : α → Either α β
+  | right : β → Either α β
+  deriving LeanMarshal
+
+@[leo4_export]
+def eitherTaggedU64String (e : Either UInt64 String) : Bool :=
+  match e with
+  | .left  _ => false
+  | .right _ => true
 
 end Sample

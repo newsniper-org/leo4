@@ -619,7 +619,7 @@ checker treats as a single recursion frame."
 | **A**  | (#4 #8 #9 #10 landed) — commit pending | First, finalize what's in-tree. #8/#9/#10 are buildable, do not break cross-impl (sample reverted to the W7-2d baseline), and are needed regardless of whether the demo lands soon |
 | **A+** | #6 parser non-ASCII identifiers + binder-name normaliser | One coordinated change: (a) plugin emits ASCII-safe generic names (`T0/T1`) instead of forwarding `α/β` verbatim, or (b) schema-idl parser accepts a wider identifier alphabet. Pick (a) — keeps the SPEC unchanged and the wire format pure ASCII |
 | **A++** | #7 nominal-decl `generic_params` render | leo4 plugin `Emit.lean` prints `record Sample.Pair<T0, T1> { … }`. Rust schema-idl parser already accepts the production; the round-trip closes |
-| **B**  | Sample fixture re-introduction + cross-impl byte-identical check | Adds `Pair u64 u32`-style monomorphic fixtures back to `tests/sample-lean/Sample.lean`. End-to-end demo of #4 |
+| **B**  | Sample fixture re-introduction + cross-impl byte-identical check | landed 2026-05-20. `Pair α β` (record) and `Either α β` (variant) re-introduced; `pairFstU64U32` / `pairSndU64U32` wire-up; `eitherTaggedU64String` remains stub pending #12. Cross-impl 58 byte-identical, schema_hash `4apuhe7gzvtzs` |
 | **C**  | #2 `FuncDecl.effect` field (D-i) | Pre-stage for Phase 7 async; small AST work; land before Phase 7 entry |
 | **D**  | #1 `UserDecl::Flags` variant | Small isolated PR, roundtrip correctness |
 | **E**  | #11 admit-set HK guard | Generic-`@[leo4_export]` boundary path; touches LEO4-DESIGN check #5; mid-size plugin work. Needed for generic-export fixtures (not for monomorphic-instance ones) |

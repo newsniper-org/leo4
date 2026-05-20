@@ -1538,7 +1538,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(raw.decls.len(), 1);
-        if let RawDecl::Record { fqn, fields } = &raw.decls[0] {
+        if let RawDecl::Record { fqn, fields, .. } = &raw.decls[0] {
             assert_eq!(fqn, "p.Pair");
             assert_eq!(fields[0].0, "fst");
         } else {
