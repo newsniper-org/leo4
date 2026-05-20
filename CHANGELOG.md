@@ -7,6 +7,38 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 7 step 2 main (Lean side): `IO T` → `future<T>` IDL lift (2026-05-20)
+
+Plumbing-only landing. Lean plugin now recognises `IO T` in
+boundary positions and the canonical IDL renders it as `future<T>`
+instead of `io<T>` (D-i 2026-05-19's effect marker). Cross-impl
+already symmetric — Rust `schema-idl` step 1 (2026-05-20)
+desugars `future<T>` into `FuncDecl { effect: Async, ret: T }`.
+
+- `lake/Leo4Plugin/Leo4Plugin/AdmitSet.lean` —
+  `exprToIDLSubst` gains `IO T → IDLType.io T` mapping (previously
+  unrecognised, would fall through to the user-inductive walk).
+- `lake/Leo4Plugin/Leo4Plugin/Mangling.lean` — `idlForm` renders
+  `IDLType.io t` as `future<t>` instead of `io<t>`. The wire
+  mangle (`I_t_i`) is unchanged for byte-identical cross-impl
+  conformance.
+
+What remains for step 2b: the shim still doesn't unwrap
+`lean_io_result` for IO-returning exports — the Lean wrapper for
+`IO α` returns a `lean_io_result α` wrapper that the shim needs
+to unbox via `lean_io_result_get_value` before encoding the
+inner `α`. Today no sample fixture exercises IO returns, so the
+limit is documented but not observable. When step 2b lands, an
+`IO α` fixture in `Sample.lean` exercises the full path.
+
+Sibling-project WASIp3 adapter (the `wasip3` crate + `block_on`
+wiring under `sibling/leo4-wasip3/`) stays upstream-dependent
+and is deferred until the WASIp3 surface stabilises in nightly
+Rust + the `wasip3` crate publishes.
+
+Cross-impl mangling harness: **66 mangled names byte-identical**,
+schema_hash `fbla3xr3fsp6g` (no rotation — no sample uses IO yet).
+
 ### Added — Phase 8 #57: nightly-only float carriers (`nightly-floats` feature) (2026-05-20)
 
 Six new carrier types behind the `nightly-floats` cargo feature on

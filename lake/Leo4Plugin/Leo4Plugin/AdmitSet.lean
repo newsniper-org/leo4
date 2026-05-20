@@ -242,6 +242,15 @@ partial def exprToIDLSubst
       let a ← exprToIDLSubst env enclosing subst mutualMembers args[0]!
       let b ← exprToIDLSubst env enclosing subst mutualMembers args[1]!
       pure (.tuple #[a, b])
+  -- Phase 7 step 2: recognise `IO T` in boundary positions. Today
+  -- this lowers to `IDLType.io T`; the rendered canonical IDL prints
+  -- it as `future<T>` (D-i 2026-05-19 effect marker). The shim's IO
+  -- unwrap (calling `lean_io_result_get_value` after invoking the
+  -- wrapper) is Phase 7 step 2b — until that lands, IO-returning
+  -- exports surface as `future<T>` in the IDL but their boundary
+  -- call returns `LEO4_ERR_UNIMPLEMENTED`.
+  | .const ``IO _,      1 =>
+      (exprToIDLSubst env enclosing subst mutualMembers args[0]!).map .io
   | .const n _, _ =>
       -- Self-reference? Bare `Tree` = `.self`; `Tree α` = `.selfApp [α']`.
       if enclosing == some n then

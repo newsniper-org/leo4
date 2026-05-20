@@ -249,7 +249,10 @@ partial def idlForm : IDLType → String
   | .resource fqn args =>
       if args.isEmpty then fqn
       else fqn ++ "<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
-  | .io t            => "io<" ++ idlForm t ++ ">"
+  -- Phase 7 (D-i 2026-05-19): lift `io<T>` → `future<T>` in the
+  -- canonical IDL surface. The wire mangle (`I_T_i`) is unchanged
+  -- for byte-identical cross-impl conformance.
+  | .io t            => "future<" ++ idlForm t ++ ">"
   | .self            => "Self"
   | .selfApp args    => "Self<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
   | .cyc i           => "Cyc<" ++ toString i ++ ">"
