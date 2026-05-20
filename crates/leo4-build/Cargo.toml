@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
+description = "`build.rs` helper for crates consuming a leo4 shim. Discovers the `.leo4-handshake` / `.leo4-mangling` / `.leo4-shim.so` triple in a given Lake-build dir and emits `cargo:rustc-env=` + `cargo:rerun-if-changed=` so the leo4-macros proc-macro and the leo4-native loader find the artefacts. See LEO4-DESIGN.md §7."
 
 [dependencies]
 
