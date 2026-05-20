@@ -1,6 +1,6 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
- "outputs": "4b29b1421186d8f3.so",
+ "outputs": "972d46d4630b4386.so",
  "log":
  [{"message":
    ".> /opt/lean4/bin/clang -shared -o /home/ybi/leo4/tests/sample-lean/.lake/build/lib/libleo4_x2dsample_Sample.so /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c.o.export -L /opt/lean4/lib/lean --sysroot /opt/lean4 -L /opt/lean4/lib -L /opt/lean4/lib/glibc -lc -lc_nonshared -Wl,--as-needed -l:ld.so -Wl,--no-as-needed -lpthread_nonshared -Wl,--as-needed -Wl,-Bstatic -lgmp -lunwind -luv -Wl,-Bdynamic -Wl,--no-as-needed -fuse-ld=lld -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic -Wl,--as-needed -lLake_shared -Wl,--no-as-needed -Wl,-Bsymbolic -Wl,--as-needed -lgmp -luv -lpthread -ldl -lrt -Wl,--no-as-needed -Wl,--gc-sections -lm -ldl -pthread",
@@ -8,7 +8,7 @@
  "inputs":
  [["linkObjs",
    [["/home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c.o.export",
-     "83a6ad16c375a5b0"]]],
+     "a44ceb66becfb56e"]]],
   ["linkLibs",
    [["/home/ybi/leo4/lake/Leo4/.lake/build/lib/libLeo4_Leo4.so",
      "5a465adce2eaaef2"]]],
@@ -16,4 +16,4 @@
    "fa77a35a41db35c0"],
   ["traceArgs: #[]", "00000000000006bb"],
   ["x86_64-unknown-linux-gnu", "53a0e8937c307c28"]],
- "depHash": "603f4ee7e7954d36"}
+ "depHash": "46d51f023af90e31"}

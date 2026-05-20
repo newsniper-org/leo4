@@ -196,13 +196,13 @@ def stmtIsNop (s : Stmt) : Bool :=
 @[leo4_export]
 def doubleVal {_N : Nat} (x : UInt32) : UInt32 := 2 * x
 
--- ROADMAP Phase 8 step 1: `LeanMarshal Rat` lives in
--- `lake/Leo4/Leo4/MathlibSubset.lean` and round-trips on both the
--- Lean and Rust sides independently. The cross-boundary export
--- (`def addRat (a b : Rat) : Rat := a + b`) needs shim "external
--- marshal" support — the plugin currently rejects `Rat` from
--- `walkUserDecl` because of its `Prop`-typed proof fields. Step 2
--- of Phase 8 lifts that and re-introduces this export.
+-- ROADMAP Phase 8: `LeanMarshal Rat` lives in
+-- `lake/Leo4/Leo4/MathlibSubset.lean`; step 2 wires the boundary
+-- via `UserDecl.externalMarshal` + Lean-side
+-- `@[export leo4_marshal_Rat_dec/_enc]` helpers in the
+-- `<pkg>.leo4-exports.lean` file. End-to-end:
+@[leo4_export]
+def addRat (a b : Rat) : Rat := a + b
 
 
 end Sample

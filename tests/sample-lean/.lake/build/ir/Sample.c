@@ -233,6 +233,8 @@ LEAN_EXPORT uint32_t lp_leo4_x2dsample_Sample_doubleVal___redArg(uint32_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_doubleVal___redArg___boxed(lean_object*);
 LEAN_EXPORT uint32_t lp_leo4_x2dsample_Sample_doubleVal(lean_object*, uint32_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_doubleVal___boxed(lean_object*, lean_object*);
+lean_object* l_Rat_add(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addRat(lean_object*, lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -4167,6 +4169,14 @@ x_4 = lp_leo4_x2dsample_Sample_doubleVal(x_1, x_3);
 lean_dec(x_1);
 x_5 = lean_box_uint32(x_4);
 return x_5;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addRat(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+lean_object* x_3; 
+x_3 = l_Rat_add(x_1, x_2);
+return x_3;
 }
 }
 lean_object* initialize_Init(uint8_t builtin);

@@ -43,6 +43,11 @@ mod sample {
         // so the boundary signature is just `(u32) -> u32`. The Lean
         // wrapper fills `_N := default` so elaboration succeeds.
         fn doubleVal(x: u32) -> u32;
+        // Phase 8 step 2b: external-marshal nominal. `Rat`'s wire
+        // format is opaque to the IDL (proof-carrying fields); the
+        // shim routes encode/decode through Lean-emitted
+        // `leo4_marshal_Rat_dec/_enc` helpers.
+        fn addRat(a: leo4::LeanRat, b: leo4::LeanRat) -> leo4::LeanRat;
     }
 }
 
@@ -171,6 +176,17 @@ fn main() -> Result<(), leo4::LeanError> {
     let d = sample::doubleVal(&lean, 21)?;
     assert_eq!(d, 42);
     println!("doubleVal(21) = {d}");
+
+    // Phase 8 step 2b: external-marshal `Rat` round-trip across the
+    // boundary. 1/3 + 1/6 = 1/2 — `Rat`'s smart constructor `mkRat`
+    // normalises on the Lean side, so the result is in lowest terms.
+    let a = leo4::LeanRat::from_i64_u64(1, 3);
+    let b = leo4::LeanRat::from_i64_u64(1, 6);
+    let sum = sample::addRat(&lean, a, b)?;
+    println!("addRat(1/3, 1/6) = {sum:?}");
+    // Expected: 1/2 = (num=1, den=2) after gcd normalisation.
+    assert_eq!(sum.num, leo4::BigInt::from_i64(1));
+    assert_eq!(sum.den, leo4::BigNat::from_u64(2));
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

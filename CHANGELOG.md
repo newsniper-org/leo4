@@ -80,6 +80,58 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — Phase 8 step 2b: external-marshal shim glue, `Rat` round-trips (2026-05-20)
+
+Phase 8 second-step finisher. Closes the cross-boundary wire for
+`Rat` and any future external-marshal nominal: the shim now
+delegates encode/decode to Lean-emitted C-callable helpers
+(`leo4_marshal_<fqnSeg>_dec/_enc`) instead of dissecting the
+type's IDL fields.
+
+Concrete plumbing:
+
+- `lake/Leo4Plugin/Leo4Plugin/Main.lean`:
+  - `renderLeanExports` now takes `userDecls` and emits a helper
+    pair per `UserDecl.externalMarshal`:
+
+      `@[export leo4_marshal_<seg>_dec] def … (buf) (off) : Except _ (T × Nat) := …`
+      `@[export leo4_marshal_<seg>_enc] def … (val) (buf) : ByteArray := …`
+
+    These wrap `Leo4.LeanMarshal.canonicalDecode/Encode` so the
+    typeclass call gets compiled to a fixed C-callable symbol.
+  - `externalMarshalHandler` (new `TyHandler`) generates the
+    decode/encode glue for each call site: build a fresh Lean
+    `ByteArray` (`lean_alloc_sarray` + `leo4_memcpy` over the
+    remaining wire bytes), invoke the helper, unwrap
+    `Except _ (T × Nat)` at the right ctor tag (Lean's `Except`
+    is `error` = 0, `ok` = 1 — got bitten in dev), advance the
+    shim's offset by the consumed-bytes count returned in the
+    pair. Encode mirrors with `lean_sarray_cptr` /
+    `lean_sarray_size`.
+  - `handlerFor`'s `.record` arm now also matches
+    `UserDecl.externalMarshal` and routes to the new handler.
+  - `renderShimSource` forward-declares every external-marshal
+    helper at the top of the shim TU
+    (`extern lean_object * leo4_marshal_<seg>_dec/_enc(…);`).
+
+- `tests/sample-lean/Sample.lean`:
+  `def addRat (a b : Rat) : Rat := a + b` re-enabled; now
+  actually goes through the boundary instead of returning
+  `LEO4_ERR_UNIMPLEMENTED`.
+
+- `examples/01-hello/src/main.rs`:
+  `sample::addRat(&lean, LeanRat::from_i64_u64(1, 3),
+  LeanRat::from_i64_u64(1, 6))` returns
+  `LeanRat { num: 1, den: 2 }` — Lean's `mkRat` normalises via
+  gcd division.
+
+Schema_hash rotates: `47swds7jpnqre` → `2iomjhrbofmos`. Cross-impl
+mangling harness: **64 mangled names byte-identical**
+(63 → 64; `addRat` joins). All four examples + workspace
+`cargo test` pass.
+
+Closes #54.
+
 ### Added — Phase 8 step 2a: UserDecl.ExternalMarshal AST + render (2026-05-20)
 
 ROADMAP Phase 8 second landing (first half). Adds the IDL-level
