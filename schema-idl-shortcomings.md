@@ -26,7 +26,7 @@
 | 4  | schema-idl    | Generic type-parameter substitution helper                         | no             | landed 2026-05-20 (Rust + Lean mirror) |
 | 5  | schema-idl    | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
 | 6  | schema-idl    | Parser rejects non-ASCII identifiers (`α`, `β`, …)                 | no             | sidestepped 2026-05-20 by ASCII-positional binder names from plugin (parser unchanged) |
-| 7  | schema-idl    | `render::user_decl_to_idl` omits `generic_params` on nominal decls | yes (cosmetic) | **open, blocking #4 demo** |
+| 7  | schema-idl    | `render::user_decl_to_idl` omits `generic_params` on nominal decls | yes (cosmetic) | landed 2026-05-20 (Rust render + Lean `userDeclToIDL`; parser `RawDecl` now carries `generics`; resolver wires `Shape::TypeVar` for in-scope binders) |
 | 8  | leo4-runtime  | `deriving LeanMarshal` generic-inductive support                   | no             | landed 2026-05-20 in working tree (not yet committed) |
 | 9  | leo4-plugin   | `walkUserDecl` generic-aware (param names, FVar→placeholder subst) | no             | landed 2026-05-20 in working tree (not yet committed) |
 | 10 | leo4-plugin   | `idlToLeanType` renders nominal generic application                | no             | landed 2026-05-20 in working tree (not yet committed) |

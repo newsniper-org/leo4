@@ -84,21 +84,31 @@ pub fn idl_form(t: &IDLType) -> String {
 
 /// Render a `UserDecl` as a single line of IDL text. Matches
 /// `Leo4Plugin.Mangling.userDeclToIDL`.
+/// `<T0, T1>` header that follows the fqn on a nominal declaration.
+/// Empty string when the declaration has no generic parameters.
+fn generic_header(generics: &[String]) -> String {
+    if generics.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", generics.join(", "))
+    }
+}
+
 pub fn user_decl_to_idl(d: &UserDecl) -> String {
     match d {
-        UserDecl::Record { fqn, fields, .. } => {
+        UserDecl::Record { fqn, generics, fields } => {
             let fs = fields
                 .iter()
                 .map(|(n, t)| format!("{n}: {}", idl_form(t)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("record {fqn} {{ {fs} }}")
+            format!("record {fqn}{} {{ {fs} }}", generic_header(generics))
         }
         UserDecl::Enum { fqn, cases } => {
             let cs = cases.join(", ");
             format!("enum {fqn} {{ {cs} }}")
         }
-        UserDecl::Variant { fqn, cases, .. } => {
+        UserDecl::Variant { fqn, generics, cases } => {
             let cs = cases
                 .iter()
                 .map(|(n, payload)| {
@@ -111,9 +121,11 @@ pub fn user_decl_to_idl(d: &UserDecl) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("variant {fqn} {{ {cs} }}")
+            format!("variant {fqn}{} {{ {cs} }}", generic_header(generics))
         }
-        UserDecl::Resource { fqn, .. } => format!("resource {fqn}"),
+        UserDecl::Resource { fqn, generics } => {
+            format!("resource {fqn}{}", generic_header(generics))
+        }
     }
 }
 

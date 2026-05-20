@@ -11,6 +11,7 @@ import Leo4Plugin.AdmitSet
 
 namespace Leo4Plugin
 
+open Lean
 open Leo4Plugin (IDLType)
 
 /-! ## Type encoding (SPEC/mangling.md §2) -/
@@ -218,23 +219,33 @@ partial def idlForm : IDLType → String
   | .self            => "Self"
   | .selfApp args    => "Self<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
 
+/-- Render the `<T0, T1>` generic-params suffix that immediately follows
+the fqn in a nominal declaration. Empty when there are no generics. -/
+private def genericHeader (generics : Array Name) : String :=
+  if generics.isEmpty then ""
+  else
+    let names := generics.map (·.toString)
+    "<" ++ String.intercalate ", " names.toList ++ ">"
+
 /-- Render one `UserDecl` as a single line of IDL text. Field/case order is
 the order in the `UserDecl` (which the walker preserves — declaration
 order, per SPEC/canonical-abi.md §8). -/
 def userDeclToIDL : UserDecl → String
-  | .record fqn _generics fields =>
+  | .record fqn generics fields =>
       let fieldStrs := fields.map fun (n, t) => s!"{n.toString}: {idlForm t}"
-      "record " ++ fqn ++ " { " ++ String.intercalate ", " fieldStrs.toList ++ " }"
+      "record " ++ fqn ++ genericHeader generics ++ " { "
+        ++ String.intercalate ", " fieldStrs.toList ++ " }"
   | .enumT fqn cases =>
       let caseStrs := cases.map (·.toString)
       "enum " ++ fqn ++ " { " ++ String.intercalate ", " caseStrs.toList ++ " }"
-  | .variant fqn _generics cases =>
+  | .variant fqn generics cases =>
       let caseStrs := cases.map fun (cn, payload) =>
         if payload.isEmpty then cn.toString
         else cn.toString ++ "(" ++ String.intercalate ", " (payload.toList.map idlForm) ++ ")"
-      "variant " ++ fqn ++ " { " ++ String.intercalate ", " caseStrs.toList ++ " }"
-  | .resource fqn _generics =>
-      "resource " ++ fqn
+      "variant " ++ fqn ++ genericHeader generics ++ " { "
+        ++ String.intercalate ", " caseStrs.toList ++ " }"
+  | .resource fqn generics =>
+      "resource " ++ fqn ++ genericHeader generics
 
 /-- Sort key tag for SPEC/handshake.md `<pkg>.leo4-schema` ordering:
 type decls first, then resources, then functions; lex by FQN within each band. -/

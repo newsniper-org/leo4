@@ -79,10 +79,24 @@ pub enum RawType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RawDecl {
-    Record { fqn: String, fields: Vec<(String, RawType)> },
-    Enum { fqn: String, cases: Vec<String> },
-    Variant { fqn: String, cases: Vec<(String, Vec<RawType>)> },
-    Resource { fqn: String },
+    Record {
+        fqn: String,
+        generics: Vec<String>,
+        fields: Vec<(String, RawType)>,
+    },
+    Enum {
+        fqn: String,
+        cases: Vec<String>,
+    },
+    Variant {
+        fqn: String,
+        generics: Vec<String>,
+        cases: Vec<(String, Vec<RawType>)>,
+    },
+    Resource {
+        fqn: String,
+        generics: Vec<String>,
+    },
 }
 
 impl RawDecl {
@@ -334,6 +348,14 @@ enum Shape {
     Enum,
     Variant,
     Resource,
+    /// In-scope generic type parameter of the enclosing nominal decl.
+    /// `resolve_decl` injects entries of this shape into a local copy
+    /// of the shape map before walking field / case types so a bare
+    /// `T0` / `T1` reference resolves to a nullary
+    /// `IDLType::Record { fqn: <name>, args: vec![] }` placeholder,
+    /// matching the form `Subst.substIDL` (and its Rust mirror) later
+    /// substitutes against concrete instance args.
+    TypeVar,
 }
 
 fn build_shape_map(decls: &[RawDecl]) -> HashMap<String, Shape> {
@@ -377,22 +399,41 @@ fn resolve_type(t: &RawType, shapes: &HashMap<String, Shape>) -> Result<IDLType,
                     fqn: fqn.clone(),
                     args: args_idl,
                 }),
+                Some(Shape::TypeVar) => Ok(IDLType::Record {
+                    fqn: fqn.clone(),
+                    args: vec![],
+                }),
                 None => Err(ResolveError::UnknownNominal { fqn: fqn.clone() }),
             }
         }
     }
 }
 
+/// Augment `shapes` with `TypeVar` entries for the enclosing decl's
+/// generic-parameter binders. Used so a field type that references
+/// `T0` resolves to a nullary placeholder rather than `UnknownNominal`.
+fn shapes_with_typars<'a>(
+    base: &'a HashMap<String, Shape>,
+    generics: &[String],
+) -> HashMap<String, Shape> {
+    let mut map = base.clone();
+    for g in generics {
+        map.insert(g.clone(), Shape::TypeVar);
+    }
+    map
+}
+
 fn resolve_decl(d: &RawDecl, shapes: &HashMap<String, Shape>) -> Result<UserDecl, ResolveError> {
     match d {
-        RawDecl::Record { fqn, fields } => {
+        RawDecl::Record { fqn, generics, fields } => {
+            let local = shapes_with_typars(shapes, generics);
             let fields = fields
                 .iter()
-                .map(|(n, t)| Ok::<_, ResolveError>((n.clone(), resolve_type(t, shapes)?)))
+                .map(|(n, t)| Ok::<_, ResolveError>((n.clone(), resolve_type(t, &local)?)))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(UserDecl::Record {
                 fqn: fqn.clone(),
-                generics: vec![],
+                generics: generics.clone(),
                 fields,
             })
         }
@@ -400,26 +441,27 @@ fn resolve_decl(d: &RawDecl, shapes: &HashMap<String, Shape>) -> Result<UserDecl
             fqn: fqn.clone(),
             cases: cases.clone(),
         }),
-        RawDecl::Variant { fqn, cases } => {
+        RawDecl::Variant { fqn, generics, cases } => {
+            let local = shapes_with_typars(shapes, generics);
             let cases = cases
                 .iter()
                 .map(|(n, payload)| {
                     let payload = payload
                         .iter()
-                        .map(|t| resolve_type(t, shapes))
+                        .map(|t| resolve_type(t, &local))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok::<_, ResolveError>((n.clone(), payload))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(UserDecl::Variant {
                 fqn: fqn.clone(),
-                generics: vec![],
+                generics: generics.clone(),
                 cases,
             })
         }
-        RawDecl::Resource { fqn } => Ok(UserDecl::Resource {
+        RawDecl::Resource { fqn, generics } => Ok(UserDecl::Resource {
             fqn: fqn.clone(),
-            generics: vec![],
+            generics: generics.clone(),
         }),
     }
 }
@@ -699,7 +741,7 @@ impl<'a> Parser<'a> {
     fn parse_record_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("record")?;
         let fqn = self.parse_fqn()?;
-        let _generics = self.parse_optional_generic_params()?;
+        let generics = self.parse_generic_param_names()?;
         self.expect_char('{')?;
         let mut fields: Vec<(String, RawType)> = Vec::new();
         loop {
@@ -720,13 +762,13 @@ impl<'a> Parser<'a> {
         }
         self.expect_char('}')?;
         self.expect_char(';')?;
-        Ok(RawDecl::Record { fqn, fields })
+        Ok(RawDecl::Record { fqn, generics, fields })
     }
 
     fn parse_variant_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("variant")?;
         let fqn = self.parse_fqn()?;
-        let _generics = self.parse_optional_generic_params()?;
+        let generics = self.parse_generic_param_names()?;
         self.expect_char('{')?;
         let mut cases: Vec<(String, Vec<RawType>)> = Vec::new();
         loop {
@@ -763,13 +805,13 @@ impl<'a> Parser<'a> {
         }
         self.expect_char('}')?;
         self.expect_char(';')?;
-        Ok(RawDecl::Variant { fqn, cases })
+        Ok(RawDecl::Variant { fqn, generics, cases })
     }
 
     fn parse_resource_decl(&mut self) -> Result<RawDecl, ParseError> {
         self.expect_keyword("resource")?;
         let fqn = self.parse_fqn()?;
-        let _generics = self.parse_optional_generic_params()?;
+        let generics = self.parse_generic_param_names()?;
         self.skip_ws();
         // Optional `{ … }` body of methods — accepted, skip-balanced.
         // v0 plugin doesn't emit a body; Phase 3+ may consume it for
@@ -788,7 +830,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_char(';')?;
-        Ok(RawDecl::Resource { fqn })
+        Ok(RawDecl::Resource { fqn, generics })
     }
 
     fn parse_use_decl(&mut self) -> Result<UseDeclRaw, ParseError> {
@@ -1018,6 +1060,22 @@ impl<'a> Parser<'a> {
         // resolver will downgrade. Phase 3 WIT lowering may distinguish
         // them more precisely (SPEC/canonical-abi.md §11).
         Ok(RawDecl::Enum { fqn, cases })
+    }
+
+    /// Thin wrapper around `parse_optional_generic_params` that
+    /// projects each binder down to its `name` field. Used by the
+    /// nominal-decl parsers (record / variant / resource), which only
+    /// need the binder *names* for `Subst.substIDL`-style lookups; the
+    /// kind / value-type annotations land in `parse_optional_generic_params`'s
+    /// fuller `Vec<GenericParamRaw>` for callers that want them.
+    fn parse_generic_param_names(&mut self) -> Result<Vec<String>, ParseError> {
+        let raw = self.parse_optional_generic_params()?;
+        Ok(raw
+            .into_iter()
+            .map(|p| match p {
+                GenericParamRaw::Type { name, .. } | GenericParamRaw::Value { name, .. } => name,
+            })
+            .collect())
     }
 
     fn parse_optional_generic_params(&mut self) -> Result<Vec<GenericParamRaw>, ParseError> {
