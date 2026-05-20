@@ -8,6 +8,8 @@
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Syntax.olean"],
   "Leo4.Resource":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Resource.olean"],
+  "Leo4.MathlibSubset":
+  ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/MathlibSubset.olean"],
   "Leo4.Marshal":
   ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean/Leo4/Marshal.olean"],
   "Leo4.Export":

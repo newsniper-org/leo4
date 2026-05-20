@@ -80,6 +80,36 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   cross-impl mangling + WIT lowering + canonical-ABI conformance
   harnesses, and the multi-version Lean CI matrix.
 
+### Added — Phase 8 step 1: `Rat` LeanMarshal infrastructure (2026-05-20)
+
+ROADMAP Phase 8 (Mathlib-compatible subset) first landing. Mirror
+implementations on both sides for Lean-core `Rat`
+(`Init.Data.Rat.Basic`):
+
+- `lake/Leo4/Leo4/MathlibSubset.lean` — new module under `Leo4`
+  carrying `instance : LeanMarshal Rat`. Wire format: `bigint num`
+  followed by `bignat den` (SPEC/canonical-abi.md §§5-6). Decode
+  uses Lean core's smart constructor `mkRat num den`, which
+  normalises (divides by gcd) and degenerates to `0/1` when
+  `den == 0`, so malformed wire payloads degrade rather than
+  panicking.
+- `crates/leo4-abi/src/rat.rs` — new module with `LeanRat { num:
+  BigInt, den: BigNat }`. `LeanMarshal` impl delegates to the
+  existing `BigInt` / `BigNat` impls so wire format stays
+  byte-identical to the Lean side.
+- `leo4` façade re-exports `LeanRat` + the `rat` module.
+- Two unit tests pin the Rust-side round-trip for the basic cases
+  (positive, negative, zero, max-magnitude) and a default-zero
+  edge.
+
+**Not yet wired**: cross-boundary calls. The plugin's `walkUserDecl`
+rejects `Rat` because of its two `Prop`-typed proof fields
+(`den_nz`, `reduced`), which prevents the shim from emitting a
+real boundary entry for an `(a b : Rat) → Rat` export. Step 2 of
+Phase 8 adds an "external marshal" path to the plugin so types
+with custom `LeanMarshal` instances are treated as opaque blobs at
+the shim and the boundary just routes bytes through.
+
 ### Changed — Variant discriminator 4-byte canonical (2026-05-20)
 
 - Shim emitter (`lake/Leo4Plugin/Leo4Plugin/Main.lean`'s
