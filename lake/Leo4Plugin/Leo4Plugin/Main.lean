@@ -217,7 +217,7 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
       let mut paramInfos : Array Emit.ParamInfo := #[]
       for i in [0 : paramTypes.size] do
         let ty := paramTypes[i]!
-        match exprToIDLSubst env none subst ty with
+        match exprToIDLSubst env none subst #[] ty with
         | some idl =>
             paramInfos := paramInfos.push
               { encoded := idl, usesGenerics := paramOrigins[i]! }
@@ -225,7 +225,7 @@ def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
             notes := notes.push s!"param type unsupported: {← Meta.ppExpr ty}"
             ok := false
       if !ok then continue
-      match exprToIDLSubst env none subst body with
+      match exprToIDLSubst env none subst #[] body with
       | some retIDL => resolved := resolved.push (fullGenArgs, paramInfos, retIDL)
       | none =>
           notes := notes.push s!"return type unsupported: {← Meta.ppExpr body}"
@@ -1151,9 +1151,12 @@ private def resourceHandler : TyHandler :=
 
 /-- Look up a `UserDecl` by FQN. Linear scan — sample sets have a
 handful of decls; if real consumers ship hundreds, swap in a
-`Std.HashMap`. -/
+`Std.HashMap`. Phase 6: a `UserDecl.mutual` cluster is opened up and
+its members are searched directly — handler resolution doesn't care
+about the bracketing. -/
 private def findUserDecl (decls : Array UserDecl) (fqn : String) : Option UserDecl :=
-  decls.find? fun d => d.fqn == fqn
+  let leaves : Array UserDecl := decls.flatMap (·.leaves)
+  leaves.find? fun d => d.fqn == fqn
 
 /-- True iff the given variant case is in the F-step "minimum-viable"
 shape that `renderVariantHelpers` knows how to emit:
@@ -1719,13 +1722,33 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
         The plugin keeps the LeanResource interpretation; please remove one."
 
   -- Walk every referenced user type and synthesise its IDL declaration.
+  -- Phase 6: deduplicate by `iv.all` so mutually-recursive inductives
+  -- are grouped into one `UserDecl.mutual` cluster rather than emitted
+  -- as N independent decls with cross-references via FQN.
   let userDeclsIO : IO (Array UserDecl) := do
     let action : MetaM (Array UserDecl) := do
+      let env ← getEnv
       let mut out : Array UserDecl := #[]
+      let mut emitted : Std.HashSet Name := {}
       for fqn in allUserTypes do
-        match ← walkUserDecl (← getEnv) {} fqn.toName with
-        | some d => out := out.push d
-        | none   => pure ()
+        let nm := fqn.toName
+        if emitted.contains nm then continue
+        let groupMembers : Array Name :=
+          match env.find? nm with
+          | some (.inductInfo iv) =>
+            if iv.all.length > 1 then iv.all.toArray else #[nm]
+          | _ => #[nm]
+        if groupMembers.size > 1 then
+          match ← walkMutualGroup env {} groupMembers with
+          | some d => out := out.push d
+          | none   => pure ()
+          for m in groupMembers do
+            emitted := emitted.insert m
+        else
+          match ← walkUserDecl env {} nm with
+          | some d => out := out.push d
+          | none   => pure ()
+          emitted := emitted.insert nm
       return out
     let coreCtx : Core.Context := { fileName := "<leo4plugin>", fileMap := FileMap.ofString "" }
     let coreSt  : Core.State   := { env := env }
@@ -1771,7 +1794,7 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
       unless cu.any (·.1 == cls.toString) do
         cu := cu.push (cls.toString, ax)
 
-  let resourceCount : Nat := userDecls.foldl (init := 0) fun acc d =>
+  let resourceCount : Nat := (userDecls.flatMap (·.leaves)).foldl (init := 0) fun acc d =>
     match d with
     | .resource _ _ => acc + 1
     | _ => acc

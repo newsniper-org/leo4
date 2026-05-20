@@ -265,7 +265,7 @@ private def genericHeader (generics : Array Name) : String :=
 /-- Render one `UserDecl` as a single line of IDL text. Field/case order is
 the order in the `UserDecl` (which the walker preserves — declaration
 order, per SPEC/canonical-abi.md §8). -/
-def userDeclToIDL : UserDecl → String
+partial def userDeclToIDL : UserDecl → String
   | .record fqn generics fields =>
       let fieldStrs := fields.map fun (n, t) => s!"{n.toString}: {idlForm t}"
       "record " ++ fqn ++ genericHeader generics ++ " { "
@@ -281,14 +281,20 @@ def userDeclToIDL : UserDecl → String
         ++ String.intercalate ", " caseStrs.toList ++ " }"
   | .resource fqn generics =>
       "resource " ++ fqn ++ genericHeader generics
+  | .mutual members =>
+      let memberStrs := members.toList.map userDeclToIDL
+      "mutual { " ++ String.intercalate "; " memberStrs ++ " }"
 
 /-- Sort key tag for SPEC/handshake.md `<pkg>.leo4-schema` ordering:
-type decls first, then resources, then functions; lex by FQN within each band. -/
+type decls first, then resources, then functions; lex by FQN within each band.
+A `mutual` cluster lands in the value band (0); its source order is preserved
+because `Cyc<i>` indices into the group are position-sensitive. -/
 private def declBand : UserDecl → Nat
-  | .record _ _ _ => 0
-  | .enumT _ _    => 0
+  | .record _ _ _  => 0
+  | .enumT _ _     => 0
   | .variant _ _ _ => 0
-  | .resource _ _  => 1   -- resources sorted between types and funcs
+  | .resource _ _  => 1
+  | .mutual _      => 0
 
 /--
 Render the canonical IDL form for the discovered export set + user-type

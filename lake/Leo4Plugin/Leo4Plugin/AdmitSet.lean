@@ -60,14 +60,31 @@ inductive UserDecl where
   | enumT    (fqn : String) (cases    : Array Name)
   | variant  (fqn : String) (generics : Array Name) (cases : Array (Name × Array IDLType))
   | resource (fqn : String) (generics : Array Name)
+  /-- Phase 6 cluster (SPEC/phase-6-mutual.md §1). Members reference
+  each other via `IDLType.cyc i` (`i` = position in `members`); peers
+  *outside* this group remain regular FQN references. Must contain
+  ≥ 2 members; singleton groups should be ordinary `record` /
+  `variant` / `enumT` decls with `Self` recursion. -/
+  | mutual   (members : Array UserDecl)
   deriving Repr, Inhabited
 
 namespace UserDecl
-def fqn : UserDecl → String
+/-- The single declaration's FQN. Returns `""` for a `mutual` group —
+callers that need a flat list of leaves use `leaves` instead. -/
+partial def fqn : UserDecl → String
   | .record   f _ _ => f
   | .enumT    f _   => f
   | .variant  f _ _ => f
   | .resource f _   => f
+  | .mutual   _     => ""
+
+/-- Flatten a `UserDecl` to its leaves: a non-mutual decl yields a
+singleton `#[d]`; a `mutual` group yields its members in source order.
+Used by emit / handler-lookup passes that don't care about the
+clustering, only about the per-decl shape. -/
+partial def leaves : UserDecl → Array UserDecl
+  | .mutual ms => ms
+  | d          => #[d]
 end UserDecl
 
 /-! ## Type-parameter substitution
@@ -190,23 +207,32 @@ fields/cases) is discovered separately by `walkUserDecl` below.
 `enclosing` is the FQN of the inductive currently being walked, if
 any; an `Expr` that references the same declaration becomes
 `IDLType.self` (Self-recursion marker, SPEC/idl-grammar.ebnf).
+
+`mutualMembers`, when non-empty, lists the peers of the enclosing
+declaration in source order (`iv.all` for the current walker); a
+reference to `mutualMembers[i]` (other than `enclosing`, which still
+goes through the `Self` short-circuit) becomes `IDLType.cyc i`
+(Phase 6, SPEC/phase-6-mutual.md §2).
 -/
 partial def exprToIDLSubst
     (env : Environment) (enclosing : Option Name) (subst : FVarId → Option IDLType)
+    (mutualMembers : Array Name := #[])
     : Expr → Option IDLType := fun e =>
   let head := e.getAppFn
   let args := e.getAppArgs
   match head, args.size with
   | .fvar fv, 0 => subst fv
-  | .const ``List _,    1 => (exprToIDLSubst env enclosing subst args[0]!).map .list
-  | .const ``Option _,  1 => (exprToIDLSubst env enclosing subst args[0]!).map .option
+  | .const ``List _,    1 =>
+      (exprToIDLSubst env enclosing subst mutualMembers args[0]!).map .list
+  | .const ``Option _,  1 =>
+      (exprToIDLSubst env enclosing subst mutualMembers args[0]!).map .option
   | .const ``Except _,  2 => do
-      let tIdl ← exprToIDLSubst env enclosing subst args[1]!
-      let eIdl ← exprToIDLSubst env enclosing subst args[0]!
+      let tIdl ← exprToIDLSubst env enclosing subst mutualMembers args[1]!
+      let eIdl ← exprToIDLSubst env enclosing subst mutualMembers args[0]!
       pure (.result tIdl (some eIdl))
   | .const ``Prod _,    2 => do
-      let a ← exprToIDLSubst env enclosing subst args[0]!
-      let b ← exprToIDLSubst env enclosing subst args[1]!
+      let a ← exprToIDLSubst env enclosing subst mutualMembers args[0]!
+      let b ← exprToIDLSubst env enclosing subst mutualMembers args[1]!
       pure (.tuple #[a, b])
   | .const n _, _ =>
       -- Self-reference? Bare `Tree` = `.self`; `Tree α` = `.selfApp [α']`.
@@ -215,8 +241,15 @@ partial def exprToIDLSubst
         else
           let argsIdl? : Option (Array IDLType) :=
             args.foldlM (init := (#[] : Array IDLType)) fun acc a =>
-              (exprToIDLSubst env enclosing subst a).map (acc.push ·)
+              (exprToIDLSubst env enclosing subst mutualMembers a).map (acc.push ·)
           argsIdl?.map IDLType.selfApp
+      -- Phase 6: peer in the current mutual group? Args (if any) are
+      -- erased on the wire — Cyc<i> closes the cycle through index
+      -- alone, exactly like `Self` does for the singleton case.
+      else if mutualMembers.contains n then
+        match mutualMembers.findIdx? (· == n) with
+        | some idx => some (.cyc idx.toUInt32)
+        | none     => none  -- unreachable given `contains` above
       -- Primitive?
       else if let some idl := leanNameToIDL n then
         some idl
@@ -225,7 +258,7 @@ partial def exprToIDLSubst
         -- inspecting the inductive value.
         let argsIdl? : Option (Array IDLType) :=
           args.foldlM (init := (#[] : Array IDLType)) fun acc a =>
-            (exprToIDLSubst env enclosing subst a).map (acc.push ·)
+            (exprToIDLSubst env enclosing subst mutualMembers a).map (acc.push ·)
         argsIdl?.bind fun argsIdl =>
           if hasLeanResourceInstance env n then
             some (.resource n.toString argsIdl)
@@ -282,9 +315,16 @@ Returns `none` if `declName` is not an inductive, has no
 LeanMarshal/LeanResource opt-in, or its fields contain a type we
 cannot lower.
 
-Recursion is bounded: we never re-walk a name already in `inFlight`. -/
+Recursion is bounded: we never re-walk a name already in `inFlight`.
+
+When `mutualMembers` is non-empty, any peer reference (a member of the
+same `iv.all` group, other than `declName` itself) lowers to
+`IDLType.cyc i` instead of a plain FQN nominal — Phase 6
+(`SPEC/phase-6-mutual.md` §5). Callers from outside a group leave the
+parameter at its default. -/
 partial def walkUserDecl
     (env : Environment) (inFlight : Std.HashSet Name) (declName : Name)
+    (mutualMembers : Array Name := #[])
     : MetaM (Option UserDecl) := do
   -- Resource short-circuit.
   if hasLeanResourceInstance env declName then
@@ -326,7 +366,7 @@ partial def walkUserDecl
       for i in [0:fieldArgs.size] do
         let arg := fieldArgs[i]!
         let argTy ← Meta.inferType arg
-        match exprToIDLSubst env (some declName) subst argTy with
+        match exprToIDLSubst env (some declName) subst mutualMembers argTy with
         | some idl => acc := acc.push (fieldNames[i]!, idl)
         | none => return none
       return some acc
@@ -347,7 +387,7 @@ partial def walkUserDecl
       let mut acc : Array IDLType := #[]
       for arg in fieldArgs do
         let argTy ← Meta.inferType arg
-        match exprToIDLSubst env (some declName) subst argTy with
+        match exprToIDLSubst env (some declName) subst mutualMembers argTy with
         | some idl => acc := acc.push idl
         | none => return none
       return some acc
@@ -355,6 +395,21 @@ partial def walkUserDecl
     | none => return none
     | some p => cases := cases.push (caseName, p)
   return some (.variant fqn genNames cases)
+
+/-- Walk a *mutual cluster* whose members are listed in `iv.all` order.
+Each member becomes a regular `UserDecl` (record / enumT / variant)
+with peer references inside it rewritten to `IDLType.cyc i`. The
+whole cluster is wrapped in `UserDecl.mutual`. Returns `none` if any
+member fails to walk (missing LeanMarshal, unlowerable field, …). -/
+partial def walkMutualGroup
+    (env : Environment) (inFlight : Std.HashSet Name) (members : Array Name)
+    : MetaM (Option UserDecl) := do
+  let mut acc : Array UserDecl := #[]
+  for m in members do
+    match ← walkUserDecl env inFlight m members with
+    | some d => acc := acc.push d
+    | none   => return none
+  return some (.mutual acc)
 
 /-! ## Class admit-set enumeration -/
 
