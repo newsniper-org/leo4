@@ -19,9 +19,17 @@
 //! ```
 
 mod sample {
+    use super::{Color, ParserHandle, Point, Tree};
     leo4::import! {
         fn add(a: u64, b: u64) -> u64;
         fn hello() -> String;
+        // P5-b₃-iii: nominal user types route through the
+        // fname-only single-instantiation lookup since the macro
+        // can't infer Lean-side FQNs from a bare Rust ident.
+        fn pointSum(p: Point) -> f64;
+        fn colorName(c: Color) -> String;
+        fn isLeaf(t: Tree) -> bool;
+        fn parserId(h: ParserHandle) -> ParserHandle;
     }
 }
 
@@ -83,6 +91,37 @@ fn main() -> Result<(), leo4::LeanError> {
 
     // P5-b₃-ii: derive macro round-trip across the four shapes.
     nominal_derive_check();
+
+    // P5-b₃-iii: nominal user-type wrappers — the macro picks the
+    // single-instantiation Lean export for each, the canonical-ABI
+    // encode / decode bridges the derived Rust impl with the
+    // Lean-side `deriving LeanMarshal` output.
+    let sum = sample::pointSum(&lean, Point { x: 1.5, y: 2.5 })?;
+    assert_eq!(sum, 4.0);
+    println!("pointSum(Point {{ x: 1.5, y: 2.5 }}) = {sum}");
+
+    for (c, expect) in [
+        (Color::Red, "red"),
+        (Color::Green, "green"),
+        (Color::Blue, "blue"),
+    ] {
+        let name = sample::colorName(&lean, c.clone())?;
+        println!("colorName({c:?}) = {name:?} (expected {expect:?})");
+        assert_eq!(name, expect);
+    }
+
+    let leaf_only = sample::isLeaf(&lean, Tree::Leaf)?;
+    let node = sample::isLeaf(
+        &lean,
+        Tree::Node(Box::new(Tree::Leaf), Box::new(Tree::Leaf)),
+    )?;
+    assert!(leaf_only);
+    assert!(!node);
+    println!("isLeaf(Leaf) = {leaf_only}, isLeaf(Node(...)) = {node}");
+
+    let h = sample::parserId(&lean, ParserHandle { raw: 0xc0ffee })?;
+    assert_eq!(h.raw, 0xc0ffee);
+    println!("parserId(ParserHandle {{ raw: 0xc0ffee }}) = {h:?}");
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

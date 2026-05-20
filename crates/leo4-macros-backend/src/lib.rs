@@ -145,26 +145,27 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
         ReturnType::Type(_, ty) => (**ty).clone(),
     };
 
-    // Compute the IDL-side mangling of each argument's Rust type so
-    // we can disambiguate instantiations of a generic export. Types
-    // we can't lower today (nominal user types without an explicit
-    // hint, function pointers, references, …) trip `unrecognised`
-    // and yield a localized compile error.
-    let arg_idls: Vec<IDLType> = arg_types
-        .iter()
-        .map(|t| {
-            rust_type_to_idl(t).ok_or_else(|| {
-                syn::Error::new_spanned(
-                    t,
-                    "leo4::import!: this Rust type isn't recognised as a leo4 IDL type; supported set is u8..u64, i8..i64, f32/f64, bool, char, String, Vec<T>, Option<T>, Result<T,E>, (T1, T2)",
-                )
-            })
-        })
-        .collect::<syn::Result<Vec<_>>>()?;
-    let arg_mangles: Vec<String> = arg_idls.iter().map(mangle_type).collect();
-
-    let mangled_body = lookup_mangled_body(mangling, &fname, &arg_mangles)
-        .map_err(|e| syn::Error::new_spanned(&sig.ident, e))?;
+    // Try to lower each arg's Rust type to its IDL counterpart so we
+    // can disambiguate generic-export instantiations by mangled
+    // arg-list. Nominal user types (e.g. `Point`, derived via
+    // `#[derive(LeanMarshal)]`) don't carry their Lean-side FQN
+    // through the macro's syntactic view; for those, fall back to
+    // a fname-only single-instantiation lookup. The fallback errors
+    // when the export has multiple instantiations — at that point
+    // the user needs to disambiguate (P5-b₃-iv attribute hint).
+    let arg_idls_opt: Vec<Option<IDLType>> =
+        arg_types.iter().map(rust_type_to_idl).collect();
+    let all_known = arg_idls_opt.iter().all(Option::is_some);
+    let mangled_body = if all_known {
+        let arg_mangles: Vec<String> = arg_idls_opt
+            .iter()
+            .map(|t| mangle_type(t.as_ref().unwrap()))
+            .collect();
+        lookup_mangled_body(mangling, &fname, &arg_mangles)
+    } else {
+        lookup_single_instantiation(mangling, &fname)
+    }
+    .map_err(|e| syn::Error::new_spanned(&sig.ident, e))?;
 
     let lean = format_ident!("lean");
 
@@ -365,6 +366,58 @@ fn lookup_mangled_body(
     Err(format!(
         "no instantiation of leo4 export `{fname}` matches arg list {arg_mangles:?}"
     ))
+}
+
+/// Fallback lookup for the case where the macro can't compute an
+/// arg-mangle vector (e.g. a parameter is a user-defined nominal
+/// type whose IDL FQN isn't surfaced through the syntactic view).
+/// Succeeds only when the named export has exactly one instantiation;
+/// multi-instantiation exports require disambiguation that today
+/// arrives by writing every arg type in a form `rust_type_to_idl`
+/// recognises (P5-b₃-iv will add an explicit attribute hint).
+fn lookup_single_instantiation(
+    mangling: &serde_json::Value,
+    fname: &str,
+) -> Result<String, String> {
+    let entries = mangling
+        .get("entries")
+        .and_then(|x| x.as_array())
+        .ok_or("mangling JSON has no `entries` array")?;
+    let mut hits: Vec<&serde_json::Value> = Vec::new();
+    for e in entries {
+        let logical = e
+            .get("logical_name")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default();
+        let last = logical.rsplit("::").next().unwrap_or("");
+        if last == fname {
+            hits.push(e);
+        }
+    }
+    let entry = match hits.len() {
+        0 => return Err(format!("no leo4 export named `{fname}` in mangling JSON")),
+        1 => hits[0],
+        n => {
+            return Err(format!(
+                "ambiguous: {n} leo4 exports match `{fname}`"
+            ))
+        }
+    };
+    let insts = entry
+        .get("instantiations")
+        .and_then(|x| x.as_array())
+        .ok_or_else(|| format!("entry `{fname}` has no `instantiations`"))?;
+    if insts.len() != 1 {
+        return Err(format!(
+            "leo4 export `{fname}` has {} instantiations — disambiguate by writing each parameter type in a form `rust_type_to_idl` recognises (or wait for P5-b₃-iv attribute hint)",
+            insts.len()
+        ));
+    }
+    insts[0]
+        .get("mangled")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| format!("instantiation of `{fname}` missing `mangled`"))
 }
 
 

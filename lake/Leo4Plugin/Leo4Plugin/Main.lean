@@ -987,20 +987,51 @@ private def bigintHandler : TyHandler :=
     unboxExpr    := id
   }
 
-/-- `enum F { c₀, c₁, … }` per SPEC §10: `u32 tag`. Lean represents
-    no-field constructors as immediate boxed scalars (`Color.red = lean_box(0)`,
-    etc.), so the encoder reads `lean_obj_tag` and the decoder boxes the
-    wire tag. Rejects tags ≥ `numCases`. -/
+/-- Pick the unboxed C scalar type Lean's compiler uses for an
+    all-nullary inductive with `numCases` ctors. Mirrors Lean's
+    `impureTypeForEnum` in `Lean/Compiler/LCNF/ToImpureType.lean`:
+    < 2⁸ → uint8, < 2¹⁶ → uint16, < 2³² → uint32. `numCases == 1`
+    Lean represents as `tagged` (lean_object*), but our IDL emits
+    `record` for single-ctor inductives, so we never call this with
+    `numCases == 1`. `≥ 2³²` is `tagged` too — unreachable for any
+    sane IDL. -/
+private structure EnumScalar where
+  /-- C type Lean uses at the FFI boundary. -/
+  cType        : String
+  /-- `lean_ctor_get_<kind>` / `lean_ctor_set_<kind>` infix. -/
+  scalarKind   : String
+  /-- Width in bytes for ctor scalar layout. -/
+  size         : Nat
+
+private def enumScalar (numCases : Nat) : Option EnumScalar :=
+  if numCases < 256 then
+    some { cType := "uint8_t",  scalarKind := "uint8",  size := 1 }
+  else if numCases < 65536 then
+    some { cType := "uint16_t", scalarKind := "uint16", size := 2 }
+  else if numCases < 4294967296 then
+    some { cType := "uint32_t", scalarKind := "uint32", size := 4 }
+  else
+    none
+
+/-- `enum F { c₀, c₁, … }` per SPEC §10: `u32 tag` on the wire.
+    Lean's IR unboxes an all-nullary inductive to the smallest
+    unsigned scalar that fits its ctor count: `uint8_t` for ≤ 255,
+    `uint16_t` for ≤ 65535, `uint32_t` otherwise (see
+    `impureTypeForEnum` in Lean's source). The handler picks the
+    matching width via `enumScalar` so the `extern` decl emitted into
+    the shim agrees with the symbol Lean actually produces; the wire
+    side stays u32 LE either way. -/
 private def enumHandler (numCases : Nat) : TyHandler :=
   let lb := "{"
   let rb := "}"
-  { cType        := "lean_object *"
-    externCType  := "lean_object *"
-    ownsRef      := true
-    scalarKind   := none
-    ctorScalarSz := 0
+  let s := (enumScalar numCases).getD { cType := "uint8_t", scalarKind := "uint8", size := 1 }
+  { cType        := s.cType
+    externCType  := s.cType
+    ownsRef      := false
+    scalarKind   := some s.scalarKind
+    ctorScalarSz := s.size
     decodeBlock  := fun var cleanup =>
-      s!"    lean_object *{var} = NULL;\n" ++
+      s!"    {s.cType} {var} = 0;\n" ++
       "    " ++ lb ++ "\n" ++
       "        if (args_len - off < 4u) " ++ lb ++
         s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
@@ -1009,13 +1040,13 @@ private def enumHandler (numCases : Nat) : TyHandler :=
       "        off += 4u;\n" ++
       s!"        if ({var}_tag >= {numCases}u) " ++ lb ++
         s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
-      s!"        {var} = lean_box((size_t){var}_tag);\n" ++
+      s!"        {var} = ({s.cType}){var}_tag;\n" ++
       "    " ++ rb ++ "\n"
     encodeBlock  := fun var cleanup =>
       "    " ++ lb ++ "\n" ++
       "        if (ret_cap - out_off < 4u) " ++ lb ++
         s!" *ret_len = out_off + 4u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
-      s!"        uint32_t _tag = (uint32_t)lean_obj_tag({var});\n" ++
+      s!"        uint32_t _tag = (uint32_t){var};\n" ++
       "        leo4_memcpy(ret_ptr + out_off, &_tag, 4);\n" ++
       "        out_off += 4u;\n" ++
       "    " ++ rb ++ "\n" ++
@@ -1083,34 +1114,33 @@ private def recordHandler (fields : Array TyHandler) : TyHandler :=
     unboxExpr    := id
   }
 
-/-- `resource R` per SPEC §12: opaque `u64` handle. Lean represents
-    a `@[leo4_resource] structure R { raw : UInt64 }` as a one-field
-    ctor with the `u64` in the scalar area at offset 0. -/
+/-- `resource R` per SPEC §12: an opaque `u64` handle on the wire.
+    A `@[leo4_resource]` structure has exactly one `UInt64` field so
+    Lean's IR elaborates it as a *transparent* single-field record —
+    the FFI boundary sees just a raw `uint64_t`, not a `lean_object *`
+    (see `lp_<x>_parserId(uint64_t)` in the compiled `.c`). The handler
+    therefore reads / writes 8 wire bytes straight into the `uint64_t`. -/
 private def resourceHandler : TyHandler :=
   let lb := "{"
   let rb := "}"
-  { cType        := "lean_object *"
-    externCType  := "lean_object *"
-    ownsRef      := true
-    scalarKind   := none
-    ctorScalarSz := 0
+  { cType        := "uint64_t"
+    externCType  := "uint64_t"
+    ownsRef      := false
+    scalarKind   := some "uint64"
+    ctorScalarSz := 8
     decodeBlock  := fun var cleanup =>
-      s!"    lean_object *{var} = NULL;\n" ++
+      s!"    uint64_t {var} = 0;\n" ++
       "    " ++ lb ++ "\n" ++
       "        if (args_len - off < 8u) " ++ lb ++
         s!" *ret_len = 0;{cleanup} return LEO4_ERR_DECODE; " ++ rb ++ "\n" ++
-      s!"        uint64_t {var}_h;\n" ++
-      s!"        leo4_memcpy(&{var}_h, args_ptr + off, 8);\n" ++
+      s!"        leo4_memcpy(&{var}, args_ptr + off, 8);\n" ++
       "        off += 8u;\n" ++
-      s!"        {var} = lean_alloc_ctor(0, 0, 8);\n" ++
-      s!"        lean_ctor_set_uint64({var}, 0, {var}_h);\n" ++
       "    " ++ rb ++ "\n"
     encodeBlock  := fun var cleanup =>
       "    " ++ lb ++ "\n" ++
       "        if (ret_cap - out_off < 8u) " ++ lb ++
         s!" *ret_len = out_off + 8u;{cleanup} return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n" ++
-      s!"        uint64_t _h = lean_ctor_get_uint64({var}, 0);\n" ++
-      "        leo4_memcpy(ret_ptr + out_off, &_h, 8);\n" ++
+      s!"        leo4_memcpy(ret_ptr + out_off, &{var}, 8);\n" ++
       "        out_off += 8u;\n" ++
       "    " ++ rb ++ "\n" ++
       cleanup
