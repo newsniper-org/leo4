@@ -189,10 +189,78 @@ def compileWrapperObj (cfg : BuildCfg) (src : System.FilePath) : IO System.FileP
   compileSourceToObj cfg src (extra := #["-DLEAN_EXPORTING"])
 
 /-- Phase 3: link the given objects into a shared library at `out`,
-honouring `BuildCfg.extraLDFlags`. -/
+honouring `BuildCfg.extraLDFlags`.
+
+The link line explicitly requests `libleanshared.so`. Without it,
+`leanc -shared` (the bundled clang) produces a `.so` that has no
+DT_NEEDED entry for the Lean runtime, and the loader fails at
+`dlsym lean_initialize_runtime_module` (the runtime's symbols are
+*static* inside `leanc`-built executables but not exported across a
+shared-library boundary). Linking the shared runtime gives the
+loader a stable surface to `dlsym` against and makes
+`Lean::open` work from any Rust process. -/
 def linkShared (cfg : BuildCfg) (objs : Array System.FilePath) (out : System.FilePath) : IO Unit := do
+  -- `cfg.leancPath` is `<sysroot>/bin/leanc`; walk up two to find
+  -- `<sysroot>/lib/lean` so we can `-L` it.
+  let sysroot : Option System.FilePath := do
+    let bin ← cfg.leancPath.parent
+    bin.parent
+  let leanLibDir : String := match sysroot with
+    | some s => (s / "lib" / "lean").toString
+    | none   => "."
+  -- Auto-detect the user package's per-module shared libraries
+  -- (Lake's `lake build <Module>:shared` output) and link against
+  -- them. The shim's wrapper init transitively calls
+  -- `initialize_<Module>`, which only exists in these libs — without
+  -- them the shim loads but `dlsym` on the wrapper init's first
+  -- transitive callee fails. We pick up every `lib<…>.so` we find
+  -- both in the user package and in each direct dependency listed
+  -- in `lake-manifest.json` (transitive Lean modules like Leo4 own
+  -- their own `initialize_*` symbols too); RPATH covers the
+  -- load-time search path.
+  let collectLibDir (dir : System.FilePath) : IO (Array String) := do
+    if !(← dir.pathExists) then return #[]
+    let entries ← dir.readDir
+    let mut libs : Array String := #[]
+    for entry in entries do
+      let name := entry.fileName
+      if name.startsWith "lib" && name.endsWith ".so" then
+        let stem := (name.drop 3).dropEnd 3
+        libs := libs.push s!"-l{stem}"
+    if libs.isEmpty then return #[]
+    return #["-L", dir.toString]
+        ++ libs
+        ++ #["-Wl,-rpath," ++ dir.toString]
+  let userLibDir : System.FilePath := cfg.pkgRoot / ".lake" / "build" / "lib"
+  let mut userLibArgs : Array String ← collectLibDir userLibDir
+  -- Walk lake-manifest.json for direct dep packages and pick up
+  -- their `.lake/build/lib/` too.
+  let manifest := cfg.pkgRoot / "lake-manifest.json"
+  if (← manifest.pathExists) then
+    let text ← IO.FS.readFile manifest
+    match Lean.Json.parse text with
+    | .error _ => pure ()
+    | .ok j =>
+      let pkgs : Array Lean.Json :=
+        (j.getObjVal? "packages").toOption.bind (·.getArr?.toOption) |>.getD #[]
+      for pkg in pkgs do
+        let dir? : Option String :=
+          (pkg.getObjVal? "dir").toOption.bind (·.getStr?.toOption)
+        match dir? with
+        | none     => pure ()
+        | some dir =>
+          let depRoot : System.FilePath := cfg.pkgRoot / dir
+          let depLibDir := depRoot / ".lake" / "build" / "lib"
+          userLibArgs := userLibArgs ++ (← collectLibDir depLibDir)
+  -- RPATH so the dynamic linker resolves `libleanshared.so` at load
+  -- time without the consumer setting `LD_LIBRARY_PATH`. Without
+  -- this, ldd would print `not found` and `dlopen` would fail with
+  -- `cannot open shared object file`.
   let args := #["-shared", "-o", out.toString]
             ++ objs.map (·.toString)
+            ++ #["-L", leanLibDir, "-lleanshared",
+                 "-Wl,-rpath," ++ leanLibDir]
+            ++ userLibArgs
             ++ cfg.extraLDFlags
   runOrThrow cfg.leancPath.toString args
 

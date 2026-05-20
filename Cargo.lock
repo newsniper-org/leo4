@@ -140,6 +140,14 @@ name = "leo4-build"
 version = "0.0.0"
 
 [[package]]
+name = "leo4-example-01-hello"
+version = "0.0.0"
+dependencies = [
+ "leo4",
+ "leo4-build",
+]
+
+[[package]]
 name = "leo4-idl"
 version = "0.0.0"
 dependencies = [

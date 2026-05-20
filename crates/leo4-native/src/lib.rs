@@ -142,13 +142,69 @@ type LeoCallShimFn = unsafe extern "C" fn(
 
 /// Lean runtime entry points the loader needs. All come from
 /// `libleanshared.so`, which `<pkg>.leo4-shim.so` links against — so
-/// `dlsym` against the *shim* picks them up transitively.
+/// `dlsym` against the *shim* picks them up transitively. `lean.h`
+/// defines several of these as `static inline`, which the linker
+/// does NOT export; those (currently just `lean_io_result_is_ok`)
+/// we re-implement inline in Rust using the documented
+/// `lean_object` layout below.
 type VoidFn = unsafe extern "C" fn();
 /// Module init: `lean_object * initialize_<Mod>(uint8_t builtin)`.
 type ModInitFn = unsafe extern "C" fn(u8) -> *mut c_void;
-type IoResultIsOkFn = unsafe extern "C" fn(*mut c_void) -> bool;
-type LeanDecRefFn = unsafe extern "C" fn(*mut c_void);
+/// `lean_dec_ref` is `static inline` in `lean.h`; only its cold
+/// fall-through `lean_dec_ref_cold` is `LEAN_EXPORT`'d. We dlsym
+/// the cold path and inline the fast-path m_rc decrement ourselves.
+type LeanDecRefColdFn = unsafe extern "C" fn(*mut c_void);
+/// `lean_dec_ref` fast path (re-implemented in Rust below) compatible
+/// with `LeanDecRefColdFn`; stored on `Lean` so `LeanRef::Drop` can
+/// invoke without a back-reference.
+pub type LeanDecRefFn = LeanDecRefColdFn;
 type LeanIoResultShowErrorFn = unsafe extern "C" fn(*mut c_void);
+
+/// `lean.h` `lean_object` layout (taken verbatim from
+/// `/opt/lean4/include/lean/lean.h`):
+///
+/// ```c
+/// typedef struct {
+///     int      m_rc;       // bytes 0..3
+///     unsigned m_cs_sz:16; // bytes 4..5
+///     unsigned m_other:8;  // byte  6
+///     unsigned m_tag:8;    // byte  7
+/// } lean_object;
+/// ```
+///
+/// `lean_io_result_is_ok(r)` is `lean_ptr_tag(r) == 0`, i.e. byte 7
+/// equals 0. This is stable across all Tier-1 Linux x86_64 builds
+/// of Lean (ABI is the Itanium C++ ABI / sysv x86_64 ABI here,
+/// neither of which reorders bit-fields).
+const LEAN_OBJECT_TAG_OFFSET: usize = 7;
+
+#[inline]
+unsafe fn lean_io_result_is_ok(r: *mut c_void) -> bool {
+    let tag_ptr = unsafe { (r as *const u8).add(LEAN_OBJECT_TAG_OFFSET) };
+    unsafe { *tag_ptr == 0 }
+}
+
+/// Inline `lean_dec_ref` — fast path is an `m_rc` decrement; the cold
+/// path (free / atomic) is delegated to `lean_dec_ref_cold` which the
+/// caller passes in. `m_rc` lives at offset 0 of `lean_object`
+/// (signed int per the layout struct).
+#[inline]
+unsafe fn lean_dec_ref_inline(o: *mut c_void, cold: LeanDecRefColdFn) {
+    if o.is_null() {
+        return;
+    }
+    let rc_ptr = o as *mut i32;
+    let rc = unsafe { *rc_ptr };
+    if rc > 1 {
+        unsafe { *rc_ptr = rc - 1 };
+    } else if rc != 0 {
+        // rc == 1: real decrement to free; rc < 0: multi-threaded.
+        // Both go through the cold path which handles atomics +
+        // deallocation.
+        unsafe { cold(o) };
+    }
+    // rc == 0: persistent / compact, no-op.
+}
 
 /// Process-wide guard: `lean_initialize_runtime_module` must run
 /// exactly once.
@@ -277,22 +333,16 @@ impl Lean {
                 .map_err(|e| LeanError::host(format!("dlsym {}: {e}", meta.wrapper_init_symbol)))?;
             *s
         };
-        let io_is_ok_fn: IoResultIsOkFn = unsafe {
-            let s: libloading::Symbol<IoResultIsOkFn> = lib
-                .get(b"lean_io_result_is_ok\0")
-                .map_err(|e| LeanError::host(format!("dlsym lean_io_result_is_ok: {e}")))?;
-            *s
-        };
         let io_show_err_fn: LeanIoResultShowErrorFn = unsafe {
             let s: libloading::Symbol<LeanIoResultShowErrorFn> = lib
                 .get(b"lean_io_result_show_error\0")
                 .map_err(|e| LeanError::host(format!("dlsym lean_io_result_show_error: {e}")))?;
             *s
         };
-        let dec_ref_fn: LeanDecRefFn = unsafe {
-            let s: libloading::Symbol<LeanDecRefFn> = lib
-                .get(b"lean_dec_ref\0")
-                .map_err(|e| LeanError::host(format!("dlsym lean_dec_ref: {e}")))?;
+        let dec_ref_cold_fn: LeanDecRefColdFn = unsafe {
+            let s: libloading::Symbol<LeanDecRefColdFn> = lib
+                .get(b"lean_dec_ref_cold\0")
+                .map_err(|e| LeanError::host(format!("dlsym lean_dec_ref_cold: {e}")))?;
             *s
         };
         let end_init_fn: VoidFn = unsafe {
@@ -310,16 +360,16 @@ impl Lean {
             LEAN_RUNTIME_INIT.call_once(|| init_runtime_fn());
             // builtin = 1: matches how lean -c-emitted main calls it.
             let res = mod_init_fn(1);
-            if !io_is_ok_fn(res) {
+            if !lean_io_result_is_ok(res) {
                 io_show_err_fn(res);
-                dec_ref_fn(res);
+                lean_dec_ref_inline(res, dec_ref_cold_fn);
                 end_init_fn();
                 return Err(LeanError::host(format!(
                     "wrapper module init `{}` returned IO error (details printed to stderr)",
                     meta.wrapper_init_symbol
                 )));
             }
-            dec_ref_fn(res);
+            lean_dec_ref_inline(res, dec_ref_cold_fn);
             end_init_fn();
         }
 
@@ -327,7 +377,7 @@ impl Lean {
             lib,
             meta,
             so_path: so_path.as_ref().to_path_buf(),
-            lean_dec_ref: dec_ref_fn,
+            lean_dec_ref: dec_ref_cold_fn,
             call_cache: std::sync::Mutex::new(HashMap::new()),
         })
     }
@@ -535,9 +585,10 @@ impl<T: ?Sized> std::fmt::Debug for LeanRef<'_, T> {
 impl<T: ?Sized> Drop for LeanRef<'_, T> {
     fn drop(&mut self) {
         // SAFETY: `from_raw`'s preconditions guarantee the pointer is
-        // valid + owned. `lean_dec_ref` is the cached Lean-runtime
-        // helper from the same library load.
-        unsafe { (self.dec_ref)(self.ptr) }
+        // valid + owned. `lean_dec_ref_inline` does the fast-path m_rc
+        // decrement; the cached `self.dec_ref` is the cold-path
+        // delegate (`lean_dec_ref_cold` from the same library load).
+        unsafe { lean_dec_ref_inline(self.ptr, self.dec_ref) }
     }
 }
 

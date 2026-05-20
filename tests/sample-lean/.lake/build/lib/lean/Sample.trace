@@ -14,10 +14,12 @@
      [["«leo4-sample»/Sample:extraDep",
        [["@«leo4-sample»:extraDep", "00000000000006bb"]]],
       ["imports",
-       [["Leo4 transitive imports (legacy)", "31afd4e98ca8b3d1"],
+       [["Leo4 transitive imports (legacy)", "86ee5bfafc7dc027"],
         ["Leo4:importAllArts", "31e0111b169f507f"]]]]],
     ["libs",
-     [["import dynlibs", "00000000000006bb"],
+     [["import dynlibs",
+       [["/home/ybi/leo4/lake/Leo4/.lake/build/lib/libLeo4_Leo4.so",
+         "53e43ff0885d0fd1"]]],
       ["package external libraries", "00000000000006bb"],
       ["module dynlibs", "00000000000006bb"],
       ["module plugins", "00000000000006bb"]]]]],
@@ -29,4 +31,4 @@
   ["Module.name: Sample", "aa097ba15ee094f1"],
   ["Package.id?: (some leo4-sample)", "553e3cd0f8245097"],
   ["Module.leanArgs: #[]", "00000000000006bb"]],
- "depHash": "372ad98feb79ee80"}
+ "depHash": "5e7192b4b331d47f"}

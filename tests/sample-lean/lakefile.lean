@@ -14,3 +14,7 @@ require Leo4 from ".." / ".." / "lake" / "Leo4"
 @[default_target]
 lean_lib Sample where
   roots := #[`Sample]
+  -- precompileModules emits .o for each module — required so the
+  -- leo4 shim link step can pick up `initialize_<Module>` symbols
+  -- the wrapper's transitive init expects.
+  precompileModules := true

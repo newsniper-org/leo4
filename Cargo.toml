@@ -11,6 +11,7 @@ members = [
     "crates/leo4-wasm",
     "crates/leo4",
     "crates/leo4c",
+    "examples/01-hello",
 ]
 
 [workspace.package]
@@ -39,6 +40,7 @@ leo4-macros           = { version = "0.0.0", path = "crates/leo4-macros" }
 leo4-macros-backend   = { version = "0.0.0", path = "crates/leo4-macros-backend" }
 leo4-native           = { version = "0.0.0", path = "crates/leo4-native" }
 leo4-wasm             = { version = "0.0.0", path = "crates/leo4-wasm" }
+leo4                  = { version = "0.0.0", path = "crates/leo4" }
 
 # External
 thiserror   = "2"

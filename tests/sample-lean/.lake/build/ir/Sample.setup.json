@@ -1,4 +1,4 @@
-{"plugins": [],
+{"plugins": ["/home/ybi/leo4/lake/Leo4/.lake/build/lib/libLeo4_Leo4.so"],
  "package": "leo4-sample",
  "options": {},
  "name": "Sample",

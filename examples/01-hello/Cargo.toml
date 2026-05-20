@@ -1,0 +1,18 @@
+[package]
+name        = "leo4-example-01-hello"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Smallest end-to-end leo4 demo: `Sample.add (a b : UInt64) : UInt64` called from Rust via `leo4::import!`. See `ROADMAP.md` Phase 5 exit criteria (Linux Tier 1)."
+
+[dependencies]
+leo4.workspace = true
+
+[build-dependencies]
+leo4-build.workspace = true
+
+[lints]
+workspace = true

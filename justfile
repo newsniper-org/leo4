@@ -27,9 +27,14 @@ lake-build:
 plugin-build:
     cd {{plugin_pkg}} && lake build
 
-# Build only the sample test package.
+# Build the sample test package, including the per-module shared
+# library (Sample:shared) the leo4 shim links against to resolve
+# `initialize_<Sample>` and any other LEAN_EXPORT symbols the user
+# module defines. Without `:shared`, lake only produces `.olean`s
+# and the shim's transitive `initialize_*` call at load time fails
+# with "undefined symbol".
 sample-build:
-    cd {{sample_pkg}} && lake build
+    cd {{sample_pkg}} && lake build && lake build Sample:shared
 
 # Lake tests (currently none beyond the smoke run).
 lake-test: smoke-plugin
