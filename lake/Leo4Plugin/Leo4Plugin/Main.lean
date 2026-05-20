@@ -1016,16 +1016,17 @@ private def enumScalar (numCases : Nat) : Option EnumScalar :=
 /-- `enum F { c₀, c₁, … }` per SPEC §10: `u32 tag` on the wire.
     Lean's IR unboxes an all-nullary inductive to the smallest
     unsigned scalar that fits its ctor count: `uint8_t` for ≤ 255,
-    `uint16_t` for ≤ 65535, `uint32_t` otherwise (see
-    `impureTypeForEnum` in Lean's source). The handler picks the
-    matching width via `enumScalar` so the `extern` decl emitted into
-    the shim agrees with the symbol Lean actually produces; the wire
-    side stays u32 LE either way. -/
-private def enumHandler (numCases : Nat) : TyHandler :=
+    `uint16_t` for ≤ 65535, `uint32_t` for < 2³². At or above 2³²
+    Lean falls back to `tagged` (boxed `lean_object *`) — the boxed
+    path isn't wired yet, so we return `none` and let the caller fall
+    back to the `LEO4_ERR_UNIMPLEMENTED` stub rather than mismatching
+    Lean's actual FFI signature. Wire format stays u32 LE either way. -/
+private def enumHandler (numCases : Nat) : Option TyHandler := do
   let lb := "{"
   let rb := "}"
-  let s := (enumScalar numCases).getD { cType := "uint8_t", scalarKind := "uint8", size := 1 }
-  { cType        := s.cType
+  let s ← enumScalar numCases
+  some {
+    cType        := s.cType
     externCType  := s.cType
     ownsRef      := false
     scalarKind   := some s.scalarKind
@@ -1379,7 +1380,7 @@ private partial def handlerFor (userDecls : Array UserDecl) : IDLType → Option
       | .bigint => some bigintHandler
       | .enumT fqn => do
         match findUserDecl userDecls fqn with
-        | some (.enumT _ cases) => return enumHandler cases.size
+        | some (.enumT _ cases) => enumHandler cases.size
         | _ => none
       | .record fqn args => do
         match findUserDecl userDecls fqn with
