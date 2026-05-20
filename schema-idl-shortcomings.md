@@ -22,7 +22,7 @@
 | 1  | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | open     |
 | 2  | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | deferred |
 | 3  | `ConstraintExpr<Atom>` typed AST missing (D-ii decided 2026-05-19) | yes            | deferred |
-| 4  | Generic type-parameter substitution helper missing                 | no             | schema-idl side landed 2026-05-20; plugin adoption pending |
+| 4  | Generic type-parameter substitution helper missing                 | no             | landed 2026-05-20; generic-record wire-up demo waits on leo4 `deriving LeanMarshal` handler |
 | 5  | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
 
 "Status" legend:
@@ -391,15 +391,25 @@ canonical example).
   Self pass-through, and arity mismatches.
 - **leo4-idl re-exports them** at the crate root so existing
   call sites can pick the new helpers up without an extra dependency.
-- **Plugin adoption is pending.** The Lean-side `handlerFor` in
-  `lake/Leo4Plugin/Leo4Plugin/Main.lean` still bails on non-empty
-  `generics` / `args`; lifting that restriction needs a Lean-side
-  mirror of `substitute` (currently the leo4 plugin does substitution
-  inline, but only in the trivial all-empty case). Tracking this as
-  a follow-up because (a) the leo4 sample exercises no generic
-  nominal types, so wire-up coverage doesn't change today, and
-  (b) a real verification fixture needs to land alongside the Lean
-  helper.
+- **Plugin adoption: landed at the code level.**
+  `lake/Leo4Plugin/Leo4Plugin/AdmitSet.lean` ships
+  `Subst.substIDL` / `Subst.mkEnv` (line-for-line mirror of the Rust
+  helpers). `lake/Leo4Plugin/Leo4Plugin/Main.lean::handlerFor`
+  swaps the `if !generics.isEmpty || !args.isEmpty then none` bail
+  for proper `mkEnv` + `substIDL` walks on the
+  `.record` / `.resource` / `.variant` branches. Arity mismatch
+  (binders vs args) still returns `none` — that is the
+  caller-bug-in-IDL case the kind discipline should catch upstream.
+- **End-to-end demo blocked elsewhere.** A sample fixture with a
+  user-declared `structure Pair (α β : Type) … deriving LeanMarshal`
+  hit `error: deriving LeanMarshal: generic inductive 'Sample.Pair'
+  not yet supported` in `lake/Leo4/Leo4/Deriving.lean`. That gap is
+  a leo4-runtime-library limitation, not a schema-idl one;
+  consequently the generic-record wire-up path is exercised today
+  only by the schema-idl Rust unit tests and by code review of the
+  mirror in `Subst.substIDL`. Filing a follow-up against
+  `lake/Leo4/Leo4/Deriving.lean` to support generic inductives will
+  unlock the end-to-end fixture.
 
 ### Grammar impact
 

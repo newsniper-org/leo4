@@ -64,6 +64,45 @@ def fqn : UserDecl → String
   | .resource f _   => f
 end UserDecl
 
+/-! ## Type-parameter substitution
+
+Mirrors `crates/schema-idl/src/subst.rs::substitute` byte-for-byte
+semantically. Used by the shim emitter (`Main.lean::handlerFor`) to
+walk a generic `UserDecl`'s field / case types after binding the
+binder names to concrete `IDLType` arguments. -/
+namespace Subst
+
+/-- Substitute every binder reference in `t` per `env`. A bare nullary
+`record fqn #[]` whose `fqn` matches a binder name resolves to the
+bound type; everything else recurses through its component types. -/
+partial def substIDL (env : Array (String × IDLType)) : IDLType → IDLType
+  | .record fqn args =>
+    if args.isEmpty then
+      match env.find? (·.1 == fqn) with
+      | some (_, t) => t
+      | none        => .record fqn #[]
+    else
+      .record fqn (args.map (substIDL env))
+  | .variant fqn args  => .variant fqn (args.map (substIDL env))
+  | .resource fqn args => .resource fqn (args.map (substIDL env))
+  | .list inner        => .list (substIDL env inner)
+  | .option inner      => .option (substIDL env inner)
+  | .result tOk tErr   =>
+    .result (substIDL env tOk) (tErr.map (substIDL env))
+  | .tuple ts          => .tuple (ts.map (substIDL env))
+  | .io inner          => .io (substIDL env inner)
+  | .selfApp args      => .selfApp (args.map (substIDL env))
+  | other              => other
+
+/-- Zip a declaration's `generics : Array Name` with concrete `args :
+Array IDLType`. Returns `none` when arities disagree. -/
+def mkEnv (generics : Array Name) (args : Array IDLType)
+    : Option (Array (String × IDLType)) :=
+  if generics.size != args.size then none
+  else some <| (generics.zip args).map (fun (g, a) => (g.toString, a))
+
+end Subst
+
 /-! ## Admit-set seeds -/
 
 /-- Closed-set scalar admit-set (LEO4-DESIGN.md §4.2: `scalar` keyword). -/

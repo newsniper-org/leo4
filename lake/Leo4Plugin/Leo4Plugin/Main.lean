@@ -1254,29 +1254,30 @@ private partial def handlerFor (userDecls : Array UserDecl) : IDLType → Option
       | .record fqn args => do
         match findUserDecl userDecls fqn with
         | some (.record _ generics fields) =>
-          -- v0 limitation: generic record handlers require substituting
-          -- `args` into the field type expressions. The sample only
-          -- exercises generics-free records, so we punt to stub when
-          -- `args` is non-empty until the substitutor lands.
-          if !generics.isEmpty || !args.isEmpty then none
-          else do
-            let mut fieldHandlers : Array TyHandler := #[]
-            for (_, fty) in fields do
-              let fh ← handlerFor userDecls fty
-              fieldHandlers := fieldHandlers.push fh
-            return recordHandler fieldHandlers
+          let env ← Subst.mkEnv generics args
+          let mut fieldHandlers : Array TyHandler := #[]
+          for (_, fty) in fields do
+            let fh ← handlerFor userDecls (Subst.substIDL env fty)
+            fieldHandlers := fieldHandlers.push fh
+          return recordHandler fieldHandlers
         | _ => none
       | .resource fqn args => do
         match findUserDecl userDecls fqn with
         | some (.resource _ generics) =>
-          if !generics.isEmpty || !args.isEmpty then none
-          else some resourceHandler
+          -- Resource wire format is an opaque u64 handle regardless of
+          -- generic args (SPEC §12); we only need an arity check.
+          let _env ← Subst.mkEnv generics args
+          some resourceHandler
         | _ => none
       | .variant fqn args => do
         match findUserDecl userDecls fqn with
         | some (.variant _ generics cases) =>
-          if !generics.isEmpty || !args.isEmpty then none
-          else if !variantIsSelfOnly cases then none
+          let env ← Subst.mkEnv generics args
+          -- After substitution, each case's payload may have changed
+          -- shape — check the self-only restriction on the substituted
+          -- form, not the original.
+          let cases' := cases.map fun (n, fs) => (n, fs.map (Subst.substIDL env))
+          if !variantIsSelfOnly cases' then none
           else some (variantHandler fqn)
         | _ => none
       | _      => none
