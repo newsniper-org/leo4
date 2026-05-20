@@ -14,6 +14,7 @@ pub mod composites;
 pub mod bignat;
 pub mod bigint;
 pub mod rat;
+pub mod complex;
 pub mod handshake;
 
 pub use error::{error_codes, LeanError};

@@ -7,6 +7,35 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 8 #56: machine-complex carriers `LeanComplexF{32,64}x2` (2026-05-20)
+
+Wire-pair `(re, im)` machine complex on stable Rust. `xN` suffix
+follows the convention that extends to `xN=4` (quaternion) /
+`xN=8` (octonion) / arbitrary `xN`.
+
+- `lake/Leo4/Leo4/Wide.lean`:
+  `structure LeanComplexF32x2 where re, im : Float32 deriving LeanMarshal`
+  and matching `LeanComplexF64x2` (`Float = binary64`). `DecidableEq`
+  skipped because IEEE-754 NaN ≠ NaN.
+- `crates/leo4-abi/src/complex.rs` — `pub struct LeanComplexF32x2 {
+  re: f32, im: f32 }` (+ F64 counterpart) with `LeanMarshal` impls
+  delegating to the underlying `f32` / `f64` ones. 8 / 16 bytes LE
+  on the wire, byte-identical to the Lean record's field-order
+  encode.
+- `leo4` façade re-exports `LeanComplexF32x2` / `LeanComplexF64x2`.
+- Sample: `def mulComplexF64x2 (a b : Leo4.LeanComplexF64x2) :
+  Leo4.LeanComplexF64x2 := …` (Karatsuba-style direct formula).
+- examples/01-hello: `(2 + 3i) · (4 - i) = 11 + 10i` round-trip.
+
+Schema hash rotates `uj55sds6f7cpq` → `fbla3xr3fsp6g`. Cross-impl
+mangling: **66 mangled names byte-identical**. Zero plugin changes
+(same record-pair pattern as #55).
+
+User direction recorded for follow-up (#58, deferred): every
+`Lean*` carrier type gets opt-in `Leo4.MathlibBridge.*` modules with
+1-to-1 `toMathlib/fromMathlib` conversions. leo4 core stays
+Mathlib-independent.
+
 ### Added — Phase 8 #55: stable 128-bit integers (`u128`, `i128`) (2026-05-20)
 
 Wide-integer carriers via the "Lean record pairs Rust primitive"

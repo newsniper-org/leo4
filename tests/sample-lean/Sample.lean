@@ -217,5 +217,14 @@ def addU128 (a b : Leo4.LeanU128) : Leo4.LeanU128 :=
   let s_hi := a.hi + b.hi + carry
   { lo := s_lo, hi := s_hi }
 
+-- Phase 8 #56: machine-complex round-trip. `LeanComplexF64x2` pairs
+-- `(f64, f64)` on the wire; the Lean side uses `Float` (= binary64).
+@[leo4_export]
+def mulComplexF64x2 (a b : Leo4.LeanComplexF64x2) : Leo4.LeanComplexF64x2 :=
+  -- (a.re + a.im·i) · (b.re + b.im·i)
+  --   = (a.re·b.re − a.im·b.im) + (a.re·b.im + a.im·b.re)·i
+  { re := a.re * b.re - a.im * b.im
+  , im := a.re * b.im + a.im * b.re }
+
 
 end Sample

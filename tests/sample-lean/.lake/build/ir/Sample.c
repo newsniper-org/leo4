@@ -238,6 +238,10 @@ LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addRat(lean_object*, lean_obje
 uint8_t lean_uint64_dec_lt(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addU128(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_addU128___boxed(lean_object*, lean_object*);
+double lean_float_mul(double, double);
+double lean_float_sub(double, double);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -4233,6 +4237,58 @@ _start:
 {
 lean_object* x_3; 
 x_3 = lp_leo4_x2dsample_Sample_addU128(x_1, x_2);
+lean_dec_ref(x_1);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint8_t x_3; 
+x_3 = !lean_is_exclusive(x_2);
+if (x_3 == 0)
+{
+double x_4; double x_5; double x_6; double x_7; double x_8; double x_9; double x_10; double x_11; double x_12; double x_13; 
+x_4 = lean_ctor_get_float(x_1, 0);
+x_5 = lean_ctor_get_float(x_1, 8);
+x_6 = lean_ctor_get_float(x_2, 0);
+x_7 = lean_ctor_get_float(x_2, 8);
+x_8 = lean_float_mul(x_4, x_6);
+x_9 = lean_float_mul(x_5, x_7);
+x_10 = lean_float_sub(x_8, x_9);
+x_11 = lean_float_mul(x_4, x_7);
+x_12 = lean_float_mul(x_5, x_6);
+x_13 = lean_float_add(x_11, x_12);
+lean_ctor_set_float(x_2, 0, x_10);
+lean_ctor_set_float(x_2, 8, x_13);
+return x_2;
+}
+else
+{
+double x_14; double x_15; double x_16; double x_17; double x_18; double x_19; double x_20; double x_21; double x_22; double x_23; lean_object* x_24; 
+x_14 = lean_ctor_get_float(x_1, 0);
+x_15 = lean_ctor_get_float(x_1, 8);
+x_16 = lean_ctor_get_float(x_2, 0);
+x_17 = lean_ctor_get_float(x_2, 8);
+lean_dec(x_2);
+x_18 = lean_float_mul(x_14, x_16);
+x_19 = lean_float_mul(x_15, x_17);
+x_20 = lean_float_sub(x_18, x_19);
+x_21 = lean_float_mul(x_14, x_17);
+x_22 = lean_float_mul(x_15, x_16);
+x_23 = lean_float_add(x_21, x_22);
+x_24 = lean_alloc_ctor(0, 0, 16);
+lean_ctor_set_float(x_24, 0, x_20);
+lean_ctor_set_float(x_24, 8, x_23);
+return x_24;
+}
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+lean_object* x_3; 
+x_3 = lp_leo4_x2dsample_Sample_mulComplexF64x2(x_1, x_2);
 lean_dec_ref(x_1);
 return x_3;
 }

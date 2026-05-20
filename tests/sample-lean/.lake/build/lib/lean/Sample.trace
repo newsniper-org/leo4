@@ -1,9 +1,9 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
  "outputs":
- {"o": ["978cdc88cfe49993.olean"],
-  "i": "d76011b437ac164b.ilean",
-  "c": "c41a2cacb340bfae.c"},
+ {"o": ["b4ddd2e26afbdc68.olean"],
+  "i": "56314f7bdf2a4975.ilean",
+  "c": "9b5c49d019d1597c.c"},
  "log":
  [{"message":
    ".> LEAN_PATH=/home/ybi/leo4/lake/Leo4/.lake/build/lib/lean:/home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean /opt/lean4/bin/lean /home/ybi/leo4/tests/sample-lean/Sample.lean -o /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.olean -i /home/ybi/leo4/tests/sample-lean/.lake/build/lib/lean/Sample.ilean -c /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c --setup /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.setup.json --json",
@@ -14,21 +14,21 @@
      [["«leo4-sample»/Sample:extraDep",
        [["@«leo4-sample»:extraDep", "00000000000006bb"]]],
       ["imports",
-       [["Leo4 transitive imports (legacy)", "c50f6363d476c754"],
+       [["Leo4 transitive imports (legacy)", "af2f7cab124f0a18"],
         ["Leo4:importAllArts", "fff1d015b94b1aa3"]]]]],
     ["libs",
      [["import dynlibs",
        [["/home/ybi/leo4/lake/Leo4/.lake/build/lib/libLeo4_Leo4.so",
-         "3ad30d903e6ceffe"]]],
+         "72dce7a2aedf39d2"]]],
       ["package external libraries", "00000000000006bb"],
       ["module dynlibs", "00000000000006bb"],
       ["module plugins", "00000000000006bb"]]]]],
   ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
    "fa77a35a41db35c0"],
-  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "f77d8781a93845f1"],
+  ["/home/ybi/leo4/tests/sample-lean/Sample.lean", "8053a68c0e28125c"],
   ["options", "00000000000006bb"],
   ["isModule: false", "feefd2a0d3a1847e"],
   ["Module.name: Sample", "aa097ba15ee094f1"],
   ["Package.id?: (some leo4-sample)", "553e3cd0f8245097"],
   ["Module.leanArgs: #[]", "00000000000006bb"]],
- "depHash": "91df4d32188d3439"}
+ "depHash": "44516fd3b99494b2"}

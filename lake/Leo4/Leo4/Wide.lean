@@ -43,4 +43,25 @@ structure LeanI128 where
   hi : UInt64
   deriving Repr, DecidableEq, Inhabited, LeanMarshal
 
+/-- Machine complex number `(Float32, Float32)` — single-precision
+real and imaginary parts. Wire: 4 + 4 = 8 bytes LE. Pairs with a
+Rust `(f32, f32)` newtype on the leo4-abi side; the `xN` suffix
+follows the naming convention extending to quaternion / octonion /
+vector-N variants later (`F32x4`, `F64x8`, …). -/
+structure LeanComplexF32x2 where
+  re : Float32
+  im : Float32
+  -- `Float32` lacks a `DecidableEq` instance (IEEE-754 NaN ≠ NaN),
+  -- so equality has to be bespoke; skip the derive.
+  deriving Repr, Inhabited, LeanMarshal
+
+/-- Machine complex number `(Float, Float)` — double-precision real
+and imaginary parts (Lean's `Float` is IEEE-754 binary64). Wire:
+8 + 8 = 16 bytes LE. Same naming convention as `LeanComplexF32x2`. -/
+structure LeanComplexF64x2 where
+  re : Float
+  im : Float
+  -- Same IEEE-754 caveat as `LeanComplexF32x2`.
+  deriving Repr, Inhabited, LeanMarshal
+
 end Leo4

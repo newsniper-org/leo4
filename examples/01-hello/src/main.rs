@@ -51,6 +51,14 @@ mod sample {
         // Phase 8 #55: bare Rust `u128` routes through `Leo4.LeanU128`
         // on the Lean side via macro auto-mapping. Wire: 16 bytes LE.
         fn addU128(a: u128, b: u128) -> u128;
+        // Phase 8 #56: machine complex multiplication. The Rust type
+        // is explicit `LeanComplexF64x2` (not a tuple) — `re` and
+        // `im` field names line up with the Lean structure so the
+        // wire is byte-identical without aliases.
+        fn mulComplexF64x2(
+            a: leo4::LeanComplexF64x2,
+            b: leo4::LeanComplexF64x2,
+        ) -> leo4::LeanComplexF64x2;
     }
 }
 
@@ -198,6 +206,15 @@ fn main() -> Result<(), leo4::LeanError> {
     let sum128 = sample::addU128(&lean, big, small)?;
     assert_eq!(sum128, big + small);
     println!("addU128({big:#x}, 1) = {sum128:#x}");
+
+    // Phase 8 #56: machine-complex multiplication.
+    // (2 + 3i) · (4 - i) = (8 + 3) + (-2 + 12)i = 11 + 10i
+    let a = leo4::LeanComplexF64x2::new(2.0, 3.0);
+    let b = leo4::LeanComplexF64x2::new(4.0, -1.0);
+    let prod = sample::mulComplexF64x2(&lean, a, b)?;
+    assert_eq!(prod.re, 11.0);
+    assert_eq!(prod.im, 10.0);
+    println!("mulComplexF64x2((2+3i)(4-i)) = {} + {}i", prod.re, prod.im);
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same
