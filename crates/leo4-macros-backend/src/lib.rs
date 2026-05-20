@@ -18,27 +18,82 @@ use quote::{format_ident, quote};
 use schema_idl::{mangle_type, IDLType};
 use syn::{
     parse::{Parse, ParseStream, Parser},
-    FnArg, GenericArgument, PathArguments, ReturnType, Signature, Type,
+    Attribute, FnArg, GenericArgument, LitStr, PathArguments, ReturnType, Signature, Type,
 };
 
-/// Parsed body of `leo4::import! { fn add(a: u64, b: u64) -> u64; … }`.
+/// One entry inside a `leo4::import! { … }` block: a function signature
+/// optionally preceded by `#[leo4(...)]` attributes.
+struct ImportItem {
+    attrs: Vec<Attribute>,
+    sig: Signature,
+}
+
+impl Parse for ImportItem {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let attrs = input.call(Attribute::parse_outer)?;
+        let sig: Signature = input.parse()?;
+        // Trailing `;` mandatory (extern-block style); fail locally
+        // when the caller forgets it.
+        let _: syn::Token![;] = input.parse()?;
+        Ok(ImportItem { attrs, sig })
+    }
+}
+
+/// Parsed body of `leo4::import! { … }`. One [`ImportItem`] per `fn`.
 struct ImportBlock {
-    signatures: Vec<Signature>,
+    items: Vec<ImportItem>,
 }
 
 impl Parse for ImportBlock {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let mut signatures = Vec::new();
+        let mut items = Vec::new();
         while !input.is_empty() {
-            let sig: Signature = input.parse()?;
-            // The trailing `;` is mandatory (extern-block style) but
-            // some callers may forget it; require it explicitly so
-            // diagnostics are local.
-            let _: syn::Token![;] = input.parse()?;
-            signatures.push(sig);
+            items.push(input.parse()?);
         }
-        Ok(ImportBlock { signatures })
+        Ok(ImportBlock { items })
     }
+}
+
+/// Parsed `#[leo4(...)]` import-side attributes (P5-b₃-iv).
+#[derive(Default, Debug)]
+struct ImportAttrs {
+    /// `#[leo4(args = "u64, str, S_Sample_Point_s")]`. Comma-separated
+    /// IDL `mangle_type` strings — one per `fn` parameter, in order.
+    /// When set, this fully replaces the macro's `rust_type_to_idl`
+    /// inference so multi-instantiation exports can be disambiguated
+    /// even when the Rust signature uses types the macro can't lower
+    /// (newtypes, aliases, user-marshalled wrappers).
+    args_mangles: Option<Vec<String>>,
+}
+
+fn parse_import_attrs(attrs: &[Attribute]) -> syn::Result<ImportAttrs> {
+    let mut out = ImportAttrs::default();
+    for attr in attrs {
+        if !attr.path().is_ident("leo4") {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "leo4::import! only recognises `#[leo4(...)]` attributes here",
+            ));
+        }
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("args") {
+                let lit: LitStr = meta.value()?.parse()?;
+                let parts: Vec<String> = lit
+                    .value()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                out.args_mangles = Some(parts);
+                Ok(())
+            } else {
+                Err(meta.error(
+                    "unknown leo4 import attribute key; supported: `args = \"…\"`",
+                ))
+            }
+        })?;
+    }
+    Ok(out)
 }
 
 /// Expand a `leo4::import! { … }` block into per-function wrappers.
@@ -75,8 +130,8 @@ pub fn expand_import(input: TokenStream) -> TokenStream {
     };
 
     let mut out = TokenStream::new();
-    for sig in block.signatures {
-        match expand_one(&sig, &mangling) {
+    for item in block.items {
+        match expand_one(&item, &mangling) {
             Ok(ts) => out.extend(ts),
             Err(e) => out.extend(e.to_compile_error()),
         }
@@ -97,7 +152,9 @@ fn load_mangling_json() -> Result<serde_json::Value, String> {
         .map_err(|e| format!("leo4_macros: cannot parse {path}: {e}"))
 }
 
-fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<TokenStream> {
+fn expand_one(item: &ImportItem, mangling: &serde_json::Value) -> syn::Result<TokenStream> {
+    let attrs = parse_import_attrs(&item.attrs)?;
+    let sig = &item.sig;
     if sig.asyncness.is_some() {
         return Err(syn::Error::new_spanned(
             sig,
@@ -145,25 +202,44 @@ fn expand_one(sig: &Signature, mangling: &serde_json::Value) -> syn::Result<Toke
         ReturnType::Type(_, ty) => (**ty).clone(),
     };
 
-    // Try to lower each arg's Rust type to its IDL counterpart so we
-    // can disambiguate generic-export instantiations by mangled
-    // arg-list. Nominal user types (e.g. `Point`, derived via
-    // `#[derive(LeanMarshal)]`) don't carry their Lean-side FQN
-    // through the macro's syntactic view; for those, fall back to
-    // a fname-only single-instantiation lookup. The fallback errors
-    // when the export has multiple instantiations — at that point
-    // the user needs to disambiguate (P5-b₃-iv attribute hint).
-    let arg_idls_opt: Vec<Option<IDLType>> =
-        arg_types.iter().map(rust_type_to_idl).collect();
-    let all_known = arg_idls_opt.iter().all(Option::is_some);
-    let mangled_body = if all_known {
-        let arg_mangles: Vec<String> = arg_idls_opt
-            .iter()
-            .map(|t| mangle_type(t.as_ref().unwrap()))
-            .collect();
-        lookup_mangled_body(mangling, &fname, &arg_mangles)
+    // Three-tier disambiguation:
+    //   1. `#[leo4(args = "…")]` override — bypasses inference entirely
+    //      so the user can name the exact instantiation when their
+    //      Rust types don't lower (newtype wrappers, aliases, custom
+    //      LeanMarshal impls). The literal is parsed as a
+    //      comma-separated list of `mangle_type` strings (same
+    //      vocabulary the `.leo4-mangling` JSON uses).
+    //   2. Every arg type lowers via `rust_type_to_idl` — match by
+    //      the computed mangled arg list.
+    //   3. At least one arg type can't be lowered — fall back to a
+    //      fname-only single-instantiation lookup. Errors when the
+    //      export has multiple instantiations; the user resolves that
+    //      with tier 1.
+    let mangled_body = if let Some(arg_mangles) = attrs.args_mangles.as_ref() {
+        if arg_mangles.len() != arg_types.len() {
+            return Err(syn::Error::new_spanned(
+                &sig.ident,
+                format!(
+                    "leo4::import! `#[leo4(args = \"…\")]` declared {} arg(s) but the Rust signature has {}",
+                    arg_mangles.len(),
+                    arg_types.len()
+                ),
+            ));
+        }
+        lookup_mangled_body(mangling, &fname, arg_mangles)
     } else {
-        lookup_single_instantiation(mangling, &fname)
+        let arg_idls_opt: Vec<Option<IDLType>> =
+            arg_types.iter().map(rust_type_to_idl).collect();
+        let all_known = arg_idls_opt.iter().all(Option::is_some);
+        if all_known {
+            let arg_mangles: Vec<String> = arg_idls_opt
+                .iter()
+                .map(|t| mangle_type(t.as_ref().unwrap()))
+                .collect();
+            lookup_mangled_body(mangling, &fname, &arg_mangles)
+        } else {
+            lookup_single_instantiation(mangling, &fname)
+        }
     }
     .map_err(|e| syn::Error::new_spanned(&sig.ident, e))?;
 
@@ -409,7 +485,7 @@ fn lookup_single_instantiation(
         .ok_or_else(|| format!("entry `{fname}` has no `instantiations`"))?;
     if insts.len() != 1 {
         return Err(format!(
-            "leo4 export `{fname}` has {} instantiations — disambiguate by writing each parameter type in a form `rust_type_to_idl` recognises (or wait for P5-b₃-iv attribute hint)",
+            "leo4 export `{fname}` has {} instantiations — disambiguate by writing each parameter type in a form `rust_type_to_idl` recognises, or by adding `#[leo4(args = \"<mangled,csv>\")]` above the `fn` (see the package's `.leo4-mangling` JSON for the exact strings)",
             insts.len()
         ));
     }
@@ -477,6 +553,32 @@ mod tests {
             lookup_mangled_body(&m, "stringify", &["b".into()]).unwrap(),
             "MANGLED_BOOL"
         );
+    }
+
+    #[test]
+    fn import_attrs_parse_args_override() {
+        let attrs: Vec<Attribute> =
+            Attribute::parse_outer
+                .parse_str("#[leo4(args = \"u64, str , L_u64_l\")]")
+                .unwrap();
+        let parsed = parse_import_attrs(&attrs).unwrap();
+        assert_eq!(
+            parsed.args_mangles.unwrap(),
+            vec![
+                "u64".to_string(),
+                "str".to_string(),
+                "L_u64_l".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn import_attrs_rejects_unknown_key() {
+        let attrs: Vec<Attribute> = Attribute::parse_outer
+            .parse_str("#[leo4(symbol = \"xx\")]")
+            .unwrap();
+        let err = parse_import_attrs(&attrs).unwrap_err();
+        assert!(err.to_string().contains("unknown leo4 import attribute key"));
     }
 
     #[test]

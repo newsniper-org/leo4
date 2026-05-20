@@ -83,9 +83,11 @@ Phase 5 — landed end-to-end on Tier 1:
 - **`crates/leo4-macros/`** — `leo4::import! { fn add(a: u64, b: u64) -> u64; }`,
   plus `#[derive(LeanMarshal)]` for the four nominal shapes
   (record / all-unit enum / mixed-payload variant / `#[leo4(resource)]`
-  single-`u64` struct). The macro reads `OUT_DIR`'s mangling JSON,
-  matches by mangled arg list when every arg type lowers via
-  `rust_type_to_idl`, and falls back to a fname-only
+  single-`u64` struct). The macro reads the Lake-emitted mangling
+  JSON and resolves each call in three tiers: (1) explicit
+  `#[leo4(args = "…")]` attribute hint for multi-instantiation
+  exports (P5-b₃-iv); (2) match by mangled arg list when every arg
+  type lowers via `rust_type_to_idl`; (3) fname-only
   single-instantiation lookup when a parameter is a user-defined
   nominal type the macro can't lower syntactically.
 - **`crates/leo4-build/`** — `leo4_build::wire(lake_build_dir)`
@@ -103,10 +105,6 @@ What is **not** built yet:
 - `examples/02-roundtrip/` — `def echoes (xs : List u32) (n : Nat) : List u32`
   exercising list / Nat / value-param erasure. The remaining
   Phase 5 exit criterion.
-- `leo4::import!` attribute hint for multi-instantiation
-  disambiguation (P5-b₃-iv) — today a user writes every parameter
-  in a `rust_type_to_idl`-recognised form; the attribute would let
-  them name the FQN explicitly.
 - Phase 6 (mutual recursion), Phase 7 (async `io<T>` lowering), and
   the larger schema-idl items (G: `ConstraintExpr<Atom>` typed AST;
   H: mutual-recursion lift) — tracked in

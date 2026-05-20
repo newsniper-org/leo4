@@ -19,7 +19,7 @@
 //! ```
 
 mod sample {
-    use super::{Color, ParserHandle, Point, Tree};
+    use super::{Color, ParserHandle, Point, Tree, Wrapped};
     leo4::import! {
         fn add(a: u64, b: u64) -> u64;
         fn hello() -> String;
@@ -30,6 +30,14 @@ mod sample {
         fn colorName(c: Color) -> String;
         fn isLeaf(t: Tree) -> bool;
         fn parserId(h: ParserHandle) -> ParserHandle;
+        // P5-b₃-iv: `stringify` is generic on the Lean side (15
+        // instantiations). `Wrapped` is a Rust newtype that marshals
+        // wire-identically to `u64` but doesn't lower via
+        // `rust_type_to_idl`, so without an attribute the macro
+        // would fall through to the multi-inst error. The
+        // `#[leo4(args = "u64")]` hint nails the u64 instantiation.
+        #[leo4(args = "u64")]
+        fn stringify(x: Wrapped) -> String;
     }
 }
 
@@ -66,6 +74,26 @@ struct ParserHandle {
 struct Pair<A, B> {
     fst: A,
     snd: B,
+}
+
+/// Hand-rolled u64 newtype. Marshals wire-identically to `u64` but
+/// the macro can't lower a bare `Wrapped` to an IDL type from the
+/// signature alone — that's the case `#[leo4(args = "…")]` exists to
+/// disambiguate (P5-b₃-iv).
+#[derive(Debug, PartialEq, Clone, Copy)]
+struct Wrapped(u64);
+
+impl leo4::LeanMarshal for Wrapped {
+    fn canonical_encode(&self, buf: &mut Vec<u8>) {
+        <u64 as leo4::LeanMarshal>::canonical_encode(&self.0, buf);
+    }
+    fn canonical_decode(
+        buf: &[u8],
+        off: usize,
+    ) -> ::core::result::Result<(Self, usize), leo4::AbiError> {
+        let (v, off) = <u64 as leo4::LeanMarshal>::canonical_decode(buf, off)?;
+        Ok((Wrapped(v), off))
+    }
 }
 
 fn main() -> Result<(), leo4::LeanError> {
@@ -122,6 +150,14 @@ fn main() -> Result<(), leo4::LeanError> {
     let h = sample::parserId(&lean, ParserHandle { raw: 0xc0ffee })?;
     assert_eq!(h.raw, 0xc0ffee);
     println!("parserId(ParserHandle {{ raw: 0xc0ffee }}) = {h:?}");
+
+    // P5-b₃-iv: attribute-routed multi-instantiation pick. Without
+    // `#[leo4(args = "u64")]` the macro can't decide which of the 15
+    // `Sample.stringify` instantiations to bind. The attribute names
+    // the u64 instantiation explicitly.
+    let s = sample::stringify(&lean, Wrapped(42))?;
+    assert_eq!(s, "42");
+    println!("stringify(Wrapped(42)) = {s:?}");
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

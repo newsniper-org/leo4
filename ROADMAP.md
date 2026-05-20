@@ -255,10 +255,10 @@ pass. `examples/02-roundtrip/` is the last exit criterion still open.
   canonical-ABI encode / decode for the four nominal shapes (record,
   all-unit enum, mixed-payload variant, single-`u64` resource).
   Generic records get a `T: LeanMarshal` bound on the generated
-  impl. Multi-instantiation exports resolve by mangled arg list when
-  every arg's `rust_type_to_idl` succeeds, otherwise by fname-only
-  single-instantiation lookup (P5-b₃-iv attribute hint is the
-  remaining disambiguation path).
+  impl. Multi-instantiation exports resolve in three tiers:
+  explicit `#[leo4(args = "…")]` attribute hint (P5-b₃-iv), then
+  by computed mangled arg list when every arg's `rust_type_to_idl`
+  succeeds, then by fname-only single-instantiation lookup.
 - ✅ **`crates/leo4-build/`** — `leo4_build::wire(lake_build_dir)`
   reads `<pkg>.leo4-handshake`, surfaces `LEO4_SHIM_SO` /
   `LEO4_HANDSHAKE_FILE` as `env!()` values, and emits the

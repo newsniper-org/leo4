@@ -16,8 +16,10 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
   resolved via `dlsym`).
 - **`crates/leo4-macros/`** — `leo4::import! { fn add(a: u64, b: u64) -> u64; }`
   expands to the dispatch wrapper. Scalars (P5-b₁), `String` and
-  composite payloads (P5-b₂), nominal user types (P5-b₃-iii) all
-  flow through `LeanMarshal` encode / decode.
+  composite payloads (P5-b₂), nominal user types (P5-b₃-iii), and
+  per-fn `#[leo4(args = "…")]` attribute hints for
+  multi-instantiation disambiguation (P5-b₃-iv) all flow through
+  `LeanMarshal` encode / decode.
 - **`#[derive(LeanMarshal)]`** for the four nominal shapes —
   record (struct), enum (all-unit), variant (mixed payload),
   resource (`#[leo4(resource)]` on a single-`u64` struct). Generic
@@ -76,8 +78,8 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 - `examples/02-roundtrip/` (P5-e) — list + Nat + value-param erasure.
   Last Phase 5 exit criterion.
-- `leo4::import!` attribute hint for multi-instantiation
-  disambiguation (P5-b₃-iv).
+<!-- P5-b₃-iv landed 2026-05-20 -->
+
 - Phase 6 (mutual recursion), Phase 7 (async), Phase 8 (Mathlib
   subset).
 - schema-idl items G (`ConstraintExpr<Atom>` typed AST) and H
