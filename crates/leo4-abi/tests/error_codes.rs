@@ -13,7 +13,7 @@
 use leo4_abi::error::error_codes::*;
 use leo4_abi::{
     handshake::check_schema_hash,
-    marshal::{encode_to_fixed, LeanMarshal as _},
+    marshal::{encode_to_fixed},
     LeanError,
 };
 
