@@ -5,117 +5,92 @@ toolchain version.
 
 ## Status
 
-**Phases 1–6 complete (2026-05-20).** Phase 5's pipeline (shim
-emitter, loader, `leo4::import!`, `#[derive(LeanMarshal)]`,
-`leo4-build`, `examples/01-hello/` + `examples/02-roundtrip/`)
-lands first; Phase 6 adds mutual recursion between nominal types
-via an explicit `mutual { … }` IDL block and a `Cyc<i>`
-cycle-breaker token (SPEC/phase-6-mutual.md). `examples/04-mutual-ast/`
-exercises a `Sample.Expr` / `Sample.Stmt` cluster end-to-end on
-Tier 1 (x86_64 Linux). `tests/mangling/` confirms cross-impl
-byte-identical mangling (61 names, schema_hash `gj6daa3oelheu`)
-between the Lean plugin and Rust `schema-idl`. Phase 7 (async
-`io<T>` lowering, gated on WASIp3 stability) is the next gate.
+**Phases 0–8 complete (2026-05-21). v0.1.0.** The full pipeline runs
+end-to-end on Tier 1 (x86_64 Linux): Lake plugin, Rust workspace,
+shim synthesis, C ↔ Lean dispatch, mutual recursion, async `io<T>`
+lift, and a Mathlib-compatible carrier-type subset with opt-in
+bridges. `tests/mangling/` confirms cross-impl byte-identical
+mangling across **70 mangled instantiations** (29 logical entries)
+with schema_hash `qi5gb74dbjyxo` between the Lean plugin and the
+Rust `schema-idl` crate.
 
 What works today:
 
-- **Lean side runtime** (`lake/Leo4/`) — `@[leo4_export]`,
+- **Lean runtime** (`lake/Leo4/`) — `@[leo4_export]`,
   `@[leo4_specialize_when …]`, the `leo4_constraint` syntax category,
-  `class LeanMarshal` (`canonicalEncode`/`canonicalDecode` over a
-  `ByteArray`), `class LeanResource` + `@[leo4_resource]`, primitive
-  blanket `LeanMarshal` instances, and a `deriving LeanMarshal`
-  handler for `structure` / `inductive` (including self-recursive
-  variants).
-- **Lake plugin** (`lake/Leo4Plugin/`, `lean_exe leo4plugin`) — re-loads
-  the user package via `Lean.importModules (loadExts := true)`,
-  computes admit-sets (phantom / unbounded / class / value-erased /
-  higher-kind reject — see `LEO4-DESIGN.md §5`), mangles names per
-  [`SPEC/mangling.md`](SPEC/mangling.md), atomically writes
-  `<pkg>.leo4-schema`, `<pkg>.leo4-mangling`, `<pkg>.leo4-handshake`.
-  Optional `--with-lower` shells out to `leo4c` to also write
-  `<pkg>.wit`.
-- **Rust-side `leo4-idl` crate** — full IDL parser (`SPEC/idl-grammar.ebnf`:
-  `package`/`use`/`interface`/`world`/`type`/`constraint_decl`/
-  `nominal_decl`, kind annotations, `value_param`, `Self<…>`),
-  byte-identical mangling + FNV-1a-64 schema hash, canonical-form
-  renderer, and WIT lowering (records/variants/enums/resources,
-  cyclic ADTs → opaque `resource`, `bigint`/`bignat`/`io<T>` → side
-  aliases).
-- **`leo4c` CLI** — `parse`, `canonical`, `mangle`, `lower`.
-- **`leo4-abi` crate** — Rust mirror of `Leo4.LeanMarshal`. Scalars
-  (`u8`..`i64`, `f32`/`f64`, `bool`, `char`), composites (`String`,
-  `Vec<T>`, `Option<T>`, `Result<T,E>`, tuples), arbitrary-precision
-  `BigNat`/`BigInt`. `LeanError` + the 8 reserved codes from
-  `SPEC/canonical-abi.md` §13. `handshake::check_schema_hash` returns
-  `0x05` on mismatch.
-- **Cross-impl conformance** — three harnesses:
-  - `tests/mangling/` (`just mangling-test`) — schema_hash + 50
-    mangled names byte-identical between Lake plugin and `leo4c`.
-  - `tests/wit/` (`just wit-test`) — 5 IDL cases lower to WIT that
+  `class LeanMarshal` over `ByteArray`, `class LeanResource` +
+  `@[leo4_resource]`, primitive blanket instances, `deriving
+  LeanMarshal` for `structure` / `inductive` (self-recursive variants
+  + mutual clusters via `mutual ... end`), `LeanU128` / `LeanI128`,
+  `LeanComplexF{32,64}x2`. Optional `Leo4.NightlyFloats` (`LeanF16`,
+  `LeanBF16`, `LeanF128`, complex variants) and the opt-in
+  `Leo4.MathlibBridge.*` modules (1-to-1 conversions to `Nat` / `Int`
+  / `BitVec` / `ZMod (2^128)` / `ℝ` / `ℂ`).
+- **Lake plugin** (`lake/Leo4Plugin/`, `lean_exe leo4plugin`) —
+  re-loads the user package via `Lean.importModules (loadExts :=
+  true)`, computes admit-sets (phantom / unbounded / class /
+  value-erased / higher-kind reject — `LEO4-DESIGN.md §5`), handles
+  `mutual` clusters with `Cyc<i>` cycle-breakers, lifts `IO α` to
+  `future<α>`, recognises `UserDecl.externalMarshal` for
+  proof-carrying types (`Rat`), emits the C shim
+  (`<pkg>.leo4-shim.c`) and Lean wrapper, drives `leanc` to produce
+  `<pkg>.leo4-shim.so`, atomically writes
+  `<pkg>.leo4-schema` / `<pkg>.leo4-mangling` /
+  `<pkg>.leo4-handshake`. `--with-lower` shells out to `leo4c` for
+  optional `<pkg>.wit`.
+- **Rust workspace** — `crates/schema-idl` (parser + mangle +
+  canonical render), `crates/leo4-idl` (WIT lowering),
+  `crates/leo4c` CLI (`parse` / `canonical` / `mangle` / `lower`),
+  `crates/leo4-abi` (canonical-ABI marshal for scalars / composites /
+  `BigNat` / `BigInt` / `LeanRat` / `LeanU128` / `LeanI128` /
+  `LeanComplexF{32,64}x2`, optional `nightly-floats` feature),
+  `crates/leo4-native` (loader, `Arena<'a>`, `LeanRef<'a, T>`,
+  dispatch cache), `crates/leo4-macros` (`leo4::import!`,
+  `#[derive(LeanMarshal)]`), `crates/leo4-build` (build-script
+  helper), `crates/leo4` (top-level façade).
+- **Sibling projects** — `sibling/leo4-wasip3/` (stable Rust +
+  `wasm32-wasip2` + `wasip3` v0.6, Phase 7 finisher),
+  `sibling/mathlib-bridge-test/` (Lake package pulling Mathlib +
+  `Leo4`; verifies every `MathlibBridge.*` module type-checks).
+- **Cross-impl conformance** —
+  - `tests/mangling/` (`just mangling-test`) — schema_hash +
+    70 mangled instantiations byte-identical between Lake plugin
+    and `leo4c`.
+  - `tests/wit/` (`just wit-test`) — IDL cases lower to WIT that
     passes `wasm-tools component wit` and `wit-bindgen markdown`.
-  - `tests/conformance/` (`just conformance-test`) — 29 fixtures
-    where the Lean encoder bytes are reproduced byte-identical by the
-    Rust encoder.
-- **`tests/sample-lean/`** smoke fixture covering every shape the
-  plugin emits.
+  - `tests/conformance/` (`just conformance-test`) — Lean encoder
+    bytes reproduced byte-identical by the Rust encoder.
+- **End-to-end examples** —
+  - `examples/01-hello/` — scalars, four nominal-type wrappers,
+    derive-only round-trips, `#[leo4(args = "…")]` attribute path,
+    handshake-mismatch detection (`LEO4_ERR_HANDSHAKE_MISMATCH` =
+    `0x05`), `addRat` (`external Rat`), `addU128`,
+    `mulComplexF64x2`, async `asyncDouble` / `asyncNegate` /
+    `asyncHalveF{32,64}`.
+  - `examples/02-roundtrip/` — `list<u32>` + `bignat` round-trip,
+    `listSumU64` / `listConcat`, multi-instantiation `listLen`.
+  - `examples/04-mutual-ast/` — `Sample.Expr` / `Sample.Stmt`
+    mutual cluster, hand-rolled `LeanMarshal` impls with `Box<T>`
+    breaking the Rust-side cycle.
 - **Multi-version CI matrix** (`ci/`, `just ci-matrix`) — hermetic
   Ubuntu container with `elan`, `rustup`, `wasm-tools`, and
   `wit-bindgen`. Matrix `v4.27.0 / v4.28.0 / v4.29.1 / v4.30.0-rc2`
   iterates inside a single container; hardlink-shared source mirror
   in a named volume gives union-FS-style dedup without privileged
-  mounts. **All 4 versions verified green** on the full `just test`
-  ladder (mangling / wit / conformance / cargo / lake); each version
-  produces the same `schema_hash` over the sample fixture
-  (`7vi56qcxzb3xw`), confirming leo4's *Lean-version-independent
-  output* invariant at the matrix level. First-run cold ~50 minutes
-  (toolchain pull + cold builds); subsequent runs ~7 minutes with the
-  persisted cache volume. GitHub Actions is the planned primary CI;
-  Tart is the fallback path once Apple Silicon hardware is available.
+  mounts. The matrix is the fallback path against GitHub-Actions
+  outages.
+- **Multilingual documentation** under `docs/` — Typst sources for
+  a short learning overview and a long-form
+  "implement-from-scratch" guide book, each in English / Korean /
+  Japanese / German (`docs/learning/<lang>/main.typ`,
+  `docs/implement-from-scratch/<lang>/main.typ`).
 
-Phase 5 — landed end-to-end on Tier 1:
+Open items:
 
-- **C shim synthesis** — `lake/Leo4Plugin/Leo4Plugin/Main.lean`
-  emits `<pkg>.leo4-shim.c`, drives `leanc` to produce
-  `<pkg>.leo4-shim.so`, and links `libleanshared` + the user
-  package's `.so` (resolved via `lake-manifest.json`'s
-  `packages[].dir`) at the right RPATH so the loader picks them up.
-- **`crates/leo4-native/`** — `Lean::open` (handshake + runtime init
-  + wrapper-module init), `Arena<'a>`, `LeanRef<'a, T>`,
-  per-callsite `Mutex<HashMap>` dispatch cache, inline
-  `lean_io_result_is_ok` + `lean_dec_ref` (with `lean_dec_ref_cold`
-  delegated via `dlsym` for the cold path).
-- **`crates/leo4-macros/`** — `leo4::import! { fn add(a: u64, b: u64) -> u64; }`,
-  plus `#[derive(LeanMarshal)]` for the four nominal shapes
-  (record / all-unit enum / mixed-payload variant / `#[leo4(resource)]`
-  single-`u64` struct). The macro reads the Lake-emitted mangling
-  JSON and resolves each call in three tiers: (1) explicit
-  `#[leo4(args = "…")]` attribute hint for multi-instantiation
-  exports (P5-b₃-iv); (2) match by mangled arg list when every arg
-  type lowers via `rust_type_to_idl`; (3) fname-only
-  single-instantiation lookup when a parameter is a user-defined
-  nominal type the macro can't lower syntactically.
-- **`crates/leo4-build/`** — `leo4_build::wire(lake_build_dir)`
-  emits `LEO4_SHIM_SO` / `LEO4_HANDSHAKE_FILE` env vars + the
-  `cargo:rerun-if-changed=` lines.
-- **`examples/01-hello/`** — `add(u64, u64) -> u64`, `hello() -> String`,
-  four nominal user-type wrappers (`pointSum` / `colorName` /
-  `isLeaf` / `parserId`), a derive-only Rust-side round-trip across
-  record / enum / variant / resource / generic-record, the
-  `#[leo4(args = "…")]` attribute path on the 15-instantiation
-  `Sample.stringify`, and the handshake-mismatch exit check
-  (`code == 5` on `schema_hash_bytes` tamper).
-- **`examples/02-roundtrip/`** — `Sample.echoes(xs : List UInt32, n : Nat) -> List UInt32`
-  driving `list<u32>` on both arg and return + `bignat` as a
-  parameter, plus `listSumU64` / `listConcat` and a
-  multi-instantiation `listLen` pick. Phase 5 exit demo.
-
-What is **not** built yet:
-- Phase 6 (mutual recursion), Phase 7 (async `io<T>` lowering), and
-  the larger schema-idl items (G: `ConstraintExpr<Atom>` typed AST;
-  H: mutual-recursion lift) — tracked in
-  `schema-idl-shortcomings.md` and the γ-plan.
-- Actual triggers for `LeanError` codes `0x02` / `0x03` / `0x04` /
-  `0x06` / `0x08` beyond what the native shim path now exercises.
+- Some `LeanError` codes (`0x02` / `0x03` / `0x04` / `0x06` / `0x08`)
+  are reserved but not yet exercised by a test fixture.
+- schema-idl items G (`ConstraintExpr<Atom>` typed AST) and the
+  `wasm64` sibling stay deferred until a concrete consumer surfaces.
 
 ## Documents to read, in order
 
@@ -157,31 +132,52 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 ├── LEO4-DESIGN.md          # single source of truth
 ├── CLAUDE.md               # Claude Code working agreement
 ├── ROADMAP.md              # phased plan
+├── CHANGELOG.md            # release history
 ├── SPEC/                   # normative specs
+│   ├── idl-grammar.ebnf
+│   ├── canonical-abi.md
+│   ├── mangling.md
+│   ├── handshake.md
+│   └── phase-6-mutual.md
 ├── crates/                 # Cargo workspace
-│   ├── leo4-idl/           # IDL parser + mangle + canonical render + WIT lower
+│   ├── schema-idl/         # parser + IDL types + mangling + canonical render
+│   ├── leo4-idl/           # WIT lowering pass on top of schema-idl
 │   ├── leo4c/              # CLI: parse / canonical / mangle / lower
-│   ├── leo4-abi/           # LeanMarshal + LeanError + scalars/composites/bignat/bigint
-│   ├── leo4-native/        # (scaffold) Phase 5 — libloading + Arena/LeanRef
-│   ├── leo4-macros/        # (scaffold) Phase 5 — #[leo4::import]
-│   ├── leo4-macros-backend # (scaffold)
-│   ├── leo4-build/         # (scaffold) Phase 5 — build.rs helper
-│   ├── leo4/               # (scaffold) Phase 5 — top-level user API
-│   └── leo4-wasm/          # (scaffold) Phase 7+
+│   ├── leo4-abi/           # LeanMarshal + LeanError + scalars / composites /
+│   │                       # bignat / bigint / LeanRat / LeanU128/I128 /
+│   │                       # LeanComplexF{32,64}x2 (+ optional nightly floats)
+│   ├── leo4-native/        # native loader (libloading) + Arena + LeanRef
+│   ├── leo4-macros/        # user-facing proc-macros (leo4::import!, derive)
+│   ├── leo4-macros-backend # macro expander (syn + quote)
+│   ├── leo4-build/         # build.rs helper (LEO4_SHIM_SO, ...)
+│   ├── leo4/               # top-level user façade
+│   └── leo4-wasm/          # (scaffold) wasm loader — see sibling/leo4-wasip3
 ├── lake/                   # Lake workspace (Lean side)
 │   ├── Leo4/               # runtime library
+│   │   └── Leo4/MathlibBridge/
+│   │                       # opt-in 1-to-1 conversions Lean carriers ↔ Mathlib
 │   └── Leo4Plugin/         # Lake plugin exe (leo4plugin)
+├── sibling/                # non-workspace Cargo / Lake projects
+│   ├── leo4-wasip3/        # stable Rust + wasm32-wasip2 + wasip3 v0.6
+│   └── mathlib-bridge-test/# Lake package verifying Mathlib bridges
+├── docs/                   # Typst documentation suite
+│   ├── template/leo4-book.typ
+│   ├── learning/{en,ko,ja,de}/main.typ
+│   └── implement-from-scratch/{en,ko,ja,de}/main.typ
 ├── ci/                     # Multi-version Lean matrix infra
 │   ├── Dockerfile.lean-test
-│   ├── entrypoint.sh       # hardlink-shared source mirror + per-version work dir
-│   └── matrix.sh           # single docker run wrapper
-├── shim/                   # C shim for the native backend (Phase 5)
-├── examples/               # end-to-end demos (Phase 5)
+│   ├── entrypoint.sh
+│   └── matrix.sh
+├── shim/                   # static C shim header shared with generated TUs
+├── examples/               # end-to-end demos
+│   ├── 01-hello/           # scalars + nominal + Rat + async + ...
+│   ├── 02-roundtrip/       # list<T> + bignat + multi-instantiation
+│   └── 04-mutual-ast/      # Expr / Stmt mutual cluster
 ├── tests/                  # integration + conformance tests
-│   ├── sample-lean/        # smoke fixture (record/enum/variant/resource/self-rec)
+│   ├── sample-lean/        # smoke fixture covering every emitted shape
 │   ├── mangling/           # cross-impl mangling harness (Phase 2)
-│   ├── wit/                # WIT lowering golden + wasm-tools/wit-bindgen validation (Phase 3)
-│   └── conformance/        # encoder byte-for-byte conformance (Phase 4)
+│   ├── wit/                # WIT lowering golden + wasm-tools validation
+│   └── conformance/        # Lean ↔ Rust encoder byte-for-byte conformance
 ├── spike/                  # disposable experiments + findings
 ├── Cargo.toml
 ├── lakefile.lean
@@ -215,12 +211,16 @@ just wit-test           # WIT golden + wasm-tools/wit-bindgen (Phase 3)
 just conformance-test   # Lean encoder vs Rust encoder bytes (Phase 4)
 just test               # full ladder = lake + cargo + mangling + wit + conformance
 
-# Phase 5 end-to-end demos:
+# End-to-end demos:
 just smoke-plugin                          # produce / refresh shim .so
-cargo run -p leo4-example-01-hello         # scalars + nominal types + handshake check
+cargo run -p leo4-example-01-hello         # scalars, nominal types, Rat, async, handshake check
 cargo run -p leo4-example-02-roundtrip     # list<T> + bignat round-trip
+cargo run -p leo4-example-04-mutual-ast    # mutual Expr / Stmt cluster
 
-# Multi-version Lean matrix (containerised, Phase 5 prep):
+# Sibling tests (off the default ladder):
+just mathlib-bridge-test                   # type-checks Mathlib bridges (1-2h cold)
+
+# Multi-version Lean matrix (containerised):
 just ci-image           # build the container image once
 just ci-matrix          # run `just test` for v4.27/v4.28/v4.29.1/v4.30.0-rc2
 just ci-version v4.29.1 # one version
@@ -247,7 +247,7 @@ interface Sample {
 }
 
 $ just schema-hash
-4apuhe7gzvtzs
+qi5gb74dbjyxo
 ```
 
 Schema hashes rotate every time the canonical IDL form changes — by

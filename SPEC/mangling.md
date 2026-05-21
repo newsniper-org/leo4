@@ -101,9 +101,20 @@ mangle_type(resource R)      = "X_" ++ fqn(R) ++ "_x"
 mangle_type(resource R<T₁,…>)= "X_" ++ fqn(R) ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_x"
 
 mangle_type(io<T>)           = "I_" ++ mangle_type(T) ++ "_i"
+-- Wire mangle for `io<T>` is unchanged for cross-impl conformance.
+-- The canonical IDL renders the same shape as `future<T>` (Phase 7
+-- lift), but mangling stays on the `I_…_i` form so the linker
+-- symbol table doesn't rotate just because the source spelling
+-- changed.
 
 mangle_type(Self)            = "self"   -- only inside a record/variant/resource
                                         -- body; never expands recursively.
+
+mangle_type(Cyc<i>)          = "c" ++ toString i ++ "c"
+                              -- only inside a `mutual { … }` group's
+                              -- members; the index is 0-based in
+                              -- declaration order. See
+                              -- SPEC/phase-6-mutual.md §2.
 ```
 
 ### Fully-qualified names
@@ -167,7 +178,9 @@ with the instantiation `F = list, A = u32, B = u64` substitutes to
 `map(x: list<u32>, f: u32 -> u64) -> list<u64>`; the parameter type
 list `[list<u32>, u32 -> u64]` mangles as
 `L_u32_l_<arrow-mangling-TBD>`. Function-arrow mangling for callback
-parameters lands in Phase 4 (function-pointer ABI not yet specified).
+parameters is unspecified — the function-pointer ABI is not on the
+phase ladder, and no callback-bearing export exists yet. The slot
+exists in case a downstream caller needs it.
 
 ## 4. Kind discipline
 

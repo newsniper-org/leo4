@@ -1,12 +1,12 @@
 # schema-idl shortcomings
 
-> Outstanding limitations across the IDL stack, last audited 2026-05-20
-> while pursuing **priority A** (#4 generic substitution). The audit
-> uncovered downstream limitations in leo4 plugin / runtime code that
-> share a dependency chain with schema-idl work, so this ledger now
-> tracks both halves and labels each item by ownership
-> (`schema-idl` / `leo4-plugin` / `leo4-runtime`). The cascade table
-> in §"Dependency graph" makes the inter-item order explicit.
+> Outstanding limitations across the IDL stack, last audited
+> 2026-05-21 after the v0.1.0 release cut. Phases 0–8 are done; this
+> ledger keeps the residual schema-idl / plugin / runtime items
+> distinct from the released surface. Each item is labelled by
+> ownership (`schema-idl` / `leo4-plugin` / `leo4-runtime`); the
+> cascade table in §"Dependency graph" makes the inter-item order
+> explicit.
 >
 > Companion docs:
 > - `for-general-interface-descriptions.md` — reuse guide + decision log
@@ -21,10 +21,10 @@
 | #  | Owner         | Title                                                              | Grammar impact | Status   |
 |----|---------------|--------------------------------------------------------------------|----------------|----------|
 | 1  | schema-idl    | `UserDecl::Flags` variant missing + parser collapses flags to Enum | no             | Rust side landed 2026-05-20; Lean `UserDecl.flagsT` pending |
-| 2  | schema-idl    | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | AST slot landed 2026-05-20; parser desugaring waits for Phase 7 entry |
+| 2  | schema-idl    | `FuncDecl.effect` field missing (D-i decided 2026-05-19)           | yes            | landed end-to-end 2026-05-20 → 2026-05-21 (Phase 7 step 1/2a/2b/2c) |
 | 3  | schema-idl    | `ConstraintExpr<Atom>` typed AST missing (D-ii decided 2026-05-19) | yes            | deferred |
 | 4  | schema-idl    | Generic type-parameter substitution helper                         | no             | landed 2026-05-20 (Rust + Lean mirror) |
-| 5  | schema-idl    | `mutual_group` production / cross-decl recursion                   | yes            | Phase 6  |
+| 5  | schema-idl    | `mutual_group` production / cross-decl recursion                   | yes            | landed Phase 6 (2026-05-20) — SPEC/phase-6-mutual.md |
 | 6  | schema-idl    | Parser rejects non-ASCII identifiers (`α`, `β`, …)                 | no             | sidestepped 2026-05-20 by ASCII-positional binder names from plugin (parser unchanged) |
 | 7  | schema-idl    | `render::user_decl_to_idl` omits `generic_params` on nominal decls | yes (cosmetic) | landed 2026-05-20 (Rust render + Lean `userDeclToIDL`; parser `RawDecl` now carries `generics`; resolver wires `Shape::TypeVar` for in-scope binders) |
 | 8  | leo4-runtime  | `deriving LeanMarshal` generic-inductive support                   | no             | committed 2026-05-20 (`ef40451` + cascade `a8556a8` / `b2df550` / `92a0d9f`) |

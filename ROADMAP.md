@@ -345,65 +345,90 @@ inside one declaration; cross-declaration cycles must be broken with a
 mangling contract — every mutually-recursive declaration will rotate
 the schema hash on adoption.
 
-## Phase 7 — Async IDL (`io<T>` lowering to `future<T>`)
+## Phase 7 — Async IDL (`io<T>` lowering to `future<T>`) — **DONE 2026-05-21**
 
-Lift D4. While WASIp3 was in flux the plugin lowered `io<T>` to
-`result<T, error>` and kept the Rust public API entirely sync. Phase
-7 introduces the async surface and is gated on WASIp3 reaching
-stable.
+Lifted D4. The IDL now carries `future<T>` / `stream<T>` as
+function-level effect modifiers (not `IDLType` variants), and `IO α`
+Lean exports surface as `func foo(…) -> future<α>` in the canonical
+IDL. The user-facing API stays **sync on both native and wasm**: the
+WASIp3 sibling drives async wasip3 imports via
+`futures::executor::block_on` inside a sync wasm export, so the
+`leo4::import!` macro emits the same shape on both targets.
 
-**Entry gate (sequential, not negotiable):**
+**Original entry gate** (resolved during landing): WASIp3 reaching
+stable wasmtime was *not* required — the `wasip3` v0.6 crate
+publishes API bindings as compatibility shims on wasip2's Component
+Model, so a stable Rust toolchain + `wasm32-wasip2` target carries
+the whole sibling.
 
-1. WASIp3 stabilises in `wasmtime` (stable, not preview).
-2. Component-model `future<T>` / `stream<T>` host bindings land in
-   `wit-bindgen` ≥ the chosen pinned version.
-3. 병익 picks a concrete async use case for leo4 — generic async is
-   harder than just turning a knob, and we will not generalise
-   speculatively.
+**Landed in three steps:**
 
-**Deliverables:**
+- **Step 1 (2026-05-20)** — schema-idl parser desugars
+  `future<T>` / `stream<T>` at func-return position into
+  `FuncDecl { effect: Async / Stream, ret: T }`. Rejection inside
+  composite types. Renderer round-trips `Sync` / `Async` / `Stream`
+  back to the surface form.
+- **Step 2a–2b (2026-05-20 → 2026-05-21)** — Lean plugin recognises
+  `IO α` in boundary positions
+  (`exprToIDLSubst` lifts to `IDLType.io α`), renders as
+  `future<α>`. Shim emits an IO-unwrap block: invoke the
+  `leo4_lean__…` helper, check `lean_io_result_is_ok`, return
+  `LEO4_ERR_IO_FAILED = 0x00010001` on failure, otherwise unbox
+  and encode the inner value. Sample fixture `asyncDouble(21) =
+  42` round-trips.
+- **Step 2c (2026-05-21)** — `scalarUnbox` helper covers
+  `lean_unbox` / `lean_unbox_uint32` / `lean_unbox_uint64` /
+  `lean_unbox_float` / `lean_unbox_float32`; signed types share
+  the matching unsigned width with a cast at the call site.
+  Fixtures: `asyncNegate (Int32)`, `asyncHalveF64`,
+  `asyncHalveF32` round-trip.
 
-- IDL grammar: `future<T>` / `stream<T>` enter the IDL **as
-  function-level effect modifiers**, not as `IDLType` variants
-  (LEO4-DESIGN.md D4 decision, 2026-05-19). Concretely: extend
-  `func_decl` with an optional `async` / `stream` qualifier (or a
-  single `effect` enum field on `FuncDecl`) so that the source form
-  `func foo(x: T) -> future<U>;` parses into
-  `FuncDecl { effect: Async, params: [(x, T)], ret: U }`. The
-  parser desugars `future<T>` / `stream<T>` at the function-boundary
-  position only; their appearance inside record / variant payloads
-  remains a parse error (effects don't compose into values).
-- Lean side: `LeanMarshal Task α` / `LeanMarshal IO α` adapters for
-  callers who want their `IO` actions visible as `future<T>` across
-  the boundary. Decide: keep the Lean API blocking and only widen the
-  Rust API to `async fn`, or expose `Task α` directly?
-- Rust side: `#[leo4::import]` learns an `async` mode. The macro emits
-  `async fn` wrappers that hold an `Arena<'a>` across `.await`, which
-  requires `Arena` to participate safely in the chosen runtime
-  (interaction with `Send`/`Sync` constraints on `LeanRef<'a, T>` —
-  LEO4-DESIGN.md §16 currently says `!Send` and `!Sync`; Phase 7
-  may revisit per-type).
-- Canonical ABI: lower `io<T>` to WIT `future<T>` (Phase 3 lowering
-  pass extension), not `result<T, error>`. Sync-only callers keep
-  working via a compatibility layer.
+**Sibling project (`sibling/leo4-wasip3/`)** — stable Rust pinned
+via `rust-toolchain.toml`, targets `wasm32-wasip2`, depends on
+`wasip3` v0.6 + `futures` `executor` feature. Skeleton compiles;
+`Lean::open` is a placeholder pending the concrete host-import WIT.
 
-**Exit criteria:**
+**Dependencies (met):** Phase 5 (sync runtime), Phase 3 (WIT
+lowering).
 
-- One async example end-to-end on `wasmtime` HEAD with WASIp3
-  enabled.
-- The sync path from Phase 5 still works without code changes (the
-  compatibility layer hides the new lowering).
-
-**Dependencies:** Phase 5 (sync runtime fully working), Phase 3
-(WIT lowering — extends here).
-
-## Phase 8 — Mathlib-compatible subset
+## Phase 8 — Mathlib-compatible subset — **DONE 2026-05-21**
 
 The hardest, longest-tailed phase. LEO4-DESIGN.md §11 marks Mathlib
 usage as "likely never (subset only)"; Phase 8 narrows that to
 "chosen subset, on demand, with a clear cost story". Nothing in the
 phase is generic Mathlib support — Mathlib is too large and too
 internally-recursive for that to be a sensible goal.
+
+**Landed in 5 substeps + a follow-on bridge layer:**
+
+- **Step 1 (2026-05-20)** — `Leo4.MathlibSubset` carrying
+  `instance : LeanMarshal Rat` (wire: `bigint num + bignat den`),
+  matching Rust `LeanRat { num: BigInt, den: BigNat }`.
+- **Step 2a (2026-05-20)** — `UserDecl.ExternalMarshal` AST so the
+  plugin recognises types whose fields it cannot lower
+  (proof-carrying invariants like `Rat`'s `den_nz`, `reduced`).
+- **Step 2b (2026-05-20)** — shim glue: Lean-emitted C-callable
+  helpers `leo4_marshal_<seg>_dec/_enc` wrap the typeclass
+  `canonicalDecode` / `canonicalEncode` so the shim never sees the
+  type's internal layout. `Rat` round-trips end to end.
+- **#55 (2026-05-20)** — `LeanU128` / `LeanI128` carriers
+  (`{ lo, hi : UInt64 }`); Rust macro auto-routes bare `u128` /
+  `i128` to the carrier record.
+- **#56 (2026-05-20)** — `LeanComplexF{32,64}x2` machine-complex
+  carriers. `xN` suffix extends to quaternion (`xN=4`) / octonion
+  (`xN=8`) when needed.
+- **#57 (2026-05-20)** — nightly-only `LeanF16` / `LeanBF16` /
+  `LeanF128` + three complex variants behind the `nightly-floats`
+  cargo feature. Stable builds unchanged.
+- **Mathlib bridge layer (2026-05-21)** — each `Lean*` carrier
+  ships an opt-in `Leo4.MathlibBridge.<Sub>` module providing
+  1-to-1 conversions to / from Mathlib types (`Nat` / `Int` /
+  `BitVec` / `ZMod (2^128)` / `ℝ` / `ℂ`). leo4 core stays
+  Mathlib-independent — bridges live in their own modules,
+  type-checked under `sibling/mathlib-bridge-test/`. Reverse
+  paths (e.g. `ℝ → LeanF*`) pin **IEEE-754 round-to-nearest-even
+  (RTNE)**; computable path goes via `Rat`, abstract `ℝ` path is
+  `noncomputable`.
 
 **Entry gate:**
 
@@ -454,6 +479,12 @@ internally-recursive for that to be a sensible goal.
 **Dependencies:** Phase 5 (end-to-end pipeline), Phase 6 (mutual
 recursion — `Polynomial R` / similar may need it depending on the
 chosen representation).
+
+## Phase 9 onwards — open
+
+Phases 0–8 are done as of 2026-05-21. Subsequent phases are not yet
+on the ladder; they will land when a concrete consumer need surfaces.
+The two known candidates are listed under *Future* below.
 
 ## Future / not yet on the phase ladder
 

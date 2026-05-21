@@ -7,12 +7,15 @@ file without polluting the main workspace's MSRV and CI policy.
 
 Current siblings:
 
-- **`leo4-wasip3/`** — WASIp3 backend. Pins nightly Rust (WASIp3
-  + `wasip3` crate are nightly-only as of Rust 1.95). Depends on
-  `crates/leo4-abi` via path so the canonical-ABI marshalling
-  layer stays single-source. Phase 7 lights this up with concrete
-  host import bindings and `block_on`-driven async dispatch
-  behind a sync user-facing API.
+- **`leo4-wasip3/`** — WASIp3 backend. Pins **stable** Rust + the
+  `wasm32-wasip2` target (verified 2026-05-21: the `wasip3` crate
+  v0.6 ships WASIp3 API bindings as compatibility shims on
+  wasip2's Component Model, so a stable toolchain compiles it).
+  Depends on `crates/leo4-abi` via path so the canonical-ABI
+  marshalling layer stays single-source. Phase 7 lights this up
+  with concrete host import bindings and
+  `futures::executor::block_on`-driven async dispatch behind a
+  sync user-facing API.
 - **`mathlib-bridge-test/`** — Lake package pulling Mathlib +
   `Leo4`. Type-checks every `Leo4.MathlibBridge.*` module
   end-to-end. Mathlib's cold build is 1-2 hours, so this isn't on

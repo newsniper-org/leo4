@@ -44,7 +44,12 @@ For each work item, "done" means all of:
 - Public API uses `Result<T, LeanError>` for fallible operations.
   `LeanError` is in `leo4::err`.
 - Lifetimes on `LeanRef<'a, T>` are NEVER elided. Always written out.
-- No `async` in public API until WASIp3 stabilizes (D4).
+- The public API stays sync on both native and wasm. Lean `IO α`
+  exports lift to `future<α>` at the IDL boundary, but the
+  generated Rust wrapper is sync — wasm hides WASIp3 async imports
+  via `futures::executor::block_on` inside a sync wasm export
+  (D4 lift, 2026-05-20). Do not surface `async fn` in user-facing
+  Rust API.
 
 ### Lean
 
@@ -75,6 +80,7 @@ separate commit, then change the code.
 - `SPEC/canonical-abi.md` — wire format per type
 - `SPEC/mangling.md` — symbol name derivation
 - `SPEC/handshake.md` — schema hash and admit-set summary file format
+- `SPEC/phase-6-mutual.md` — mutual recursion (Phase 6 design + rules)
 
 ## How to Work With the Lake Plugin
 
@@ -89,39 +95,51 @@ The Lake plugin (`lake/Leo4Plugin/`) hooks into Lake's build process to:
 
 The plugin is itself a Lake target; it builds once per `lean-toolchain` change.
 
-**The hook stability of `Lake.Module.recBuildLean` is the subject of
-spike 0** (`spike/SPIKE-0-lake-hook.md`). Do not assume any particular
-hook is stable until spike 0 reports its findings.
+**Spike 0 result (2026-05-16, RESOLVED):** the plugin is a
+`lean_exe` (`lake exe leo4plugin <user-module>`) that calls
+`Lean.importModules (loadExts := true)` on the user package's
+already-built `.olean` files. We do **not** hook
+`Lake.Module.recBuildLean` (it stayed `private` across v4.27.0 →
+v4.30.0-rc2). Full investigation: `spike/SPIKE-0-FINDINGS.md`.
 
-## How to Work With the macro-on-extern-C Layer
+## How to Work With the `leo4::import!` Layer
 
-`leo4_macros::import` expands `#[leo4::import(module = "…")]` blocks into:
+`leo4::import! { fn add(a: u64, b: u64) -> u64; … }` is a
+function-procedural macro (`#[proc_macro]` in
+`crates/leo4-macros/`, expansion in
+`crates/leo4-macros-backend/`). It parses an extern-block-like
+input and emits one sync Rust wrapper `fn` per declaration. Each
+wrapper:
 
-1. An `extern "C"` block with one entry per admit-set instantiation,
-   each with an explicit `#[link_name = "<mangled>"]`.
-2. A generic Rust wrapper function that does:
-   - `match T::SCALAR_TAG` (or equivalent for non-scalar generics) to
-     dispatch to the right `extern "C"` symbol.
-   - Canonical-encode arguments via `leo4-abi`.
-   - Call the `extern "C"` function.
-   - Canonical-decode the return value.
-   - Wrap errors in `LeanError`.
+1. Canonical-encodes arguments via `<T as ::leo4::LeanMarshal>::canonical_encode`.
+2. Calls `lean.call_shim(MANGLED_BODY, &args, &mut ret)` — dynamic
+   dispatch through `libloading`, not `extern "C"` link-name.
+3. Canonical-decodes the return value, wraps errors in `LeanError`.
 
-The macro reads `target/leo4/<pkg>.leo4-mangling` to know which symbols to
-declare. If the file does not exist, the macro emits a build error that
-instructs the user to run `lake build` first.
+The macro reads `LEO4_MANGLING_FILE` (set at build time by
+`leo4_build::wire(...)` in the user's `build.rs`) to resolve each
+fn name + arg-type tuple into a mangled body. For
+multi-instantiation generic exports the user can disambiguate with
+`#[leo4(args = "u64,str")]` on the `fn` declaration.
 
 ## How to Add a New Boundary Type
 
 1. Update `SPEC/canonical-abi.md` with the wire format.
 2. Update `SPEC/mangling.md` with the type's `mangle_type` rule.
-3. Add the type to the IDL grammar in `SPEC/idl-grammar.ebnf` if it is a
-   built-in.
-4. Implement `LeanType` / `LeanMarshal` in `leo4-abi`.
-5. Implement encode/decode in `leo4-abi`.
-6. Implement the corresponding Lean side in `lake/Leo4/Marshal.lean`.
-7. Add a conformance test in `tests/conformance/` that round-trips the type
-   through both backends.
+3. Add the type to the IDL grammar in `SPEC/idl-grammar.ebnf` if it
+   is a built-in.
+4. Implement `LeanMarshal` (and `LeanResource` if applicable) in
+   `crates/leo4-abi/src/…` for the Rust side.
+5. Implement the corresponding Lean side in
+   `lake/Leo4/Leo4/Builtins.lean` (primitives) or a dedicated
+   module under `lake/Leo4/Leo4/` (carrier types).
+6. Mirror the type discovery in the plugin
+   (`lake/Leo4Plugin/Leo4Plugin/AdmitSet.lean` and `Main.lean`) if
+   it surfaces as anything other than a regular record.
+7. Add a conformance test in `tests/conformance/` round-tripping
+   through both encoders.
+8. Add a sample fixture exercising the type end-to-end — usually
+   `tests/sample-lean/Sample.lean` + one of the examples.
 
 ## Build Commands Quick Reference
 
@@ -130,7 +148,8 @@ instructs the user to run `lake build` first.
 just build               # runs lake build, then cargo build, in order
 just test                # all tests, both sides
 just spec-lint           # validates SPEC/*.md consistency
-just regen-mangling      # regenerates the mangled-name table
+just smoke-plugin        # rebuilds shim + emits .leo4-{schema,mangling,handshake}
+just mathlib-bridge-test # type-checks Mathlib bridges (off the default ladder)
 just clean               # nukes target/ and .lake/
 
 # Lake-only
@@ -159,7 +178,10 @@ cargo clippy --workspace -- -D warnings
 - Don't import `lean.h` from Rust. Ever. That defeats the entire point of leo4.
 - Don't add a dependency on `bindgen` to any Rust crate. The shim absorbs all
   Lean ABI details.
-- Don't introduce `tokio` or any async runtime before WASIp3 stabilizes (D4).
+- Don't introduce `tokio` or any other async runtime in the main
+  workspace. WASIp3 async lives inside the `sibling/leo4-wasip3/`
+  project behind `futures::executor::block_on`; the public Rust API
+  stays sync on every target (D4 lift, 2026-05-20).
 - Don't merge a PR that changes a mangled name without changing the schema
   hash, or vice versa.
 - Don't speculatively add features. leo4 is small on purpose.

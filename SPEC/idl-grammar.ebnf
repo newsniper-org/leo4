@@ -5,7 +5,7 @@
 
 document        = { package_decl | use_decl | interface_decl | world_decl
                   | type_decl | constraint_decl | nominal_decl
-                  | mutual_decl } ;
+                  | mutual_decl | external_decl } ;
 
 package_decl    = "package" , ident , [ ":" , ident ] , [ "@" , semver ] , ";" ;  (* [WIT] *)
 
@@ -13,7 +13,7 @@ use_decl        = "use" , path , [ "as" , ident ] , ";" ;                       
 
 interface_decl  = "interface" , ident , [ generic_params ] , "{" ,
                   { type_decl | func_decl | resource_decl | nominal_decl
-                  | mutual_decl | use_decl } , "}" ;                                (* [leo4] generic_params, nominal_decl, mutual_decl *)
+                  | mutual_decl | external_decl | use_decl } , "}" ;                (* [leo4] generic_params, nominal_decl, mutual_decl, external_decl *)
 
 world_decl      = "world" , ident , "{" , { world_item } , "}" ;                   (* [WIT] *)
 world_item      = "export" , ident , [ "(" , ident , ")" ] , ";"
@@ -46,6 +46,15 @@ nominal_flags_decl     = "flags"    , fqn , [ generic_params ] , "{" , ident , {
    FQN; the index `i` is 0-based and scoped to the immediately enclosing block.
    A singleton mutual block is a parse error — authors keep using `Self`.       *)
 mutual_decl     = "mutual" , "{" , nominal_decl , nominal_decl , { nominal_decl } , "}" , ";" ;  (* [leo4] *)
+
+(* Phase 8 step 2a — types that carry a user-supplied `LeanMarshal`
+   instance whose internal fields the plugin cannot lower (proof-carrying
+   invariants in Lean core's `Rat`, opaque wrappers, …). Function-position
+   references to such a type lower to `IDLType::Record { fqn, args }`
+   identically to a regular record — the distinction lives at the
+   `UserDecl` level and drives the shim's encode/decode dispatch
+   (Lean-emitted C-callable helpers `leo4_marshal_<seg>_dec/_enc`). *)
+external_decl   = "external" , fqn , [ generic_params ] , ";" ;                    (* [leo4] *)
 
 generic_params  = "<" , generic_param , { "," , generic_param } , ">" ;            (* [leo4] *)
 generic_param   = type_param | value_param ;                                       (* [leo4] *)
@@ -107,8 +116,8 @@ primitive       = "u8" | "u16" | "u32" | "u64"
        parameters with concrete types (or other in-scope generics). Arity must
        match the enclosing declaration's generic_params arity.
    Permitted only as a type leaf inside the immediately enclosing declaration;
-   nested decls reset the binding. Mutual self-reference (two declarations
-   naming each other) is rejected in v0; see LEO4-DESIGN.md §4.3. *)
+   nested decls reset the binding. Cross-declaration cycles use
+   `mutual { … }` + `Cyc<i>` (Phase 6 — SPEC/phase-6-mutual.md). *)
 self_type       = "Self" , [ "<" , type , { "," , type } , ">" ] ;                 (* [leo4] *)
 
 (* Phase 6 cycle-breaker. Valid only inside a `mutual_decl` member; the
@@ -121,8 +130,8 @@ builtin_generic = "list" , "<" , type , ">"
                 | "option" , "<" , type , ">"
                 | "result" , "<" , type , [ "," , type ] , ">"
                 | "tuple" , "<" , type , { "," , type } , ">"
-                | "future" , "<" , type , ">"                                      (* [WIT, deferred to WASIp3; LEO4-DESIGN.md D4 (2026-05-19): when lifted, this lowers to a function-level `effect` flag, NOT an IDLType variant — only valid at the boundary position of a `func_decl`'s return type, not inside records / variants ] *)
-                | "stream" , "<" , type , ">" ;                                    (* [WIT, deferred to WASIp3; same lifting decision as `future<T>` above ] *)
+                | "future" , "<" , type , ">"                                      (* [WIT; LEO4-DESIGN.md D4 (lifted 2026-05-20). Lowers to a function-level `FuncDecl.effect = Async` flag, NOT an IDLType variant — only valid at the boundary position of a `func_decl`'s return type, not inside records / variants. ] *)
+                | "stream" , "<" , type , ">" ;                                    (* [WIT; same lifting decision as `future<T>` above — `FuncDecl.effect = Stream`. ] *)
 
 named_type      = ident , [ "<" , type , { "," , type } , ">" ] ;                  (* [leo4] generic application *)
 

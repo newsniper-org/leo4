@@ -182,10 +182,17 @@ handle:u64
 leo4 uses Lean's native rc for native backend resources. Each `LeanRef<'a, T>`
 on the Rust side corresponds to one rc increment. `Drop` decrements.
 
-## 13. `io<T>` (sync-only era)
+## 13. `io<T>` / `future<T>`
 
-`io<T>` lowers to `result<T, error>` for now. When WASIp3 stabilizes,
-this may change to a `future<T>` lowering for wasm targets.
+`io<T>` is recognised in boundary positions and renders in the
+canonical IDL as `future<T>` (Phase 7 lift, 2026-05-20). At the wire
+layer the value is encoded as bare `T` — the future-ness is a
+function-level effect (D-i 2026-05-19), not a wrapper type — and the
+shim unwraps Lean's `lean_io_result` before encoding (see
+`LEO4_ERR_IO_FAILED` below).
+
+Sync exports continue to land unchanged; only the `IO α` arm flows
+through the effect lift.
 
 The `error` type:
 ```
@@ -217,7 +224,13 @@ leo4 runtime error codes:
 | `0x0000_0006` | Unknown function |
 | `0x0000_0007` | Return buffer too small (caller retries with larger buffer) |
 | `0x0000_0008` | Decode-depth exceeded on a `Self`-recursive type |
-| `0x0000_0064` | Shim instantiation not yet implemented (W7-2a placeholder; removed once W7-2d ships full composite/nominal coverage) |
+| `0x0000_0064` | Shim instantiation not yet implemented (placeholder returned when an export uses a wire shape the shim emitter doesn't cover yet) |
+
+Lean-passthrough error codes (range `0x0001_0000`..`0x0001_FFFF`):
+
+| Code | Meaning |
+|---|---|
+| `0x0001_0001` | `LEO4_ERR_IO_FAILED` — an `IO α` boundary export returned an error result. The shim unwraps `lean_io_result` and surfaces this code instead of the inner value (Phase 7 step 2b, 2026-05-21). |
 
 ## 14. Function Call Convention
 

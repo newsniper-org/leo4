@@ -7,6 +7,42 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+(no entries yet)
+
+## [0.1.0] — 2026-05-21
+
+First tagged release. Phases 0–8 complete: full Lean ↔ Rust
+round-trip on Tier 1 Linux, cross-impl mangling agreement (70
+mangled instantiations, schema_hash `qi5gb74dbjyxo`), mutual
+recursion via `mutual { … }` + `Cyc<i>`, `IO α` lifted to
+`future<α>`, Mathlib-compatible carrier-type subset with opt-in
+bridges, and a Typst documentation suite in four languages.
+
+### Added — Typst documentation suite (2026-05-21)
+
+`docs/learning/{en,ko,ja,de}/main.typ` — short architectural
+overview in English / Korean / Japanese / German (~330 lines each).
+`docs/implement-from-scratch/{en,ko,ja,de}/main.typ` — long-form
+step-by-step build guide following the Phase 0–10 ladder (~1050–1175
+lines each). Shared `docs/template/leo4-book.typ` carries cover /
+ToC / code-block styling. All eight documents compile with
+`typst >= 0.14.2` via `typst compile --root docs <file>`.
+
+### Changed — workspace version bump 0.0.0 → 0.1.0 (2026-05-21)
+
+`workspace.package.version` + the path-dep version fields in
+`workspace.dependencies` align with the 0.1.0 release.
+
+### Changed — `cargo check` clean: 17 non_snake_case + 1 dead_code (2026-05-21)
+
+`leo4-macros-backend` emits `#[allow(non_snake_case)]` on every
+wrapper `fn` generated from `leo4::import!` — Lean export names are
+camelCase by convention and must match byte-for-byte, so consumers
+no longer have to suppress lints per-binding. `schema-idl`'s
+long-dead `RawDecl::fqn()` helper deleted (its sole caller was
+inlined into `insert_shape_entries` in 8f27ff1 / Phase 6-2). Plus a
+small `leo4-abi` test cleanup (unused `LeanMarshal as _` import).
+
 ### Added — Mathlib bridge infrastructure + initial bridges (2026-05-21)
 
 User direction recorded 2026-05-20 (memory:
@@ -597,8 +633,13 @@ the shim and the boundary just routes bytes through.
   fixture; 61 mangled names + schema_hash `gj6daa3oelheu` are
   byte-identical between the Lake plugin and `leo4c`.
 
-### Pending
-- Phase 6 (mutual recursion), Phase 7 (async), Phase 8 (Mathlib
-  subset).
-- schema-idl items G (`ConstraintExpr<Atom>` typed AST) and H
-  (mutual-recursion lift) per `schema-idl-shortcomings.md`.
+### Open follow-ups
+- schema-idl item G (`ConstraintExpr<Atom>` typed AST) — deferred
+  until a concrete consumer needs it.
+- `wasm64` sibling project — deferred until `wasm64-*` exits Rust
+  stable's tier 3.
+- Some `LeanError` codes (`0x02` / `0x03` / `0x04` / `0x06` /
+  `0x08`) are reserved but not yet fired by a test fixture.
+
+[Unreleased]: https://github.com/Honey-Be/leo4/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Honey-Be/leo4/releases/tag/v0.1.0

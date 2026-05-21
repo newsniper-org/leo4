@@ -32,7 +32,7 @@ written justification.
 | D1 | Project name | `leo4` |
 | D2 | Schema IDL | Strict superset of WIT; lowering to WIT when WASM target requires it |
 | D3 | Generic strategy | **(α′)** Specialize-both with **constraint-driven** instantiation enumeration |
-| D4 | Async model | Sync only until WASIp3 stabilizes; `io<T>` lowers to `result<T, error>` for now. **Surface form when lifted (decided 2026-05-19):** asynchrony is a *function-level effect flag* (`is_async` boolean, or equivalent enum if `stream<T>` also lifts), **not** an `IDLType` variant. `future<T>` / `stream<T>` in source IDL are syntactic sugar that the parser folds into the function's effect + payload type `T`. Rationale: keeps `IDLType` free of effect coloration, avoids effect-wrappers leaking into record/variant payloads, and matches the WIT-component-model "function ABI carries the future, not the value" mental model. |
+| D4 | Async model | **Lifted (2026-05-20 → 2026-05-21).** Asynchrony is a *function-level effect flag* (`FuncDecl.effect ∈ {Sync, Async, Stream}`), **not** an `IDLType` variant. `future<T>` / `stream<T>` in source IDL are syntactic sugar that the parser folds into the function's effect + payload type `T`. `io<T>` in Lean exports lowers to `future<T>` at the IDL boundary; the shim unwraps `lean_io_result` and surfaces failures as `LEO4_ERR_IO_FAILED = 0x00010001`. User-facing Rust / wasm APIs both stay **sync** — the WASIp3 sibling (`sibling/leo4-wasip3/`) drives wasip3 async imports via `futures::executor::block_on` inside a sync wasm export, so the Rust call site doesn't change between targets. Rationale: keeps `IDLType` free of effect coloration, avoids effect-wrappers leaking into record/variant payloads, and matches the WIT-component-model "function ABI carries the future, not the value" mental model. |
 | D5 | `leo4_specialize_when` syntax on Lean side | Lean metaprogram quotation via a dedicated `leo4_constraint` syntax category |
 | D6 | Rust `extern` representation | `extern "C"` plus a macro layer (`#[leo4::import]`) on stable Rust; no new calling convention |
 | D7 | Repository structure | Monorepo (Cargo workspace + Lake workspace, side by side) |
@@ -129,7 +129,9 @@ impl<'a, T: LeanType> Drop for LeanRef<'a, T> {
 | Type bounds | `<T: scalar + ord>` | Drives (α′) admit-set computation |
 | Cyclic ADTs | `type expr = variant { … }` direct recursion | WIT lowers via `resource` wrapping |
 | `bigint`, `bignat` | Builtin primitives | Lean has `Int`/`Nat` natively |
-| `io<T>` | Effect wrapper | Sync-only for now: lowers to `result<T, error>` |
+| `io<T>` / `future<T>` | Function-level effect | Lean `IO α` exports lift to `future<α>` in the canonical IDL (D4 lift, 2026-05-20). Effect lives on the `func`, not on a payload type. |
+| `mutual { … }` | Block for cross-decl recursion | Members share a `Cyc<i>` cycle-breaker namespace (Phase 6, 2026-05-20). See `SPEC/phase-6-mutual.md`. |
+| `external <fqn>` | Type carries a user-supplied `LeanMarshal` instance | Lean core `Rat` and friends: proof-carrying fields the plugin can't lower, so the shim routes through Lean-emitted C-callable helpers (Phase 8 step 2, 2026-05-20). |
 
 ### 4.2 Constraint Sublanguage
 
@@ -164,14 +166,13 @@ constraint ::= "scalar"
   `Type 0`.
 - Recursive constraints (e.g., `T : Marshal` requiring `T → T : Marshal`)
 - Open-ended negation (`¬(T : Marshal)`)
-- **Mutual recursion between two nominal types** — forbidden in v0
-  until Phase 6 lands. The four design questions ROADMAP enumerated
-  are resolved in **`SPEC/phase-6-mutual.md`** (explicit `mutual { … }`
-  block, `Cyc<i>` cycle-breaker token, group-shared decode-depth
-  counter, one `mutual … end` deriving block per group). v0 still
-  supports only *direct* self-recursion through `Self`; users who
-  need a cross-decl cycle before the Phase 6 landings ship may
-  break one side with a `LeanResource` handle.
+- ~~Mutual recursion between two nominal types~~ **Supported as of
+  Phase 6 (2026-05-20).** The four design questions ROADMAP
+  enumerated are resolved in **`SPEC/phase-6-mutual.md`**: explicit
+  `mutual { … }` block, `Cyc<i>` cycle-breaker token, group-shared
+  decode-depth counter, one `mutual … end` deriving block per
+  group. Direct self-recursion through `Self` continues to work
+  unchanged for the singleton case.
 
 The Lake plugin rejects these with diagnostics.
 
@@ -420,27 +421,29 @@ matrix, not the source.
 ## 10. Type System on the Rust Side
 
 ```rust
-pub trait LeanType: Sized + 'static {
-    const SCHEMA: SchemaItem;
-    fn nominal_name() -> &'static str;
+pub trait LeanMarshal: Sized + 'static {
+    fn canonical_encode(&self, buf: &mut Vec<u8>);
+    fn canonical_decode(buf: &[u8], off: usize)
+        -> Result<(Self, usize), LeanError>;
 }
 
-pub trait LeanScalar: LeanType + Copy {
-    const SCALAR_TAG: ScalarTag;
-}
-
-pub trait LeanResource: LeanType {}
-
-pub trait LeanOrd: LeanType { /* … */ }
-pub trait LeanEq: LeanType { /* … */ }
-pub trait LeanHash: LeanType { /* … */ }
-pub trait LeanMarshal: LeanType {
-    fn canonical_encode(&self, buf: &mut EncodeBuf) -> Result<()>;
-    fn canonical_decode(arena: &Arena, buf: &[u8]) -> Result<Self>;
+pub trait LeanResource: 'static {
+    /// Opaque 64-bit handle the shim hands back. On native this is a
+    /// cast `lean_object *`; on wasm it is a Component-Model resource
+    /// handle. The Rust side never inspects it.
+    fn handle(&self) -> u64;
+    fn from_handle(h: u64) -> Self;
 }
 ```
 
-Blanket impls for all scalars; `derive(LeanType)` for user records and variants.
+Blanket `LeanMarshal` impls for all scalars, `String`, `Vec<T>`,
+`Option<T>`, `Result<T, E>`, `(T1, …, Tn)`, `Box<T>`, and the
+arbitrary-precision `BigNat` / `BigInt`. `#[derive(LeanMarshal)]`
+covers records (`struct`), all-unit enums (`enum`), mixed-payload
+variants, and resource newtype structs (`#[leo4(resource)]`). The
+P0 trait sketch above was distilled to two traits during Phase 4 —
+the named constraints (`ord`/`eq`/`hash`/`pod`/`scalar`) live as IDL
+constraints, not as Rust supertraits.
 
 ## 10.1. Mirroring Type System on the Lean Side
 
@@ -492,8 +495,10 @@ the plugin side, an IDL declaration emitted into `<pkg>.leo4-schema`.
 Field order, nominal-name disambiguation, recursion handling, and
 generic-record mangling all follow `SPEC/mangling.md` and
 `SPEC/canonical-abi.md`. Mutual recursion (two declarations that name each
-other) is **not supported in v0** — the plugin rejects it; users break
-the cycle with a `LeanResource` handle.
+other) is supported via the `mutual { … }` block (Phase 6, 2026-05-20;
+see `SPEC/phase-6-mutual.md`). Members share a `Cyc<i>` cycle-breaker
+namespace and a single `mutual … end` deriving block emits all
+members' `partial def _leo4_encode/_decode` pairs at once.
 
 ### `@[leo4_resource]` shorthand
 
@@ -506,17 +511,27 @@ equivalent to a hand-written `instance : LeanResource ParserHandle := ⟨⟩`.
 
 ## 11. Out-of-Scope (v0)
 
-- mathlib usage from Rust — out of v0; named subset deferred to
-  Phase 8 (`ROADMAP.md`) on an opt-in, type-by-type basis. No
-  general Mathlib reflection at the boundary, ever.
+- mathlib usage from Rust — out of v0 core; the **named-subset**
+  approach landed in Phase 8 (`ROADMAP.md`, 2026-05-20 → 2026-05-21).
+  leo4 ships carrier types (`LeanU128/I128`, `LeanComplexF{32,64}x2`,
+  optional nightly `LeanF{16,BF16,128}` + complex variants, plus the
+  Lean-core `Rat` external-marshal path) with opt-in
+  `Leo4.MathlibBridge.*` modules providing 1-to-1 conversions to
+  Mathlib types. The leo4 runtime library imports zero Mathlib;
+  bridges live in their own modules, type-checked separately under
+  `sibling/mathlib-bridge-test/`. No general Mathlib reflection at
+  the boundary, ever.
 - Lean macros executing inside Rust process (definitely never)
 - Lean tactic mode from Rust (would require LSP-style backend, separate project)
 - Effect handlers, algebraic effects beyond `IO`
 - Custom calling conventions (`extern "leo4"`)
-- Async surfaces in the public API — out of v0; covered by Phase 7
-  once WASIp3 stabilises (`ROADMAP.md`, D4).
-- Mutual recursion between nominal types — out of v0 (§4.3); see
-  Phase 6.
+- ~~Async surfaces in the public API — out of v0~~ The public API
+  stays sync on both native and wasm targets; the wasm side hides
+  WASIp3's async imports behind `block_on` inside a sync wasm
+  export (D4 lift, 2026-05-20 → 2026-05-21). Lean `IO α` exports
+  surface as `future<α>` in the IDL.
+- ~~Mutual recursion between nominal types — out of v0 (§4.3)~~
+  Landed in Phase 6 (2026-05-20). See `SPEC/phase-6-mutual.md`.
 
 ## 12. Open Questions Deferred to Implementation
 
