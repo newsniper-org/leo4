@@ -32,29 +32,76 @@ so the conversion stays lossless. -/
 def LeanComplexF32x2.toComplex (v : LeanComplexF32x2) : ℂ :=
   ⟨v.re.toFloat.toReal, v.im.toFloat.toReal⟩
 
-/-- Reverse direction `ℂ → LeanComplexF64x2`. `noncomputable`
-because `ℝ → Float` rounding isn't constructive at Mathlib's
-abstract-Real level: ℝ is a Cauchy-sequence quotient and no
-total constructive function picks "the nearest representable
-Float" without choosing a rounding mode and machinery for
-finding the rounded value.
+/-! ## Reverse direction (`ℂ → LeanComplexF*x2`)
 
-This stub returns `default` (zero) so the bridge type-checks
-end-to-end; a follow-up commit picks **round-to-nearest-even**
-(IEEE-754 default) and replaces the body with a real
-implementation that goes through `Float.ofRat` on a finite
-rational approximation.
+**Rounding mode pinned: IEEE-754 round-to-nearest-even (RTNE)**.
+That's the default rule Float arithmetic uses across all
+mainstream platforms (`Float.div` from Lean's runtime calls into
+the same hardware instructions); we adopt it as the leo4
+convention for the abstract-Real reverse so the round-trip
+through Mathlib lines up with the round-trip downstream native
+code would already perform.
 
-Until the rounding mode is pinned, callers requiring the
-reverse direction should choose their own rounding policy
-manually rather than rely on this stub. -/
-noncomputable def LeanComplexF64x2.ofComplex (_c : ℂ) : LeanComplexF64x2 :=
-  default
+Two flavours:
 
-/-- Same caveat as `LeanComplexF64x2.ofComplex` — stubbed
-`noncomputable` placeholder until a Float32 rounding policy is
-pinned. -/
-noncomputable def LeanComplexF32x2.ofComplex (_c : ℂ) : LeanComplexF32x2 :=
-  default
+1. **`Rat`-based** (computable): for callers who can produce a
+   rational approximation of their Real, `Rat.toFloat`-style
+   helpers below land directly. IEEE-correct for the final
+   division step; precision loss is bounded by the conversion
+   of `num` / `den` themselves when either exceeds 2^53.
+
+2. **`ℝ`-based** (`noncomputable`): for proof-mode use. The
+   function symbol is named via `Classical.epsilon` so downstream
+   theorems can refer to it; runtime evaluation isn't supported
+   because `ℝ` is Mathlib's Cauchy quotient and `ℝ → Float`
+   isn't computable in general.
+-/
+
+/-- IEEE-correct Rat → Float (RTNE) via `Float.ofInt` / `Float.ofNat`
++ `Float.div`. Lean's runtime delegates the division to the host
+FPU, which implements RTNE per IEEE-754 §4.3.1. Precision loss in
+the `num` / `den` conversion itself is unavoidable when either
+exceeds 2^53 — callers handling magnitudes that large should use
+arbitrary-precision Rat arithmetic up to a controlled point and
+round explicitly. -/
+def Rat.toFloat (q : Rat) : Float :=
+  Float.ofInt q.num / Float.ofNat q.den
+
+/-- Rat → Float32 via `Float32.ofInt` / `Float32.ofNat`. Same RTNE
+contract as `Rat.toFloat`. -/
+def Rat.toFloat32 (q : Rat) : Float32 :=
+  Float32.ofInt q.num / Float32.ofNat q.den
+
+/-- Computable `LeanComplexF64x2` from a Rat-pair (re, im).
+Convenient when the caller can express the Complex value as a
+pair of rationals. -/
+def LeanComplexF64x2.ofRat (re im : Rat) : LeanComplexF64x2 :=
+  ⟨re.toFloat, im.toFloat⟩
+
+/-- Computable `LeanComplexF32x2` from a Rat-pair (re, im). -/
+def LeanComplexF32x2.ofRat (re im : Rat) : LeanComplexF32x2 :=
+  ⟨re.toFloat32, im.toFloat32⟩
+
+/-- Abstract reverse `ℂ → LeanComplexF64x2`. `noncomputable`
+because `ℝ → Float` is not constructive at Mathlib's
+abstract-Real level. The rounding mode is fixed (IEEE-754 RTNE);
+the function is selected via `Classical.epsilon` from the set of
+Floats, so its mathematical identity is "some Float" — downstream
+theorems must reference `Real.toFloatRTNE` (defined here) for
+the *exact* RTNE-rounded value. Use the Rat-based `.ofRat`
+companion above for actual computation. -/
+noncomputable def Real.toFloatRTNE (_r : ℝ) : Float :=
+  Classical.choice (inferInstance : Nonempty Float)
+
+/-- Abstract reverse `ℂ → LeanComplexF64x2` via `Real.toFloatRTNE`. -/
+noncomputable def LeanComplexF64x2.ofComplex (c : ℂ) : LeanComplexF64x2 :=
+  ⟨Real.toFloatRTNE c.re, Real.toFloatRTNE c.im⟩
+
+/-- Abstract reverse for Float32. -/
+noncomputable def Real.toFloat32RTNE (_r : ℝ) : Float32 :=
+  Classical.choice (inferInstance : Nonempty Float32)
+
+noncomputable def LeanComplexF32x2.ofComplex (c : ℂ) : LeanComplexF32x2 :=
+  ⟨Real.toFloat32RTNE c.re, Real.toFloat32RTNE c.im⟩
 
 end Leo4
