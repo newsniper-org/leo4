@@ -7,6 +7,31 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — Tier 2 Windows target: `*-pc-windows-msvc` → `*-pc-windows-gnullvm` (2026-05-21)
+
+leo4 targets the gnullvm Windows triple (clang + lld + UCRT)
+rather than MSVC. Practical consequences:
+
+- The forward shim's clang/gcc-style C
+  (`__attribute__((visibility("default")))`, `__builtin_memcpy`,
+  gcc command-line flags) compiles on Windows unmodified — no
+  MSVC-intrinsic fork in the emitter.
+- The C-standard baseline (`-std=c17` / optional `-std=c2x`)
+  is uniform across every tier via clang/leanc.
+- Users skip the Visual Studio dependency; the only
+  Windows-specific prerequisite is `rustup target add
+  x86_64-pc-windows-gnullvm`.
+- The OS-PORTABILITY audit's "C compiler visibility" and
+  "gcc/clang command-line flags" rows move from "needs layer"
+  to "resolved by Tier 2 target choice". Spawn / IPC / dynamic
+  loading / DLL search remain genuinely Windows-specific and
+  stay behind their respective abstraction layers.
+
+Updated: `LEO4-DESIGN.md §9.1` (platform tier table + rationale),
+`README.md` (tier table), `OS-PORTABILITY.md` (policy +
+audit), `SPEC/reverse-direction.md` §4.4 + §11 (Windows
+backend target + uniform `-std` invocation).
+
 ### Added — OS-portability policy + audit ledger (2026-05-21)
 
 `OS-PORTABILITY.md` (new) — leo4-wide policy: OS-specific code

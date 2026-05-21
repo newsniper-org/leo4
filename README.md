@@ -281,8 +281,8 @@ local-container output and GitHub Actions output is a real bug.
 
 | Tier | Platforms | Guarantee |
 |------|-----------|-----------|
-| 1    | x86_64 Linux (glibc)              | every commit, every matrix entry must pass |
-| 2    | x86_64 Windows                    | feature parity, periodic CI |
+| 1    | x86_64-unknown-linux-gnu          | every commit, every matrix entry must pass |
+| 2    | x86_64-pc-windows-**gnullvm**     | feature parity, periodic CI (clang + lld + UCRT toolchain, see `LEO4-DESIGN.md §9.1`) |
 | 3    | macOS (Apple Silicon / Intel)     | best-effort; not gating, no CI |
 
 macOS dropped from Tier 1 to Tier 3 on 2026-05-20 — see

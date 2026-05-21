@@ -252,6 +252,10 @@ Two backends ship in the same TU, gated by `#ifdef`:
 - **Windows backend** (`#if defined(_WIN32)`): `CreateProcess`
   + named pipe (`CreateNamedPipeA` with name
   `\\.\pipe\leo4_rust_<pid>_<nonce>`) + `WaitForSingleObject`.
+  Target triple is **`x86_64-pc-windows-gnullvm`** (clang + lld
+  + UCRT), so this branch compiles under clang the same way the
+  POSIX branch does — no MSVC-intrinsic fork. See
+  `LEO4-DESIGN.md §9.1` for the target rationale.
 
 A third **stub backend** ships unconditionally for unknown
 platforms: every operation returns `LEO4_ERR_RUST_SPAWN_FAILED`.
@@ -501,6 +505,11 @@ the compiler reports support (gcc ≥ 13, clang ≥ 16), falling
 back to `-std=c17`. C11 is rejected — the
 dispatcher uses `_Atomic` heavily for the worker-handle
 cache and the `static_assert` semantics that C17 cleaned up.
+
+Because the Tier 2 Windows target is `x86_64-pc-windows-gnullvm`
+(clang + lld + UCRT, see `LEO4-DESIGN.md §9.1`), the same
+`-std=c17` / `-std=c2x` invocation works on Windows as on Linux
+— no MSVC-specific compiler driver branch.
 
 Mandatory C standard library headers:
 

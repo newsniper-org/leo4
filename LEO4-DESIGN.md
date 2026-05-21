@@ -403,8 +403,32 @@ across the boundary in step with Lean's unboxing. Discovered
 | Tier | Platforms                       | Guarantee |
 |------|---------------------------------|-----------|
 | 1    | x86_64-unknown-linux-gnu        | every commit verified by CI; regressions block merge |
-| 2    | x86_64-pc-windows-msvc          | feature parity expected, periodic CI |
+| 2    | x86_64-pc-windows-**gnullvm**   | feature parity expected, periodic CI |
 | 3    | aarch64-apple-darwin / x86_64-apple-darwin | best-effort; community fixes welcome but not gating |
+
+**Windows = `*-pc-windows-gnullvm`, not `*-pc-windows-msvc`**
+(adopted 2026-05-21). The gnullvm target uses clang + lld + UCRT,
+matching the LLVM toolchain stack `leanc` already drives on every
+other tier. Three practical consequences:
+
+- The shim's gcc / clang-style C (e.g.
+  `__attribute__((visibility("default")))`, `__builtin_memcpy`)
+  compiles on Windows unmodified — no `__declspec(dllexport)`
+  / MSVC-intrinsic fork in the emitter.
+- The C standard baseline (C17 with optional C23) and the
+  `-std=c17` / `-std=c2x` driver flag are uniform across tiers.
+- Users do not need Visual Studio; `rustup target add
+  x86_64-pc-windows-gnullvm` is the only Windows-specific
+  prerequisite.
+
+What stays Windows-specific (and therefore goes through an
+identified abstraction layer per `OS-PORTABILITY.md`): process
+spawn (`CreateProcess` vs `posix_spawn`), IPC primitive
+(named pipe vs unix-domain socket), dynamic library loading
+(`LoadLibrary` vs `dlopen`), and DLL search path (no RPATH; PATH
+/ install dir / `SetDllDirectory`). Visibility attribute and the
+gcc-style command-line flag set are **not** Windows-specific
+under this target choice.
 
 The macOS demotion (2026-05-20) was a scope-cut decision: the
 canonical-ABI shim, the `LeanMarshal` derivation handler, and the
