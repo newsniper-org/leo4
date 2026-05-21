@@ -18,8 +18,16 @@ description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
 # `cargo build --features nightly-floats` and the main workspace's
 # `rust-toolchain.toml` must override to nightly at that point.
 nightly-floats = []
+# Phase 9 reverse-direction: enables the `rust_exports` module and
+# pulls in `linkme` for the distributed-slice metadata collection
+# driven by `#[leo4::export]`. Off by default — only cdylibs that
+# expose Rust functions to Lean need it (typically turned on
+# transparently by the `leo4` facade's matching feature). See
+# SPEC/reverse-direction.md.
+rust-exports = ["dep:linkme"]
 
 [dependencies]
+linkme = { workspace = true, optional = true }
 
 [lints]
 workspace = true

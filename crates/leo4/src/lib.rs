@@ -82,3 +82,39 @@ pub fn encode<T: LeanMarshal>(v: &T) -> Vec<u8> {
 pub fn decode<T: LeanMarshal>(buf: &[u8]) -> Result<T, leo4_abi::LeanError> {
     leo4_abi::marshal::decode_from_slice(buf)
 }
+
+/// `#[leo4::export]` — expose a Rust function to Lean (Phase 9
+/// reverse direction). Only available when the `rust-exports`
+/// feature is enabled on this crate (which in turn enables
+/// `leo4-abi/rust-exports` and pulls in `linkme`).
+///
+/// Build a cdylib with this feature on, then:
+///
+/// ```ignore
+/// #[leo4::export]
+/// pub fn solve_smt(formula: String) -> u64 { /* … */ 42 }
+///
+/// #[leo4::export(isolated)]
+/// pub fn run_untrusted(input: Vec<u8>) -> Vec<u8> { /* … */ input }
+/// ```
+///
+/// See `SPEC/reverse-direction.md` for the wire contract.
+#[cfg(feature = "rust-exports")]
+pub use leo4_macros::export;
+
+/// Implementation-detail re-exports the `#[leo4::export]`
+/// proc-macro expands against. Users do not touch this module
+/// directly; their hand-written code only sees `leo4::export`.
+///
+/// The macro emits paths like `::leo4::__private::ExportEntry`
+/// and registers entries into `::leo4::__private::EXPORTS`. Both
+/// are stable for the macro to refer to, even when the
+/// `leo4-abi` re-export shape evolves.
+#[cfg(feature = "rust-exports")]
+pub mod __private {
+    pub use leo4_abi::rust_exports::{ExportEntry, EXPORTS};
+    // Re-export `linkme` itself so the macro's
+    // `#[::linkme::distributed_slice(...)]` path resolves through
+    // `leo4` without the user crate adding `linkme` directly.
+    pub use linkme;
+}

@@ -20,6 +20,8 @@ pub mod complex;
 #[cfg(feature = "nightly-floats")]
 pub mod floats_nightly;
 pub mod handshake;
+#[cfg(feature = "rust-exports")]
+pub mod rust_exports;
 
 pub use error::{error_codes, LeanError};
 pub use marshal::LeanMarshal;

@@ -12,11 +12,20 @@ description = "Top-level façade re-exporting `leo4-native` (loader / dispatch) 
 # Pass-through to `leo4-abi`'s `nightly-floats` feature. Nightly
 # Rust required when enabled (`feature(f16, f128)` at crate roots).
 nightly-floats = ["leo4-abi/nightly-floats"]
+# Phase 9 reverse-direction (Rust -> Lean). Enables the
+# `#[leo4::export]` proc-macro re-export and the `__private`
+# module the macro expands against. Off by default — only
+# cdylibs that expose Rust functions to Lean turn it on.
+rust-exports = ["leo4-abi/rust-exports", "dep:linkme"]
 
 [dependencies]
 leo4-abi.workspace    = true
 leo4-native.workspace = true
 leo4-macros.workspace = true
+# Re-exported through `leo4::__private::linkme` when the
+# `rust-exports` feature is on, so user cdylibs invoking
+# `#[leo4::export]` need not depend on `linkme` directly.
+linkme = { workspace = true, optional = true }
 
 [lints]
 workspace = true

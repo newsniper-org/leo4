@@ -35,3 +35,20 @@ pub fn import(input: TokenStream) -> TokenStream {
 pub fn derive_lean_marshal(input: TokenStream) -> TokenStream {
     leo4_macros_backend::expand_derive_lean_marshal(input.into()).into()
 }
+
+/// `#[leo4::export]` — expose a Rust function to Lean as an
+/// `IO α` action (Phase 9 reverse direction). See
+/// `SPEC/reverse-direction.md` and `leo4_macros_backend::expand_export`.
+///
+/// Default mode runs the function in a long-running worker
+/// process (state persists across calls).
+/// `#[leo4::export(isolated)]` opts a function into a fresh
+/// worker per call.
+///
+/// Only meaningful inside a cdylib that enables the `leo4`
+/// facade's `rust-exports` feature (which wires the `linkme`
+/// metadata registry the macro emits into).
+#[proc_macro_attribute]
+pub fn export(args: TokenStream, input: TokenStream) -> TokenStream {
+    leo4_macros_backend::expand_export(args.into(), input.into()).into()
+}

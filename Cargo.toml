@@ -55,6 +55,11 @@ syn         = { version = "2", features = ["full", "extra-traits"] }
 quote       = "1"
 proc-macro2 = "1"
 clap        = { version = "4", features = ["derive"] }
+# Phase 9: reverse-direction (Rust -> Lean). `linkme` provides
+# distributed slices for static metadata collection from
+# `#[leo4::export]`-tagged functions in user cdylibs.
+# Optional via `rust-exports` feature on `leo4-abi`.
+linkme      = "0.3"
 
 [profile.release]
 lto = "thin"

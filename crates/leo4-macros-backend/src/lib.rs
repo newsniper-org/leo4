@@ -609,6 +609,88 @@ mod tests {
         let err = lookup_mangled_body(&m, "add", &["u32".into(), "u32".into()]).unwrap_err();
         assert!(err.contains("no instantiation"), "{err}");
     }
+
+    // ─── #[leo4::export] expansion (Phase 9-1) ─────────────────
+
+    #[test]
+    fn export_attrs_default_is_persistent() {
+        let parsed = ExportAttrs::parse_from_args(TokenStream::new()).unwrap();
+        assert!(!parsed.isolated);
+    }
+
+    #[test]
+    fn export_attrs_isolated() {
+        let args: TokenStream = syn::parse_str("isolated").unwrap();
+        let parsed = ExportAttrs::parse_from_args(args).unwrap();
+        assert!(parsed.isolated);
+    }
+
+    #[test]
+    fn export_attrs_rejects_unknown() {
+        let args: TokenStream = syn::parse_str("speedrun").unwrap();
+        let err = ExportAttrs::parse_from_args(args).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown #[leo4::export(...)] option"),
+            "got: {err}"
+        );
+    }
+
+    /// Sanity: a trivial scalar-only `#[leo4::export]` expansion
+    /// emits the expected mangled wrapper symbol and the `ExportEntry`
+    /// metadata. The output is just rendered as text; we don't
+    /// type-check it here (proc-macro UI tests on a fixture cdylib
+    /// are 9-1's responsibility once an example crate exists).
+    #[test]
+    fn expand_export_scalar_smoke() {
+        let input: TokenStream = syn::parse_str(
+            "pub fn add(a: u64, b: u64) -> u64 { a + b }",
+        )
+        .unwrap();
+        let ts = expand_export(TokenStream::new(), input);
+        let rendered = ts.to_string();
+        assert!(
+            rendered.contains("leo4_rust__add__u64_u64"),
+            "expected mangled wrapper symbol in: {rendered}"
+        );
+        assert!(
+            rendered.contains("ExportEntry"),
+            "expected ExportEntry registration in: {rendered}"
+        );
+        assert!(
+            rendered.contains("\"add\""),
+            "expected logical_name literal in: {rendered}"
+        );
+    }
+
+    #[test]
+    fn expand_export_rejects_async() {
+        let input: TokenStream = syn::parse_str(
+            "pub async fn foo(x: u64) -> u64 { x }",
+        )
+        .unwrap();
+        let ts = expand_export(TokenStream::new(), input);
+        let rendered = ts.to_string();
+        assert!(
+            rendered.contains("does not support `async fn`"),
+            "expected diagnostic in: {rendered}"
+        );
+    }
+
+    #[test]
+    fn expand_export_rejects_unsupported_param_type() {
+        // `Cow<'_, str>` isn't in `rust_type_to_idl`'s table.
+        let input: TokenStream = syn::parse_str(
+            "pub fn foo(x: std::borrow::Cow<'static, str>) -> u64 { x.len() as u64 }",
+        )
+        .unwrap();
+        let ts = expand_export(TokenStream::new(), input);
+        let rendered = ts.to_string();
+        assert!(
+            rendered.contains("cannot lower parameter")
+                || rendered.contains("rust_type_to_idl"),
+            "expected diagnostic in: {rendered}"
+        );
+    }
 }
 
 // ─── #[derive(LeanMarshal)] backend ────────────────────────────────
@@ -955,4 +1037,340 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
             }
         }
     }
+}
+
+// =====================================================================
+// Phase 9-1 — `#[leo4::export]` attribute proc-macro expansion.
+//
+// Input: an `ItemFn` (the user's tagged Rust function) and an
+// `args` token stream from the attribute (empty for default mode;
+// `isolated` for per-call fresh-worker mode).
+//
+// Output: the original function (unchanged) + a generated
+// `extern "C"` wrapper named `leo4_rust__<fname>__<param_mangles>`
+// that performs canonical-ABI decode → catch_unwind(call) →
+// canonical-ABI encode, plus a `linkme` distributed-slice entry
+// registering the export's metadata.
+//
+// The wrapper symbol intentionally omits the `__h<schema_hash>`
+// suffix that forward-direction mangling carries — schema_hash is
+// not known at macro-expand time, and it lives in the handshake
+// file + cdylib constant only. See `SPEC/reverse-direction.md` §2.
+// =====================================================================
+
+/// `#[leo4::export]` — see `SPEC/reverse-direction.md`.
+///
+/// Expansion (sketch):
+///
+/// ```ignore
+/// // input
+/// #[leo4::export]
+/// pub fn add(a: u64, b: u64) -> u64 { a + b }
+///
+/// // output
+/// pub fn add(a: u64, b: u64) -> u64 { a + b }
+///
+/// #[unsafe(no_mangle)]
+/// pub unsafe extern "C" fn leo4_rust__add__u64_u64(
+///     args_ptr: *const u8, args_len: usize,
+///     ret_ptr: *mut u8, ret_cap: usize, ret_len: *mut usize,
+/// ) -> i32 { /* decode -> catch_unwind(add(...)) -> encode */ }
+///
+/// #[::linkme::distributed_slice(::leo4::__private::EXPORTS)]
+/// #[allow(non_upper_case_globals)]
+/// static __LEO4_EXPORT_add: ::leo4::__private::ExportEntry = …;
+/// ```
+pub fn expand_export(args: TokenStream, input: TokenStream) -> TokenStream {
+    let attrs = match ExportAttrs::parse_from_args(args.clone()) {
+        Ok(a) => a,
+        Err(e) => return e.to_compile_error(),
+    };
+    let item_fn: syn::ItemFn = match syn::parse2(input.clone()) {
+        Ok(f) => f,
+        Err(e) => return e.to_compile_error(),
+    };
+
+    match expand_export_inner(&attrs, &item_fn) {
+        Ok(ts) => ts,
+        Err(e) => {
+            // Keep the original `fn` so downstream type-checking
+            // proceeds (gives the user a clearer diagnostic than
+            // a "function not found" cascade).
+            let original = quote! { #item_fn };
+            let err = e.to_compile_error();
+            quote! { #original #err }
+        }
+    }
+}
+
+#[derive(Default, Debug)]
+struct ExportAttrs {
+    isolated: bool,
+}
+
+impl ExportAttrs {
+    fn parse_from_args(args: TokenStream) -> syn::Result<Self> {
+        if args.is_empty() {
+            return Ok(ExportAttrs::default());
+        }
+        // Comma-separated key list. Today only `isolated` is
+        // recognised; the recycle / panic-abort options stay
+        // deferred per ROADMAP.
+        struct Parser_(ExportAttrs);
+        impl Parse for Parser_ {
+            fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+                let mut out = ExportAttrs::default();
+                let punct: syn::punctuated::Punctuated<syn::Ident, syn::Token![,]> =
+                    syn::punctuated::Punctuated::parse_terminated(input)?;
+                for ident in punct {
+                    match ident.to_string().as_str() {
+                        "isolated" => out.isolated = true,
+                        other => {
+                            return Err(syn::Error::new(
+                                ident.span(),
+                                format!(
+                                    "unknown #[leo4::export(...)] option: `{other}` \
+                                     (recognised: `isolated`)"
+                                ),
+                            ));
+                        }
+                    }
+                }
+                Ok(Parser_(out))
+            }
+        }
+        let Parser_(parsed) = syn::parse2(args)?;
+        Ok(parsed)
+    }
+}
+
+fn expand_export_inner(
+    attrs: &ExportAttrs,
+    item_fn: &syn::ItemFn,
+) -> syn::Result<TokenStream> {
+    let sig = &item_fn.sig;
+    let fname = sig.ident.clone();
+    let fname_str = fname.to_string();
+
+    if sig.asyncness.is_some() {
+        return Err(syn::Error::new_spanned(
+            sig.fn_token,
+            "`#[leo4::export]` does not support `async fn` in v0; the boundary stays sync",
+        ));
+    }
+    if sig.unsafety.is_some() {
+        return Err(syn::Error::new_spanned(
+            sig.fn_token,
+            "`#[leo4::export]` does not accept `unsafe fn`; wrap unsafety inside the body",
+        ));
+    }
+    if !sig.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &sig.generics,
+            "`#[leo4::export]` does not support generic functions in v0 — monomorphise at the boundary",
+        ));
+    }
+
+    // Collect parameter types in declaration order, rejecting `self`.
+    let mut param_idents: Vec<syn::Ident> = Vec::new();
+    let mut param_types: Vec<Type> = Vec::new();
+    for input in &sig.inputs {
+        match input {
+            FnArg::Receiver(r) => {
+                return Err(syn::Error::new_spanned(
+                    r,
+                    "`#[leo4::export]` does not support `self` receivers",
+                ));
+            }
+            FnArg::Typed(pt) => {
+                let ident = match &*pt.pat {
+                    syn::Pat::Ident(pi) => pi.ident.clone(),
+                    other => {
+                        return Err(syn::Error::new_spanned(
+                            other,
+                            "`#[leo4::export]` parameter patterns must be plain identifiers",
+                        ));
+                    }
+                };
+                param_idents.push(ident);
+                param_types.push((*pt.ty).clone());
+            }
+        }
+    }
+
+    // Compute IDL form for each parameter via the existing
+    // `rust_type_to_idl` helper (shared with the forward
+    // direction's lookup path).
+    let mut param_mangles: Vec<String> = Vec::with_capacity(param_types.len());
+    for (i, ty) in param_types.iter().enumerate() {
+        let idl = rust_type_to_idl(ty).ok_or_else(|| {
+            syn::Error::new_spanned(
+                ty,
+                format!(
+                    "`#[leo4::export]`: cannot lower parameter #{i} type to IDL — \
+                     `rust_type_to_idl` doesn't recognise it (only scalars, \
+                     `String`, `Vec<T>`, `Option<T>`, `Result<T, E>`, tuples, \
+                     and the LeanU128/I128/Complex* carriers are wired in v9-1)"
+                ),
+            )
+        })?;
+        param_mangles.push(mangle_type(&idl));
+    }
+
+    // Return type: `()` is unit (mangle as empty string).
+    let (ret_ty_tokens, ret_mangle, ret_is_unit): (TokenStream, String, bool) = match &sig.output {
+        ReturnType::Default => (quote! { () }, String::new(), true),
+        ReturnType::Type(_, ty) => {
+            let idl = rust_type_to_idl(ty).ok_or_else(|| {
+                syn::Error::new_spanned(
+                    ty,
+                    "`#[leo4::export]`: cannot lower return type to IDL — same restriction as parameters",
+                )
+            })?;
+            let tokens = quote! { #ty };
+            (tokens, mangle_type(&idl), false)
+        }
+    };
+
+    // Mangled wrapper symbol — no `__h<hash>` suffix in reverse
+    // direction (SPEC/reverse-direction.md §2).
+    let mangled = if param_mangles.is_empty() {
+        format!("leo4_rust__{fname_str}")
+    } else {
+        format!("leo4_rust__{fname_str}__{}", param_mangles.join("_"))
+    };
+    let wrapper_ident = format_ident!("{}", mangled);
+    let entry_ident = format_ident!("__LEO4_EXPORT_{}", fname_str);
+
+    let isolated_lit = attrs.isolated;
+
+    // Decode statements: one per parameter, threading the offset.
+    let mut decode_stmts: Vec<TokenStream> = Vec::with_capacity(param_idents.len());
+    for (ident, ty) in param_idents.iter().zip(param_types.iter()) {
+        decode_stmts.push(quote! {
+            let (#ident, __leo4_off) = match
+                <#ty as ::leo4::LeanMarshal>::canonical_decode(__leo4_args, __leo4_off)
+            {
+                ::core::result::Result::Ok(v) => v,
+                ::core::result::Result::Err(_) => return ::core::result::Result::Err(
+                    ::leo4::error_codes::DECODE_ERROR as i32,
+                ),
+            };
+        });
+    }
+
+    let call_expr = quote! { #fname(#(#param_idents),*) };
+
+    let encode_block: TokenStream = if ret_is_unit {
+        // Unit return: wrapper writes a zero-length response.
+        quote! {
+            let _ = #call_expr;
+            let mut __leo4_buf: ::std::vec::Vec<u8> = ::std::vec::Vec::new();
+            ::core::result::Result::<::std::vec::Vec<u8>, i32>::Ok(__leo4_buf)
+        }
+    } else {
+        quote! {
+            let __leo4_ret: #ret_ty_tokens = #call_expr;
+            let mut __leo4_buf: ::std::vec::Vec<u8> = ::std::vec::Vec::new();
+            <#ret_ty_tokens as ::leo4::LeanMarshal>::canonical_encode(&__leo4_ret, &mut __leo4_buf);
+            ::core::result::Result::<::std::vec::Vec<u8>, i32>::Ok(__leo4_buf)
+        }
+    };
+
+    // Per-parameter IDL string literals for the linkme entry.
+    let param_type_lits = param_mangles.iter().map(|s| s.as_str());
+
+    Ok(quote! {
+        // Original user function — kept unchanged so the user
+        // can still call it from Rust as a normal `fn`.
+        #item_fn
+
+        // Canonical-ABI wrapper. `#[unsafe(no_mangle)]` (2024 edition)
+        // makes the symbol name predictable; `extern "C"` pins the
+        // calling convention. The dispatcher reaches this symbol via
+        // `dlsym` / `GetProcAddress` after loading the cdylib.
+        #[unsafe(no_mangle)]
+        #[allow(non_snake_case)]
+        #[allow(clippy::missing_safety_doc)]
+        pub unsafe extern "C" fn #wrapper_ident(
+            __leo4_args_ptr: *const u8,
+            __leo4_args_len: usize,
+            __leo4_ret_ptr: *mut u8,
+            __leo4_ret_cap: usize,
+            __leo4_ret_len: *mut usize,
+        ) -> i32 {
+            // SAFETY: dispatcher contract — `args_ptr` is valid for
+            // `args_len` bytes of read; `ret_ptr` for `ret_cap` bytes
+            // of write; `ret_len` is a valid `&mut usize`.
+            let __leo4_args: &[u8] = if __leo4_args_len == 0 {
+                &[]
+            } else {
+                unsafe { ::core::slice::from_raw_parts(__leo4_args_ptr, __leo4_args_len) }
+            };
+
+            let __leo4_result: ::core::result::Result<
+                ::core::result::Result<::std::vec::Vec<u8>, i32>,
+                ::std::boxed::Box<dyn ::core::any::Any + ::core::marker::Send + 'static>,
+            > = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                let __leo4_off: usize = 0;
+                #(#decode_stmts)*
+                if __leo4_off != __leo4_args.len() {
+                    return ::core::result::Result::Err(
+                        ::leo4::error_codes::DECODE_ERROR as i32,
+                    );
+                }
+                #encode_block
+            }));
+
+            match __leo4_result {
+                ::core::result::Result::Ok(::core::result::Result::Ok(__leo4_buf)) => {
+                    if __leo4_buf.len() > __leo4_ret_cap {
+                        unsafe { *__leo4_ret_len = __leo4_buf.len(); }
+                        return ::leo4::error_codes::BUFFER_TOO_SMALL as i32;
+                    }
+                    if !__leo4_buf.is_empty() {
+                        unsafe {
+                            ::core::ptr::copy_nonoverlapping(
+                                __leo4_buf.as_ptr(),
+                                __leo4_ret_ptr,
+                                __leo4_buf.len(),
+                            );
+                        }
+                    }
+                    unsafe { *__leo4_ret_len = __leo4_buf.len(); }
+                    0_i32
+                }
+                ::core::result::Result::Ok(::core::result::Result::Err(__code)) => {
+                    unsafe { *__leo4_ret_len = 0; }
+                    __code
+                }
+                ::core::result::Result::Err(_) => {
+                    // Rust panic — dispatcher's contract is to abort
+                    // the worker, but we also signal LEO4_ERR_RUST_PANIC
+                    // so the caller has a code to log. The harness
+                    // (Phase 9-3) handles the abort.
+                    unsafe { *__leo4_ret_len = 0; }
+                    0x0002_0001_u32 as i32
+                }
+            }
+        }
+
+        // Metadata entry — picked up by `leo4-build` at cdylib
+        // build time (Phase 9-2) and by Lake (Phase 9-5) via the
+        // emitted `<pkg>.leo4-rust-exports.idl`. The `linkme` path
+        // routes through `leo4::__private` so user cdylibs need
+        // only depend on `leo4`, not on `linkme` directly.
+        #[::leo4::__private::linkme::distributed_slice(::leo4::__private::EXPORTS)]
+        #[linkme(crate = ::leo4::__private::linkme)]
+        #[allow(non_upper_case_globals)]
+        static #entry_ident: ::leo4::__private::ExportEntry =
+            ::leo4::__private::ExportEntry {
+                logical_name: #fname_str,
+                mangled: #mangled,
+                param_types: &[#(#param_type_lits),*],
+                ret_type: #ret_mangle,
+                isolated: #isolated_lit,
+                abi_version: 1,
+            };
+    })
 }

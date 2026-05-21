@@ -7,6 +7,49 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-1: `#[leo4::export]` attribute proc-macro (2026-05-21)
+
+First code landing for Phase 9. Tagged Rust functions become
+callable through the reverse-direction pipeline once the rest
+of Phase 9 ships.
+
+- `crates/leo4-abi/src/rust_exports.rs` (new, behind a new
+  `rust-exports` cargo feature) — `ExportEntry` struct + the
+  `EXPORTS` distributed slice (`linkme::distributed_slice`).
+  Stays off by default so stable workspace builds remain free of
+  the `linkme` dependency.
+- `crates/leo4-macros-backend` — `expand_export` function +
+  `ExportAttrs` parsing (`isolated` recognised; recycle / panic
+  options deferred). The expansion emits:
+  - The original user `fn` unchanged.
+  - An `#[unsafe(no_mangle)] pub unsafe extern "C" fn
+    leo4_rust__<fname>__<param_mangles>(args, args_len, ret,
+    ret_cap, ret_len) -> i32` wrapper that does canonical-ABI
+    decode → `catch_unwind`(user-fn) → canonical-ABI encode.
+    `LEO4_ERR_RUST_PANIC = 0x00020001` surfaces on panic.
+  - A `linkme` distributed-slice registration writing one
+    `ExportEntry` into `EXPORTS`.
+- `crates/leo4-macros` — `#[proc_macro_attribute] pub fn export`.
+- `crates/leo4` — `rust-exports` feature pass-through + a new
+  `__private` module that re-exports `linkme`, `ExportEntry`, and
+  `EXPORTS` so user cdylibs need only depend on `leo4`. The macro
+  emits paths through `::leo4::__private::*`.
+- Unit tests in `leo4-macros-backend` (4 new) cover the attr
+  parser (`isolated` / default / unknown rejection), a scalar
+  smoke expansion, and the `async fn` / unsupported-type
+  diagnostics. Workspace test count 110 → 114; all green.
+- Standalone smoke cdylib verified: three `#[leo4::export]`s
+  (`add(u64, u64) -> u64`, `#[leo4::export(isolated)] echo(String)
+  -> String`, `no_args() -> u32`) compile and the wrapper
+  symbols (`leo4_rust__add__u64_u64`, `leo4_rust__echo__str`,
+  `leo4_rust__no_args`) show up in the produced `.so`.
+
+The dispatcher (`libleo4_rust_bridge.a`) and the worker harness
+that will reach these symbols land in 9-3 / 9-4a-c. Phase 9-2
+(build script emitting `<pkg>.leo4-rust-exports.idl` +
+`<pkg>.leo4-rust-handshake` from the `EXPORTS` slice) is the
+next substep.
+
 ### Changed — Tier 2 Windows: clarify C ↔ Rust ABI compatibility (2026-05-21)
 
 Follow-up on the gnullvm target adoption. Per the rustc
