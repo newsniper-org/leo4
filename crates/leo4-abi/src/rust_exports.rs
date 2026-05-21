@@ -27,13 +27,18 @@ use linkme::distributed_slice;
 /// One row in the cdylib's reverse-direction export table.
 ///
 /// Static lifetime everywhere: the macro emits the entry as a
-/// `static`, so all string fields are `&'static str`.
+/// `static`, so all string fields are `&'static str`. The
+/// `#[repr(C)]` is so external tools (the `leo4-rust-emit` CLI,
+/// and later the worker harness) can read entries via FFI by
+/// `dlopen`ing the cdylib — Rust's default repr does not
+/// guarantee field order or layout, but `repr(C)` does.
+#[repr(C)]
 #[derive(Debug)]
 pub struct ExportEntry {
     /// User-visible name. Today this is the Rust `fn` ident
-    /// (e.g. `"solve_smt"`); Phase 9-2 may prefix it with a
-    /// package / interface segment derived from
-    /// `CARGO_PKG_NAME` when emitting `<pkg>.leo4-rust-exports.idl`.
+    /// (e.g. `"solve_smt"`); Phase 9-2's emit CLI may prefix it
+    /// with a package / interface segment derived from
+    /// `CARGO_PKG_NAME` when writing `<pkg>.leo4-rust-exports.idl`.
     pub logical_name: &'static str,
 
     /// The C-linkage symbol the dispatcher reaches via
@@ -69,3 +74,43 @@ pub struct ExportEntry {
 /// Empty on cdylibs that use leo4 only in the forward direction.
 #[distributed_slice]
 pub static EXPORTS: [ExportEntry] = [..];
+
+// ─── FFI entry for external introspection (Phase 9-2) ────────────────
+//
+// The `leo4-rust-emit` CLI and (later) the worker harness load the
+// cdylib via `dlopen` and need a way to walk its `EXPORTS` slice
+// without resolving `linkme`'s private internals. The function
+// below is the stable, repr-C-safe gateway: it writes the slice's
+// in-process pointer and length into caller-provided out params.
+//
+// Safety contract: the returned pointer is valid for the lifetime
+// of the cdylib (i.e. until `dlclose`). The `&'static str` fields
+// inside each `ExportEntry` likewise point into the cdylib's
+// .rodata. Callers must not retain pointers across `dlclose`.
+
+/// `extern "C"` entry exposing the `EXPORTS` slice to in-process
+/// `dlopen`-style consumers. Always emitted when the
+/// `rust-exports` feature is enabled.
+///
+/// # Safety
+///
+/// `out_ptr` and `out_len` must be valid writable pointers. The
+/// returned pointer is valid for the lifetime of the cdylib and
+/// the entries' `&'static str` fields point into the cdylib's
+/// constant pool — do not retain the data across `dlclose`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn leo4_rust_describe_exports(
+    out_ptr: *mut *const ExportEntry,
+    out_len: *mut usize,
+) -> i32 {
+    if out_ptr.is_null() || out_len.is_null() {
+        return 1; // null-arg error
+    }
+    let slice: &[ExportEntry] = &EXPORTS;
+    // SAFETY: callers must pass valid out-pointers (documented above).
+    unsafe {
+        *out_ptr = slice.as_ptr();
+        *out_len = slice.len();
+    }
+    0
+}

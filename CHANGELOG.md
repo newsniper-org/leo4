@@ -7,6 +7,60 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-2: `leo4-rust-emit` CLI + `leo4-build::wire_rust_exports` (2026-05-21)
+
+Second code landing on the Phase 9 ladder. The emit pass that
+turns a built user cdylib into the `.leo4-rust-exports.idl` +
+`.leo4-rust-handshake` pair Lake will consume in 9-5.
+
+- `crates/leo4-abi/src/rust_exports.rs` gains:
+  - `#[repr(C)]` on `ExportEntry` (was implicit Rust repr;
+    external tooling needs a stable field layout to walk the
+    slice via `dlopen`).
+  - A new `extern "C"` entry,
+    `leo4_rust_describe_exports(out_ptr, out_len) -> i32`,
+    that writes the in-process `EXPORTS` slice pointer + length
+    into caller-provided out-params. This is the stable
+    FFI gateway for in-process introspection; downstream tools
+    do not need to resolve `linkme`'s private internals.
+- `crates/leo4-rust-emit/` (new workspace member, binary). CLI:
+  `leo4-rust-emit --cdylib <path> --out-dir <dir> [--pkg <name>]
+                  [--iface <name>] [--rust-toolchain <str>]`.
+  `dlopen`s the cdylib via `libloading`, calls
+  `leo4_rust_describe_exports`, copies each entry out (so the
+  cdylib can be unloaded immediately), computes the canonical
+  IDL form + FNV-1a-64 schema_hash (13-char base32lc, matching
+  the forward direction's algorithm), and atomically writes:
+  - `<pkg>.leo4-rust-exports.idl` — pretty canonical IDL,
+    functions sorted by mangled name.
+  - `<pkg>.leo4-rust-handshake` — JSON containing schema_hash,
+    abi_version, package, interface, cdylib_path (absolute),
+    rust_toolchain, leo4_rust_emit_version, emitted_at (UTC
+    RFC 3339), and an exports table mirroring the slice. 6
+    unit tests; standalone cdylib smoke verified 4 exports
+    (`add(u64,u64)→u64`, `echo(string)→string` (isolated),
+    `pi()→f64`, `list_len(list<u32>)→u64`) round-trip into
+    both files with schema_hash `7i2wz2k5rqhls`.
+- `crates/leo4-build/` gains `wire_rust_exports(out_dir)` for
+  Lean-side consumers' `build.rs`. Locates the
+  `.leo4-rust-handshake` file in `out_dir`, emits
+  `cargo:rustc-env=LEO4_RUST_HANDSHAKE_FILE=…` and
+  `cargo:rustc-env=LEO4_RUST_EXPORTS_IDL_FILE=…`, plus
+  `cargo:rerun-if-changed=` for both and
+  `cargo:rerun-if-env-changed=LEO4_RUST_CDYLIB`.
+- `SPEC/reverse-direction.md` §7 + §8 rewritten to match: the
+  Rust cdylib is built first; `leo4-rust-emit` is a separate
+  CLI step (not a `build.rs` action) that produces the
+  metadata files; Lake then reads them in 9-5. The handshake
+  JSON example reflects the actual `leo4-rust-emit 0.1.0`
+  output (collapsed canonical form, sort by mangled name,
+  per-export fields).
+
+Schema-hash detection between cdylib and handshake is deferred
+to the worker harness (9-3): the worker recomputes the hash at
+init time and the dispatcher surfaces `LEO4_ERR_HANDSHAKE_MISMATCH`
+(0x05) on the first call.
+
 ### Added — Phase 9-1: `#[leo4::export]` attribute proc-macro (2026-05-21)
 
 First code landing for Phase 9. Tagged Rust functions become

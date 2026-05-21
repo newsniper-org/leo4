@@ -385,18 +385,32 @@ emits a metadata file that Lake reads, but the Rust cdylib
 itself is **not** in Lake's build graph (it is loaded at
 runtime). Concretely:
 
-1. **Cargo pass** (`cargo build --release` of the user cdylib):
+1. **Cargo pass** (`cargo build` of the user cdylib):
    - `#[leo4::export]` proc-macro emits per-function wrapper
      shims `leo4_rust__<mangled>` and a static metadata entry
-     via the `linkme` crate.
-   - The `leo4-build` crate's `wire_rust_exports()` helper,
-     called from the cdylib's `build.rs`, writes:
-     - `<pkg>.leo4-rust-exports.idl` — canonical IDL of all
-       exports.
-     - `<pkg>.leo4-rust-handshake` — JSON with `schema_hash`,
-       `abi_version`, `cdylib_path` (absolute), and
-       `emitted_at`.
-2. **Lake pass** (`lake build` of the consuming Lean package):
+     via the `linkme` crate (Phase 9-1).
+   - `leo4-abi`'s `rust_exports` module additionally exports the
+     `leo4_rust_describe_exports` C entry that surfaces the
+     `EXPORTS` slice's in-process pointer + length to anyone
+     who later `dlopen`s the cdylib.
+2. **Emit pass** (`leo4-rust-emit` CLI, Phase 9-2):
+   - The user invokes
+     `leo4-rust-emit --cdylib <path-to-.so/.dylib/.dll>
+                     --out-dir <metadata-dir>
+                     [--pkg <name>] [--iface <name>]`
+     after `cargo build`.
+   - The CLI `dlopen`s the cdylib, calls
+     `leo4_rust_describe_exports`, copies each `ExportEntry`
+     out of the cdylib's address space, computes the
+     canonical IDL form + its FNV-1a-64 schema_hash, and
+     writes two files into `--out-dir`:
+     - `<pkg>.leo4-rust-exports.idl` — pretty canonical IDL.
+     - `<pkg>.leo4-rust-handshake` — JSON (§8). `cdylib_path`
+       is the absolute path passed via `--cdylib`.
+   - The CLI does not modify the cdylib. Re-running it after
+     a rebuild is the only way to refresh the metadata.
+3. **Lake pass** (`lake build` of the consuming Lean package,
+   Phase 9-5):
    - The leo4 Lake plugin reads
      `<pkg>.leo4-rust-exports.idl` and `<pkg>.leo4-rust-handshake`
      from a path the user configures in `lakefile.lean`
@@ -404,13 +418,27 @@ runtime). Concretely:
    - Generates `<pkg>.leo4-rust-imports.lean` — one `opaque`
      declaration per export with a typed wrapper that calls
      into `leo4_rust_call`.
-   - Schema-hash mismatch between handshake and the wrapper
-     module's compile-time constant raises a build-time
-     error.
-3. **leanc link**: Lake's link step adds
+   - Schema-hash mismatch between handshake and the cdylib
+     (recomputed by the worker at init time, §1) surfaces as
+     `LEO4_ERR_HANDSHAKE_MISMATCH` on the first call rather
+     than as a build-time error; this lets `lake build` proceed
+     even when the cdylib will be replaced at runtime via
+     `LEO4_RUST_CDYLIB` (§9).
+4. **leanc link**: Lake's link step adds
    `libleo4_rust_bridge.a` (from `Leo4.Build`'s static
    archive). No mention of the user cdylib here; the cdylib is
    discovered at runtime per §9.
+
+The `leo4-build` crate exposes `wire_rust_exports(out_dir)` as a
+build-script helper for **Lean-side consumers** (or a thin Cargo
+wrapper that re-exports the paths to Lake): it locates the two
+metadata files, emits
+`cargo:rustc-env=LEO4_RUST_HANDSHAKE_FILE` /
+`cargo:rustc-env=LEO4_RUST_EXPORTS_IDL_FILE`, and registers
+`cargo:rerun-if-changed=` for both plus
+`cargo:rerun-if-env-changed=LEO4_RUST_CDYLIB`. The Rust cdylib
+producer's `build.rs` does **not** call this — it has nothing to
+wire (the emit step is post-build).
 
 A project containing **both** directions is fine: the two
 metadata flows are independent (`<pkg>.leo4-schema` for forward,
@@ -423,29 +451,57 @@ which would only happen by accident.
 
 `<pkg>.leo4-rust-handshake` — JSON, atomic write, same
 conventions as `<pkg>.leo4-handshake` (`SPEC/handshake.md`).
-Required fields:
+Required fields (matching what `leo4-rust-emit` 0.1.0 writes,
+Phase 9-2):
 
 ```json
 {
   "leo4_rust_handshake_version": 1,
-  "schema_hash": "qi5gb74dbjyxo",
+  "schema_hash": "7i2wz2k5rqhls",
   "abi_version": 1,
-  "package": "my-rust-smt",
+  "package": "my_rust_smt",
+  "interface": "MyRustSmt",
   "cdylib_path": "/abs/path/to/libmy_rust_smt.so",
-  "rust_toolchain": "1.85.0",
-  "leo4_rust_macros_version": "0.1.0",
-  "emitted_at": "2026-05-21T05:43:59Z",
+  "rust_toolchain": "rustc-stable",
+  "leo4_rust_emit_version": "0.1.0",
+  "emitted_at": "2026-05-21T07:27:42Z",
   "exports": [
-    { "logical_name": "Smt::solve", "instantiations": [ /* same shape as forward .leo4-mangling */ ] }
+    {
+      "logical_name": "solve",
+      "mangled": "leo4_rust__solve__str",
+      "param_types": ["str"],
+      "ret_type": "u64",
+      "isolated": false,
+      "abi_version": 1
+    }
   ]
 }
 ```
 
-The `schema_hash` is FNV-1a-64 of the same canonical form the
-forward direction uses, computed over the reverse package's
-IDL. The hash spaces of forward and reverse are independent —
-a Rust project's `<pkg>.leo4-rust-handshake` hash has no
-relation to any Lean project's `<pkg>.leo4-handshake` hash.
+The `schema_hash` is FNV-1a-64 of the **collapsed canonical IDL
+form** (single-space token separators, no newlines, exports
+sorted by mangled name), rendered as 13 base32lc characters
+(`abcdefghijklmnopqrstuvwxyz234567`, no padding). This matches
+the forward direction's algorithm bit-for-bit; only the input
+text differs. The hash spaces of forward and reverse are
+independent — a Rust project's `<pkg>.leo4-rust-handshake` hash
+has no relation to any Lean project's `<pkg>.leo4-handshake`
+hash.
+
+The `exports` array carries one row per `#[leo4::export]`
+function, structurally similar to (but distinct from) the
+forward direction's `<pkg>.leo4-mangling` shape:
+
+- `logical_name` — the Rust `fn` identifier.
+- `mangled` — exact wrapper symbol; the dispatcher resolves
+  this via `dlsym` / `GetProcAddress` after the worker loads
+  the cdylib.
+- `param_types` / `ret_type` — IDL mangle strings from
+  `SPEC/mangling.md` §2. `ret_type` is the empty string for
+  unit returns.
+- `isolated` — `true` iff `#[leo4::export(isolated)]`.
+- `abi_version` — currently always `1`; bumps lockstep with
+  the `ExportEntry` repr-C layout.
 
 ## 9. cdylib Path Resolution
 

@@ -1,0 +1,28 @@
+[package]
+name        = "leo4-rust-emit"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Phase 9-2 CLI — given a built user cdylib, emit <pkg>.leo4-rust-exports.idl and <pkg>.leo4-rust-handshake by `dlopen`ing the cdylib and walking its `EXPORTS` distributed slice via the `leo4_rust_describe_exports` entry. See SPEC/reverse-direction.md."
+
+[[bin]]
+name = "leo4-rust-emit"
+path = "src/main.rs"
+
+[dependencies]
+libloading.workspace = true
+serde_json.workspace = true
+clap.workspace       = true
+# `rust-exports` feature enables the `rust_exports` module that
+# defines `ExportEntry` (the repr-C layout we cast `dlsym`-ed
+# pointers to). The CLI itself never hosts a distributed slice,
+# but it has to know the struct layout, which lives behind the
+# feature gate.
+leo4-abi = { workspace = true, features = ["rust-exports"] }
+schema-idl.workspace = true
+
+[lints]
+workspace = true
