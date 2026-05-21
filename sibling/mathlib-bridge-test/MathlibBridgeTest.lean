@@ -62,4 +62,18 @@ example : Complex := Leo4.LeanComplexF16x2.toComplex ⟨⟨0⟩, ⟨0⟩⟩
 example : Complex := Leo4.LeanComplexBF16x2.toComplex ⟨⟨0⟩, ⟨0⟩⟩
 example : Complex := Leo4.LeanComplexF128x2.toComplex ⟨⟨0, 0⟩, ⟨0, 0⟩⟩
 
+-- ZMod / reverse-Complex elaborate-only smoke (Wide bridge ZMod
+-- adds Mathlib `ZMod (2^128)`; reverse Complex is `noncomputable`
+-- stub).
+
+example : ZMod (2 ^ 128) := Leo4.LeanU128.toZMod ⟨1, 2⟩
+example : Leo4.LeanU128 :=
+  Leo4.LeanU128.ofZMod ((42 : ℕ) : ZMod (2 ^ 128))
+example : ZMod (2 ^ 128) := Leo4.LeanI128.toZMod ⟨1, 2⟩
+
+noncomputable example : Leo4.LeanComplexF64x2 :=
+  Leo4.LeanComplexF64x2.ofComplex ⟨0, 0⟩
+noncomputable example : Leo4.LeanComplexF32x2 :=
+  Leo4.LeanComplexF32x2.ofComplex ⟨0, 0⟩
+
 end MathlibBridgeTest

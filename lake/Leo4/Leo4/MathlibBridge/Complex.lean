@@ -32,4 +32,29 @@ so the conversion stays lossless. -/
 def LeanComplexF32x2.toComplex (v : LeanComplexF32x2) : ℂ :=
   ⟨v.re.toFloat.toReal, v.im.toFloat.toReal⟩
 
+/-- Reverse direction `ℂ → LeanComplexF64x2`. `noncomputable`
+because `ℝ → Float` rounding isn't constructive at Mathlib's
+abstract-Real level: ℝ is a Cauchy-sequence quotient and no
+total constructive function picks "the nearest representable
+Float" without choosing a rounding mode and machinery for
+finding the rounded value.
+
+This stub returns `default` (zero) so the bridge type-checks
+end-to-end; a follow-up commit picks **round-to-nearest-even**
+(IEEE-754 default) and replaces the body with a real
+implementation that goes through `Float.ofRat` on a finite
+rational approximation.
+
+Until the rounding mode is pinned, callers requiring the
+reverse direction should choose their own rounding policy
+manually rather than rely on this stub. -/
+noncomputable def LeanComplexF64x2.ofComplex (_c : ℂ) : LeanComplexF64x2 :=
+  default
+
+/-- Same caveat as `LeanComplexF64x2.ofComplex` — stubbed
+`noncomputable` placeholder until a Float32 rounding policy is
+pinned. -/
+noncomputable def LeanComplexF32x2.ofComplex (_c : ℂ) : LeanComplexF32x2 :=
+  default
+
 end Leo4

@@ -21,6 +21,7 @@
 
 import Leo4.Wide
 import Mathlib.Init
+import Mathlib.Data.ZMod.Basic
 
 namespace Leo4
 
@@ -79,5 +80,31 @@ def LeanI128.toBitVec128 (v : LeanI128) : BitVec 128 :=
 def LeanI128.ofBitVec128 (b : BitVec 128) : LeanI128 where
   lo := (b.extractLsb' 0 64).toNat.toUInt64
   hi := (b.extractLsb' 64 64).toNat.toUInt64
+
+/-- View `LeanU128` as `ZMod (2^128)`. Mathlib's `ZMod n` is
+`Fin n` for `n > 0`, with arithmetic mod `n`; `(v.toNat :
+ZMod (2^128))` invokes the `NatCast` instance. -/
+def LeanU128.toZMod (v : LeanU128) : ZMod (2 ^ 128) :=
+  (v.toNat : ZMod (2 ^ 128))
+
+/-- Recover a `LeanU128` from `ZMod (2^128)`. `ZMod.val` gives the
+canonical representative in `0..2^128 - 1`. -/
+def LeanU128.ofZMod (z : ZMod (2 ^ 128)) : LeanU128 :=
+  LeanU128.ofNat z.val
+
+/-- View `LeanI128` as `ZMod (2^128)` (unsigned representative).
+Consumers can recover the signed view via `ZMod.toIntInRange` or
+similar Mathlib helpers. -/
+def LeanI128.toZMod (v : LeanI128) : ZMod (2 ^ 128) :=
+  ((v.hi.toNat * (2 ^ 64) + v.lo.toNat : Nat) : ZMod (2 ^ 128))
+
+/-- Recover a `LeanI128` from `ZMod (2^128)`. The bit pattern at
+position 127 carries the sign per two's complement; callers who
+want a signed `Int` view first convert with `LeanI128.ofZMod` and
+then `LeanI128.toInt`. -/
+def LeanI128.ofZMod (z : ZMod (2 ^ 128)) : LeanI128 :=
+  let n := z.val
+  { lo := (n &&& (2 ^ 64 - 1)).toUInt64
+  , hi := (n >>> 64).toUInt64 }
 
 end Leo4
