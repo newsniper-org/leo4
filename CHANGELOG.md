@@ -7,6 +7,55 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Mathlib bridge infrastructure + initial bridges (2026-05-21)
+
+User direction recorded 2026-05-20 (memory:
+`project_mathlib_bridge.md`): every `Lean*` carrier type ships with
+opt-in `Leo4.MathlibBridge.*` modules providing 1-to-1 conversions
+to/from Mathlib types. leo4 core stays Mathlib-independent
+(ROADMAP §8).
+
+Infrastructure (`sibling/mathlib-bridge-test/`):
+- New non-workspace Lake package pulling `Leo4` (path) + `mathlib`
+  (git, `leanprover-community/mathlib4`). Lean toolchain pinned
+  to `v4.29.1` matching the rest of the repo.
+- `MathlibBridgeTest.lean` imports every `Leo4.MathlibBridge.*`
+  module + Mathlib core; `decide`-based smoke checks where
+  feasible.
+- `just mathlib-bridge-test` recipe drives `lake build` in the
+  sibling. NOT on the default `just test` ladder — Mathlib's
+  cold build is 1-2 hours.
+- `sibling/README.md` documents the cold-build caveat.
+
+Bridge modules (`lake/Leo4/Leo4/MathlibBridge/*`) — opt-in import,
+NOT auto-imported by `Leo4`; Lake's import-driven build keeps
+them out of the main `Leo4` lib's compile graph:
+
+- **`MathlibBridge.Wide`** —
+  `LeanU128 ↔ Nat / BitVec 128`, `LeanI128 ↔ Int / BitVec 128`.
+  Wide → Nat is total; Nat → Wide truncates ≥ 2^128. Wide → Int
+  applies two's-complement sign; Int → Wide wraps mod 2^128.
+  Wide ↔ BitVec 128 is a bit-level bijection.
+- **`MathlibBridge.Complex`** — `LeanComplexF{32,64}x2 →
+  Complex ℝ` via `Float.toReal` (Float32 → Float → ℝ for the
+  F32 carrier). Forward direction only — reverse is
+  rounding-lossy and waits for a concrete rounding-mode decision.
+
+Deferred:
+- `MathlibBridge.NightlyFloats` — needs IEEE binary16 / bfloat16 /
+  binary128 bit-decode in Lean (no native types in Lean core).
+  Scoped for a future commit once we have the float-decode
+  helper code.
+- Reverse-direction `Complex ℝ → LeanComplexF*x2` — requires a
+  rounding-mode choice.
+- `ZMod / Fin (2^128)` conversions for the Wide bridge — separate
+  add-on commit when a consumer needs them.
+
+No regression: main `lake/Leo4` lib builds in 12 jobs (bridge
+files not in import graph). `just smoke-plugin` + `cargo test
+--workspace` + `just mangling-test` all green;
+schema_hash `tjhnmfbc7izmk` unchanged.
+
 ### Added — Phase 7 step 2b: shim IO unwrap + `asyncDouble` fixture (2026-05-21)
 
 Closes the end-to-end functional path for `IO α` boundary exports.
