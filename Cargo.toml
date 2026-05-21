@@ -13,6 +13,7 @@ members = [
     "crates/leo4c",
     "crates/leo4-rust-emit",
     "crates/leo4-rust-worker",
+    "crates/leo4-rust-bridge",
     "examples/01-hello",
     "examples/02-roundtrip",
     "examples/04-mutual-ast",
@@ -47,6 +48,7 @@ leo4-wasm             = { version = "0.1.0", path = "crates/leo4-wasm" }
 leo4                  = { version = "0.1.0", path = "crates/leo4" }
 leo4-rust-emit        = { version = "0.1.0", path = "crates/leo4-rust-emit" }
 leo4-rust-worker      = { version = "0.1.0", path = "crates/leo4-rust-worker" }
+leo4-rust-bridge      = { version = "0.1.0", path = "crates/leo4-rust-bridge" }
 
 # External
 thiserror   = "2"
@@ -64,6 +66,8 @@ clap        = { version = "4", features = ["derive"] }
 # `#[leo4::export]`-tagged functions in user cdylibs.
 # Optional via `rust-exports` feature on `leo4-abi`.
 linkme      = "0.3"
+# Phase 9-4a: build helper for `leo4-rust-bridge`'s C TU.
+cc          = "1"
 
 [profile.release]
 lto = "thin"

@@ -1,0 +1,23 @@
+[package]
+name        = "leo4-rust-bridge"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Phase 9-4 — builds `libleo4_rust_bridge.a` (single C TU dispatcher) from `shim/leo4_rust_bridge.c` and exposes its single C entry to Rust callers. The dispatcher routes Lean -> Rust calls through a long-running worker process. See SPEC/reverse-direction.md."
+
+[lib]
+# `staticlib` for Lake-side link; `rlib` so the workspace can `cargo
+# test` against the dispatcher entry without building a separate
+# crate.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+
+[build-dependencies]
+cc.workspace = true
+
+[lints]
+workspace = true

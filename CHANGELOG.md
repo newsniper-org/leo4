@@ -7,6 +7,68 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-4a: dispatcher skeleton + `leo4_worker_ops_t` + stub backend (2026-05-21)
+
+Fourth code landing on the Phase 9 ladder. The single-entry C
+dispatcher that the Lean side will reach via
+`@[extern "leo4_rust_call"]`. POSIX and Windows backends
+(9-4b / 9-4c) land later and just fill the ops table — the
+dispatcher body does not change.
+
+- `shim/leo4_rust_bridge.c` (new, single C TU, ~330 lines):
+  - `leo4_worker_ops_t` ops-table interface
+    (spawn / kill / reap / send / recv / alive) per SPEC
+    `reverse-direction.md` §4.4.
+  - **Stub backend** (`leo4_stub_ops`) wired unconditionally
+    on every platform; every op errors with
+    `LEO4_ERR_RUST_SPAWN_FAILED` / `LEO4_ERR_RUST_IPC_FAILED`.
+    Compile-time backend selection chain
+    (`__unix__ || __APPLE__` → stub today, POSIX in 9-4b;
+    `_WIN32` → stub today, Windows in 9-4c; else → stub).
+    Ensures `libleo4_rust_bridge.a` links on every platform
+    from day 1.
+  - Worker handle slot via `_Atomic` (lazy spawn,
+    compare-exchange guard). Single-Lean-thread invariant
+    means the spin path is unreachable today; the guard is
+    defensive for future multi-Lean models.
+  - Dispatcher body `leo4_rust_call(mangled, ..., args, ...,
+    ret, ret_cap, ret_len)`:
+    1. `leo4_get_or_spawn_persistent` (ops `spawn`).
+    2. `leo4_send_request` builds the SPEC §5.1 request frame
+       (LE u32 magic / mangled_len / args_len + payload).
+    3. `leo4_recv_response` parses the SPEC §5.2 response
+       frame (magic + i32 status + u32 ret_len + u32
+       detail_len + payload + detail), validates magic +
+       sizes, propagates `LEO4_ERR_BUFFER_TOO_SMALL` with
+       `*ret_len` = required size on caller-too-small.
+  - cdylib path resolution: env `LEO4_RUST_CDYLIB` only
+    (SPEC §9's full chain lands when 9-5 bakes a
+    compile-time fallback).
+  - Single export visibility macro: `__declspec(dllexport)`
+    on Windows, `__attribute__((visibility("default")))`
+    elsewhere. C17 baseline.
+  - Debug helper `leo4_rust_bridge_current_ops()` exposed for
+    tests so Rust can identify which backend got selected.
+- `crates/leo4-rust-bridge/` (new workspace member):
+  - `[lib] crate-type = ["staticlib", "rlib"]` so Lake can
+    pick up the `.a` archive and the workspace can
+    `cargo test` against the dispatcher.
+  - `build.rs` drives `cc::Build::new().file(c_source)
+    .std("c17").compile("leo4_rust_bridge")`. cc crate added
+    to `workspace.dependencies`.
+  - `src/lib.rs` declares the `leo4_rust_call` extern and a
+    sanity test verifying that the dispatcher links and
+    returns `LEO4_ERR_RUST_SPAWN_FAILED = 0x00020003` against
+    the stub backend.
+
+Workspace test count 126 → 127; all green. `libleo4_rust_bridge.a`
+produced at `target/<profile>/libleo4_rust_bridge.a`.
+
+End-to-end (dispatcher → worker → cdylib → wrapper) integration
+arrives with the POSIX backend in 9-4b: only that fill-in
+exchanges the stub `spawn`/`send`/`recv` for `posix_spawn` +
+`socketpair` + `wait4`.
+
 ### Added — Phase 9-3: `leo4-rust-worker` harness binary (2026-05-21)
 
 Third code landing on the Phase 9 ladder. The harness binary
