@@ -409,7 +409,29 @@ across the boundary in step with Lean's unboxing. Discovered
 **Windows = `*-pc-windows-gnullvm`, not `*-pc-windows-msvc`**
 (adopted 2026-05-21). The gnullvm target uses clang + lld + UCRT,
 matching the LLVM toolchain stack `leanc` already drives on every
-other tier. Three practical consequences:
+other tier.
+
+**C toolchain ABI compatibility (per the rustc platform-support
+docs).** Rust code built for `x86_64-pc-windows-gnullvm` is
+ABI-compatible with C code built by Clang targeting either
+`x86_64-pc-windows-gnu` or `x86_64-pc-windows-gnullvm`, provided
+the C side is also driven through an LLVM-based toolchain (clang,
+not MSVC `cl`, not stock mingw-w64 `gcc`). leo4's policy follows:
+
+- **leo4 C shim** (`<pkg>.leo4-shim.c`, forward direction) is
+  compiled through `leanc` on every tier; on Windows, `leanc`
+  must dispatch to **clang** (Lean 4's Windows binary already
+  wraps clang as its C driver), so the C side and the Rust cdylib
+  end up on the same LLVM ABI track.
+- **leo4 dispatcher** (`libleo4_rust_bridge.a`, reverse direction)
+  is similarly compiled with **clang** (either via `leanc` or
+  directly via `cc` with `--target=x86_64-pc-windows-gnu` /
+  `--target=x86_64-pc-windows-gnullvm`). C++ is never involved, so
+  the gnu vs gnullvm C++-ABI difference is moot — only C
+  function-call ABI matters and clang produces the same on both
+  Windows triples.
+
+Three practical consequences:
 
 - The shim's gcc / clang-style C (e.g.
   `__attribute__((visibility("default")))`, `__builtin_memcpy`)

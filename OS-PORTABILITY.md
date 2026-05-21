@@ -45,6 +45,29 @@ concerns that would have needed an abstraction layer under MSVC
 do not need one. The §2 table records which concerns remain
 under-abstracted given this target choice.
 
+**C ↔ Rust ABI compatibility on Windows.** Per the rustc
+platform-support docs for `x86_64-pc-windows-gnullvm`: Rust
+binaries on that target are ABI-compatible with C code built
+through an **LLVM-based** C toolchain targeting either
+`x86_64-pc-windows-gnu` (mingw triple, but compiled with clang)
+or `x86_64-pc-windows-gnullvm`. This is *not* automatic with
+mingw-w64 `gcc` — the C compiler must be `clang`. leo4 enforces
+the LLVM track end-to-end:
+
+1. The forward shim and the reverse-direction dispatcher are
+   both C code; leo4's build path drives them through `leanc`,
+   which on Windows already wraps clang.
+2. User cdylibs (Phase 9 reverse direction) are Rust, built
+   for `x86_64-pc-windows-gnullvm`. They cannot link MSVC-ABI
+   C++ libraries directly, but they can link any C library
+   built with clang on either Windows triple.
+
+The Phase 9 spawn / IPC layer's Windows branch (`CreateProcess`
++ named pipe, see `SPEC/reverse-direction.md` §4.4) is plain
+Windows API, available regardless of which Windows target is
+chosen — the gnullvm choice is about ABI alignment and C
+ergonomics, not about access to system calls.
+
 A new commit that adds a `#[cfg(target_os = …)]`, `cfg(unix)`,
 `cfg(windows)`, `cfg(target_family = …)`, or a `System.os` /
 `System.Platform`-driven Lean branch **outside an identified

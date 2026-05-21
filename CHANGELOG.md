@@ -7,6 +7,20 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — Tier 2 Windows: clarify C ↔ Rust ABI compatibility (2026-05-21)
+
+Follow-up on the gnullvm target adoption. Per the rustc
+platform-support docs for `x86_64-pc-windows-gnullvm`, Rust
+binaries on that target are ABI-compatible with C code built by
+**clang** targeting either `*-pc-windows-gnu` or
+`*-pc-windows-gnullvm` — i.e. mingw-w64's `gcc` is NOT sufficient,
+the C compiler must be LLVM-based. leo4 enforces the LLVM
+track end-to-end: the forward shim and the reverse-direction
+dispatcher are both compiled through `leanc` (which on Windows
+wraps clang); user cdylibs are gnullvm Rust. Documented in
+`LEO4-DESIGN.md §9.1`, `OS-PORTABILITY.md §1`, and
+`SPEC/reverse-direction.md` §11.
+
 ### Changed — Tier 2 Windows target: `*-pc-windows-msvc` → `*-pc-windows-gnullvm` (2026-05-21)
 
 leo4 targets the gnullvm Windows triple (clang + lld + UCRT)

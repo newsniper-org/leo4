@@ -511,6 +511,17 @@ Because the Tier 2 Windows target is `x86_64-pc-windows-gnullvm`
 `-std=c17` / `-std=c2x` invocation works on Windows as on Linux
 — no MSVC-specific compiler driver branch.
 
+Per the rustc platform-support note for gnullvm, Rust code on
+`*-pc-windows-gnullvm` is ABI-compatible with C code built by
+clang for either `*-pc-windows-gnu` or `*-pc-windows-gnullvm`,
+**as long as the C side also goes through an LLVM-based
+toolchain**. leo4 enforces this end-to-end: the dispatcher is
+compiled with clang (via `leanc` or directly with
+`--target=x86_64-pc-windows-gnu`), and user cdylibs are built
+for `*-pc-windows-gnullvm`. The two end up on the same C ABI
+even though their Rust / C target triples are not literally
+identical. C++ is never involved.
+
 Mandatory C standard library headers:
 
 - POSIX path: `<unistd.h>`, `<spawn.h>`, `<sys/socket.h>`,
