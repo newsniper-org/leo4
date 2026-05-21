@@ -13,8 +13,10 @@
 -- and a couple of `example` checks.
 
 import Leo4
+import Leo4.NightlyFloats
 import Leo4.MathlibBridge.Wide
 import Leo4.MathlibBridge.Complex
+import Leo4.MathlibBridge.NightlyFloats
 import Mathlib.Init
 
 namespace MathlibBridgeTest
@@ -47,5 +49,17 @@ example : Complex :=
 
 example : Complex :=
   Leo4.LeanComplexF32x2.toComplex ⟨3.0, 4.0⟩
+
+-- Nightly-float bridge type-check smoke
+-- (`Leo4.MathlibBridge.NightlyFloats`). The `decide` route is
+-- unavailable (Real arithmetic), but elaboration still catches
+-- API drift.
+
+example : Real := Leo4.LeanF16.toReal ⟨0⟩
+example : Real := Leo4.LeanBF16.toReal ⟨0⟩
+example : Real := Leo4.LeanF128.toReal ⟨0, 0⟩
+example : Complex := Leo4.LeanComplexF16x2.toComplex ⟨⟨0⟩, ⟨0⟩⟩
+example : Complex := Leo4.LeanComplexBF16x2.toComplex ⟨⟨0⟩, ⟨0⟩⟩
+example : Complex := Leo4.LeanComplexF128x2.toComplex ⟨⟨0, 0⟩, ⟨0, 0⟩⟩
 
 end MathlibBridgeTest
