@@ -74,211 +74,220 @@ static const lean_string_object l_Sample_stringify___at___00__leo4__export__stri
 static const lean_object* l_Sample_stringify___at___00__leo4__export__stringify__b_spec__0___closed__1 = (const lean_object*)&l_Sample_stringify___at___00__leo4__export__stringify__b_spec__0___closed__1_value;
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__b_spec__0(uint8_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__b_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__b__htjhnmfbc7izmk(uint8_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__b__hqi5gb74dbjyxo(uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__b___boxed(lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__bN_spec__0(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bN__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bN__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__str_spec__0(lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__str_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__str__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__str__hqi5gb74dbjyxo(lean_object*);
 static const lean_string_object l_Sample_stringify___at___00__leo4__export__stringify__bI_spec__0___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 2, .m_capacity = 2, .m_length = 1, .m_data = "-"};
 static const lean_object* l_Sample_stringify___at___00__leo4__export__stringify__bI_spec__0___closed__0 = (const lean_object*)&l_Sample_stringify___at___00__leo4__export__stringify__bI_spec__0___closed__0_value;
 lean_object* lean_nat_sub(lean_object*, lean_object*);
 lean_object* lean_string_append(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__bI_spec__0(lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__bI_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bI__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bI__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u8_spec__0(uint8_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u8_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u8__htjhnmfbc7izmk(uint8_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u8__hqi5gb74dbjyxo(uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__u8___boxed(lean_object*);
 lean_object* lean_float32_to_string(float);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__f32_spec__0(float);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__f32_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f32__htjhnmfbc7izmk(float);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f32__hqi5gb74dbjyxo(float);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__f32___boxed(lean_object*);
 lean_object* lean_int32_to_int(uint32_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i32_spec__0(uint32_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i32_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i32__htjhnmfbc7izmk(uint32_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i32__hqi5gb74dbjyxo(uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__i32___boxed(lean_object*);
 lean_object* lean_uint16_to_nat(uint16_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u16_spec__0(uint16_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u16_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u16__htjhnmfbc7izmk(uint16_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u16__hqi5gb74dbjyxo(uint16_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__u16___boxed(lean_object*);
 lean_object* lean_int64_to_int_sint(uint64_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i64_spec__0(uint64_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i64_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i64__htjhnmfbc7izmk(uint64_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i64__hqi5gb74dbjyxo(uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__i64___boxed(lean_object*);
 static const lean_string_object l_Sample_stringify___at___00__leo4__export__stringify__S__Rat__s_spec__0___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 2, .m_capacity = 2, .m_length = 1, .m_data = "/"};
 static const lean_object* l_Sample_stringify___at___00__leo4__export__stringify__S__Rat__s_spec__0___closed__0 = (const lean_object*)&l_Sample_stringify___at___00__leo4__export__stringify__S__Rat__s_spec__0___closed__0_value;
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__S__Rat__s_spec__0(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__S_Rat_s__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__S_Rat_s__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u64_spec__0(uint64_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u64_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u64__htjhnmfbc7izmk(uint64_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u64__hqi5gb74dbjyxo(uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__u64___boxed(lean_object*);
 lean_object* lean_float_to_string(double);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__f64_spec__0(double);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__f64_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f64__htjhnmfbc7izmk(double);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f64__hqi5gb74dbjyxo(double);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__f64___boxed(lean_object*);
 lean_object* lean_int8_to_int(uint8_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i8_spec__0(uint8_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i8_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i8__htjhnmfbc7izmk(uint8_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i8__hqi5gb74dbjyxo(uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__i8___boxed(lean_object*);
 lean_object* lean_int16_to_int(uint16_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i16_spec__0(uint16_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__i16_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i16__htjhnmfbc7izmk(uint16_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i16__hqi5gb74dbjyxo(uint16_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__i16___boxed(lean_object*);
 lean_object* lean_uint32_to_nat(uint32_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u32_spec__0(uint32_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__u32_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u32__htjhnmfbc7izmk(uint32_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u32__hqi5gb74dbjyxo(uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__u32___boxed(lean_object*);
 static const lean_string_object l_Sample_stringify___at___00__leo4__export__stringify__c_spec__0___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 1, .m_capacity = 1, .m_length = 0, .m_data = ""};
 static const lean_object* l_Sample_stringify___at___00__leo4__export__stringify__c_spec__0___closed__0 = (const lean_object*)&l_Sample_stringify___at___00__leo4__export__stringify__c_spec__0___closed__0_value;
 lean_object* lean_string_push(lean_object*, uint32_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__c_spec__0(uint32_t);
 LEAN_EXPORT lean_object* l_Sample_stringify___at___00__leo4__export__stringify__c_spec__0___boxed(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__c__htjhnmfbc7izmk(uint32_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__c__hqi5gb74dbjyxo(uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__stringify__c___boxed(lean_object*);
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__pairSndU64U32__S__Sample__Pair__u64__u32__s___boxed(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_safeDiv(uint64_t, uint64_t);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__htjhnmfbc7izmk(uint64_t, uint64_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__hqi5gb74dbjyxo(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__safeDiv__u64__u64___boxed(lean_object*, lean_object*);
 uint8_t lp_leo4_x2dsample_Sample_exprIsLit(lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__exprIsLit__V__Sample__Expr__v___boxed(lean_object*);
 uint8_t lp_leo4_x2dsample_Sample_stmtIsNop(lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__stmtIsNop__V__Sample__Stmt__v___boxed(lean_object*);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__pairFstU64U32__S__Sample__Pair__u64__u32__s___boxed(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__mulComplexF64x2__S_Leo4_LeanComplexF64x2_s_S_Leo4_LeanComplexF64x2_s__htjhnmfbc7izmk(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__mulComplexF64x2__S_Leo4_LeanComplexF64x2_s_S_Leo4_LeanComplexF64x2_s__hqi5gb74dbjyxo(lean_object*, lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_asyncDouble(uint64_t);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncDouble__u64__htjhnmfbc7izmk(uint64_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncDouble__u64__hqi5gb74dbjyxo(uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__asyncDouble__u64___boxed(lean_object*, lean_object*);
 double lp_leo4_x2dsample_Sample_pointSum(lean_object*);
-LEAN_EXPORT double leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT double leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__pointSum__S__Sample__Point__s___boxed(lean_object*);
+lean_object* lp_leo4_x2dsample_Sample_asyncNegate(uint32_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncNegate__i32__hqi5gb74dbjyxo(uint32_t);
+LEAN_EXPORT lean_object* l___leo4__export__asyncNegate__i32___boxed(lean_object*, lean_object*);
 uint64_t lp_leo4_x2dsample_Sample_pairAdd(lean_object*);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__pairAdd__T__u64__u32__t___boxed(lean_object*);
 uint8_t lean_int64_dec_lt(uint64_t, uint64_t);
 LEAN_EXPORT uint64_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__i64__i64_spec__0(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__i64__i64_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__htjhnmfbc7izmk(uint64_t, uint64_t);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__hqi5gb74dbjyxo(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__i64__i64___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__b__b_spec__0(uint8_t, uint8_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__b__b_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__htjhnmfbc7izmk(uint8_t, uint8_t);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__hqi5gb74dbjyxo(uint8_t, uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__b__b___boxed(lean_object*, lean_object*);
 uint8_t lean_uint16_dec_lt(uint16_t, uint16_t);
 LEAN_EXPORT uint16_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__u16__u16_spec__0(uint16_t, uint16_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__u16__u16_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__htjhnmfbc7izmk(uint16_t, uint16_t);
+LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__hqi5gb74dbjyxo(uint16_t, uint16_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__u16__u16___boxed(lean_object*, lean_object*);
 uint8_t lean_string_dec_lt(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__str__str_spec__0(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__str__str_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__htjhnmfbc7izmk(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__hqi5gb74dbjyxo(lean_object*, lean_object*);
 uint8_t lean_uint64_dec_lt(uint64_t, uint64_t);
 LEAN_EXPORT uint64_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__u64__u64_spec__0(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__u64__u64_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__htjhnmfbc7izmk(uint64_t, uint64_t);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__hqi5gb74dbjyxo(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__u64__u64___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__u8__u8_spec__0(uint8_t, uint8_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__u8__u8_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__htjhnmfbc7izmk(uint8_t, uint8_t);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__hqi5gb74dbjyxo(uint8_t, uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__u8__u8___boxed(lean_object*, lean_object*);
 uint8_t lean_uint32_dec_lt(uint32_t, uint32_t);
 LEAN_EXPORT uint32_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__u32__u32_spec__0(uint32_t, uint32_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__u32__u32_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__htjhnmfbc7izmk(uint32_t, uint32_t);
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__hqi5gb74dbjyxo(uint32_t, uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__u32__u32___boxed(lean_object*, lean_object*);
 uint8_t lean_int16_dec_lt(uint16_t, uint16_t);
 LEAN_EXPORT uint16_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__i16__i16_spec__0(uint16_t, uint16_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__i16__i16_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__htjhnmfbc7izmk(uint16_t, uint16_t);
+LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__hqi5gb74dbjyxo(uint16_t, uint16_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__i16__i16___boxed(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__bI__bI_spec__0(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__bI__bI_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__htjhnmfbc7izmk(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__hqi5gb74dbjyxo(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__bN__bN_spec__0(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__bN__bN_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__htjhnmfbc7izmk(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__hqi5gb74dbjyxo(lean_object*, lean_object*);
 uint8_t lean_int8_dec_lt(uint8_t, uint8_t);
 LEAN_EXPORT uint8_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__i8__i8_spec__0(uint8_t, uint8_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__i8__i8_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__htjhnmfbc7izmk(uint8_t, uint8_t);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__hqi5gb74dbjyxo(uint8_t, uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__i8__i8___boxed(lean_object*, lean_object*);
 uint8_t lean_int32_dec_lt(uint32_t, uint32_t);
 LEAN_EXPORT uint32_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__i32__i32_spec__0(uint32_t, uint32_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__i32__i32_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__htjhnmfbc7izmk(uint32_t, uint32_t);
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__hqi5gb74dbjyxo(uint32_t, uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__i32__i32___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint32_t l_Sample_maxScalar___at___00__leo4__export__maxScalar__c__c_spec__0(uint32_t, uint32_t);
 LEAN_EXPORT lean_object* l_Sample_maxScalar___at___00__leo4__export__maxScalar__c__c_spec__0___boxed(lean_object*, lean_object*);
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__htjhnmfbc7izmk(uint32_t, uint32_t);
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__hqi5gb74dbjyxo(uint32_t, uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__maxScalar__c__c___boxed(lean_object*, lean_object*);
 uint64_t lean_uint64_add(uint64_t, uint64_t);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__htjhnmfbc7izmk(uint64_t, uint64_t);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__hqi5gb74dbjyxo(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__add__u64__u64___boxed(lean_object*, lean_object*);
 uint64_t lp_leo4_x2dsample_Sample_listSumU64(lean_object*);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__listSumU64__L__u64__l___boxed(lean_object*);
 static const lean_string_object l___leo4__export__hello___00__closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 12, .m_capacity = 12, .m_length = 11, .m_data = "hello, leo4"};
 static const lean_object* l___leo4__export__hello___00__closed__0 = (const lean_object*)&l___leo4__export__hello___00__closed__0_value;
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____hqi5gb74dbjyxo(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_addU128(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addU128__S_Leo4_LeanU128_s_S_Leo4_LeanU128_s__htjhnmfbc7izmk(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addU128__S_Leo4_LeanU128_s_S_Leo4_LeanU128_s__hqi5gb74dbjyxo(lean_object*, lean_object*);
 uint8_t lp_leo4_x2dsample_Sample_isLeaf(lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__isLeaf__V__Sample__Tree__v___boxed(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_parseU64(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__parseU64__str__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__parseU64__str__hqi5gb74dbjyxo(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_listConcat(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__hqi5gb74dbjyxo(lean_object*);
 lean_object* l_List_lengthTR___redArg(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__htjhnmfbc7izmk(lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__hqi5gb74dbjyxo(lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__hqi5gb74dbjyxo(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_colorName(uint8_t);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__htjhnmfbc7izmk(uint8_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__hqi5gb74dbjyxo(uint8_t);
 LEAN_EXPORT lean_object* l___leo4__export__colorName__E__Sample__Color__e___boxed(lean_object*);
 uint32_t lp_leo4_x2dsample_Sample_doubleVal___redArg(uint32_t);
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__htjhnmfbc7izmk(uint32_t);
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__hqi5gb74dbjyxo(uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__doubleVal__u32___boxed(lean_object*);
 uint8_t lp_leo4_x2dsample_Sample_eitherTaggedU64String(lean_object*);
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__htjhnmfbc7izmk(lean_object*);
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__hqi5gb74dbjyxo(lean_object*);
 LEAN_EXPORT lean_object* l___leo4__export__eitherTaggedU64String__V__Sample__Either__u64__str__v___boxed(lean_object*);
 lean_object* l_Rat_add(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addRat__S_Rat_s_S_Rat_s__htjhnmfbc7izmk(lean_object*, lean_object*);
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__htjhnmfbc7izmk(uint64_t);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addRat__S_Rat_s_S_Rat_s__hqi5gb74dbjyxo(lean_object*, lean_object*);
+lean_object* lp_leo4_x2dsample_Sample_asyncHalveF64(double);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncHalveF64__f64__hqi5gb74dbjyxo(double);
+LEAN_EXPORT lean_object* l___leo4__export__asyncHalveF64__f64___boxed(lean_object*, lean_object*);
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__hqi5gb74dbjyxo(uint64_t);
 LEAN_EXPORT lean_object* l___leo4__export__parserId__X__Sample__ParserHandle__x___boxed(lean_object*);
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__htjhnmfbc7izmk(uint32_t);
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__hqi5gb74dbjyxo(uint32_t);
 LEAN_EXPORT lean_object* l___leo4__export__constantFortyTwo__u32___boxed(lean_object*);
 lean_object* lp_leo4_x2dsample_Sample_echoes(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__htjhnmfbc7izmk(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__hqi5gb74dbjyxo(lean_object*, lean_object*);
+lean_object* lp_leo4_x2dsample_Sample_asyncHalveF32(float);
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncHalveF32__f32__hqi5gb74dbjyxo(float);
+LEAN_EXPORT lean_object* l___leo4__export__asyncHalveF32__f32___boxed(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l___private_Init_Data_Range_Basic_0__Std_Legacy_Range_forIn_x27_loop___at___00__leo4__marshal__Rat__dec_spec__0___redArg(lean_object* x_1, lean_object* x_2, lean_object* x_3, lean_object* x_4) {
 _start:
 {
@@ -1297,7 +1306,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__b_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__b__htjhnmfbc7izmk(uint8_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__b__hqi5gb74dbjyxo(uint8_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1310,7 +1319,7 @@ _start:
 {
 uint8_t x_2; lean_object* x_3; 
 x_2 = lean_unbox(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__b__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__b__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1322,7 +1331,7 @@ x_2 = l_Nat_reprFast(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bN__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bN__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1346,7 +1355,7 @@ lean_dec_ref(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__str__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__str__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 return x_1;
@@ -1391,7 +1400,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bI__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__bI__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1418,7 +1427,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__u8_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u8__htjhnmfbc7izmk(uint8_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u8__hqi5gb74dbjyxo(uint8_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1431,7 +1440,7 @@ _start:
 {
 uint8_t x_2; lean_object* x_3; 
 x_2 = lean_unbox(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u8__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u8__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1453,7 +1462,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__f32_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f32__htjhnmfbc7izmk(float x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f32__hqi5gb74dbjyxo(float x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1467,7 +1476,7 @@ _start:
 float x_2; lean_object* x_3; 
 x_2 = lean_unbox_float32(x_1);
 lean_dec_ref(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__f32__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__f32__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1514,7 +1523,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__i32_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i32__htjhnmfbc7izmk(uint32_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i32__hqi5gb74dbjyxo(uint32_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1528,7 +1537,7 @@ _start:
 uint32_t x_2; lean_object* x_3; 
 x_2 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i32__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i32__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1550,7 +1559,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__u16_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u16__htjhnmfbc7izmk(uint16_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u16__hqi5gb74dbjyxo(uint16_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1563,7 +1572,7 @@ _start:
 {
 uint16_t x_2; lean_object* x_3; 
 x_2 = lean_unbox(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u16__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u16__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1610,7 +1619,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__i64_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i64__htjhnmfbc7izmk(uint64_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i64__hqi5gb74dbjyxo(uint64_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1624,7 +1633,7 @@ _start:
 uint64_t x_2; lean_object* x_3; 
 x_2 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i64__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i64__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1712,7 +1721,7 @@ return x_8;
 }
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__S_Rat_s__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__S_Rat_s__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1739,7 +1748,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__u64_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u64__htjhnmfbc7izmk(uint64_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u64__hqi5gb74dbjyxo(uint64_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1753,7 +1762,7 @@ _start:
 uint64_t x_2; lean_object* x_3; 
 x_2 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u64__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u64__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1775,7 +1784,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__f64_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f64__htjhnmfbc7izmk(double x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__f64__hqi5gb74dbjyxo(double x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1789,7 +1798,7 @@ _start:
 double x_2; lean_object* x_3; 
 x_2 = lean_unbox_float(x_1);
 lean_dec_ref(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__f64__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__f64__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1833,7 +1842,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__i8_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i8__htjhnmfbc7izmk(uint8_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i8__hqi5gb74dbjyxo(uint8_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1846,7 +1855,7 @@ _start:
 {
 uint8_t x_2; lean_object* x_3; 
 x_2 = lean_unbox(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i8__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i8__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1890,7 +1899,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__i16_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i16__htjhnmfbc7izmk(uint16_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__i16__hqi5gb74dbjyxo(uint16_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1903,7 +1912,7 @@ _start:
 {
 uint16_t x_2; lean_object* x_3; 
 x_2 = lean_unbox(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i16__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__i16__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1926,7 +1935,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__u32_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u32__htjhnmfbc7izmk(uint32_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__u32__hqi5gb74dbjyxo(uint32_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1940,7 +1949,7 @@ _start:
 uint32_t x_2; lean_object* x_3; 
 x_2 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u32__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__u32__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
@@ -1963,7 +1972,7 @@ x_3 = l_Sample_stringify___at___00__leo4__export__stringify__c_spec__0(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__c__htjhnmfbc7izmk(uint32_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__stringify__c__hqi5gb74dbjyxo(uint32_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -1977,11 +1986,11 @@ _start:
 uint32_t x_2; lean_object* x_3; 
 x_2 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__c__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__stringify__c__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; uint32_t x_3; 
@@ -1997,12 +2006,12 @@ LEAN_EXPORT lean_object* l___leo4__export__pairSndU64U32__S__Sample__Pair__u64__
 _start:
 {
 uint32_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__pairSndU64U32__S_Sample_Pair_u64_u32_s__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box_uint32(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__htjhnmfbc7izmk(uint64_t x_1, uint64_t x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__hqi5gb74dbjyxo(uint64_t x_1, uint64_t x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -2018,11 +2027,11 @@ x_3 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
 x_4 = lean_unbox_uint64(x_2);
 lean_dec_ref(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__safeDiv__u64_u64__hqi5gb74dbjyxo(x_3, x_4);
 return x_5;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 uint8_t x_2; 
@@ -2035,12 +2044,12 @@ LEAN_EXPORT lean_object* l___leo4__export__exprIsLit__V__Sample__Expr__v___boxed
 _start:
 {
 uint8_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__exprIsLit__V_Sample_Expr_v__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 uint8_t x_2; 
@@ -2053,12 +2062,12 @@ LEAN_EXPORT lean_object* l___leo4__export__stmtIsNop__V__Sample__Stmt__v___boxed
 _start:
 {
 uint8_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__stmtIsNop__V_Sample_Stmt_v__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; uint64_t x_3; 
@@ -2074,12 +2083,12 @@ LEAN_EXPORT lean_object* l___leo4__export__pairFstU64U32__S__Sample__Pair__u64__
 _start:
 {
 uint64_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__pairFstU64U32__S_Sample_Pair_u64_u32_s__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box_uint64(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__mulComplexF64x2__S_Leo4_LeanComplexF64x2_s_S_Leo4_LeanComplexF64x2_s__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__mulComplexF64x2__S_Leo4_LeanComplexF64x2_s_S_Leo4_LeanComplexF64x2_s__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -2088,7 +2097,7 @@ lean_dec_ref(x_1);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncDouble__u64__htjhnmfbc7izmk(uint64_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncDouble__u64__hqi5gb74dbjyxo(uint64_t x_1) {
 _start:
 {
 lean_object* x_3; 
@@ -2102,11 +2111,11 @@ _start:
 uint64_t x_3; lean_object* x_4; 
 x_3 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
-x_4 = leo4_lean__leo4__leo4_sample__Sample__asyncDouble__u64__htjhnmfbc7izmk(x_3);
+x_4 = leo4_lean__leo4__leo4_sample__Sample__asyncDouble__u64__hqi5gb74dbjyxo(x_3);
 return x_4;
 }
 }
-LEAN_EXPORT double leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT double leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 double x_2; 
@@ -2119,12 +2128,30 @@ LEAN_EXPORT lean_object* l___leo4__export__pointSum__S__Sample__Point__s___boxed
 _start:
 {
 double x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__pointSum__S_Sample_Point_s__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box_float(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncNegate__i32__hqi5gb74dbjyxo(uint32_t x_1) {
+_start:
+{
+lean_object* x_3; 
+x_3 = lp_leo4_x2dsample_Sample_asyncNegate(x_1);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* l___leo4__export__asyncNegate__i32___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint32_t x_3; lean_object* x_4; 
+x_3 = lean_unbox_uint32(x_1);
+lean_dec(x_1);
+x_4 = leo4_lean__leo4__leo4_sample__Sample__asyncNegate__i32__hqi5gb74dbjyxo(x_3);
+return x_4;
+}
+}
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 uint64_t x_2; 
@@ -2137,7 +2164,7 @@ LEAN_EXPORT lean_object* l___leo4__export__pairAdd__T__u64__u32__t___boxed(lean_
 _start:
 {
 uint64_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__pairAdd__T_u64_u32_t__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box_uint64(x_2);
 return x_3;
 }
@@ -2170,7 +2197,7 @@ x_6 = lean_box_uint64(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__htjhnmfbc7izmk(uint64_t x_1, uint64_t x_2) {
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__hqi5gb74dbjyxo(uint64_t x_1, uint64_t x_2) {
 _start:
 {
 uint64_t x_3; 
@@ -2186,7 +2213,7 @@ x_3 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
 x_4 = lean_unbox_uint64(x_2);
 lean_dec_ref(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i64_i64__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box_uint64(x_5);
 return x_6;
 }
@@ -2229,7 +2256,7 @@ x_6 = lean_box(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__htjhnmfbc7izmk(uint8_t x_1, uint8_t x_2) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__hqi5gb74dbjyxo(uint8_t x_1, uint8_t x_2) {
 _start:
 {
 uint8_t x_3; 
@@ -2243,7 +2270,7 @@ _start:
 uint8_t x_3; uint8_t x_4; uint8_t x_5; lean_object* x_6; 
 x_3 = lean_unbox(x_1);
 x_4 = lean_unbox(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__b_b__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box(x_5);
 return x_6;
 }
@@ -2274,7 +2301,7 @@ x_6 = lean_box(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__htjhnmfbc7izmk(uint16_t x_1, uint16_t x_2) {
+LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__hqi5gb74dbjyxo(uint16_t x_1, uint16_t x_2) {
 _start:
 {
 uint16_t x_3; 
@@ -2288,7 +2315,7 @@ _start:
 uint16_t x_3; uint16_t x_4; uint16_t x_5; lean_object* x_6; 
 x_3 = lean_unbox(x_1);
 x_4 = lean_unbox(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u16_u16__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box(x_5);
 return x_6;
 }
@@ -2320,7 +2347,7 @@ lean_dec_ref(x_1);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__str_str__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -2358,7 +2385,7 @@ x_6 = lean_box_uint64(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__htjhnmfbc7izmk(uint64_t x_1, uint64_t x_2) {
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__hqi5gb74dbjyxo(uint64_t x_1, uint64_t x_2) {
 _start:
 {
 uint64_t x_3; 
@@ -2374,7 +2401,7 @@ x_3 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
 x_4 = lean_unbox_uint64(x_2);
 lean_dec_ref(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u64_u64__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box_uint64(x_5);
 return x_6;
 }
@@ -2405,7 +2432,7 @@ x_6 = lean_box(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__htjhnmfbc7izmk(uint8_t x_1, uint8_t x_2) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__hqi5gb74dbjyxo(uint8_t x_1, uint8_t x_2) {
 _start:
 {
 uint8_t x_3; 
@@ -2419,7 +2446,7 @@ _start:
 uint8_t x_3; uint8_t x_4; uint8_t x_5; lean_object* x_6; 
 x_3 = lean_unbox(x_1);
 x_4 = lean_unbox(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u8_u8__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box(x_5);
 return x_6;
 }
@@ -2452,7 +2479,7 @@ x_6 = lean_box_uint32(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__htjhnmfbc7izmk(uint32_t x_1, uint32_t x_2) {
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__hqi5gb74dbjyxo(uint32_t x_1, uint32_t x_2) {
 _start:
 {
 uint32_t x_3; 
@@ -2468,7 +2495,7 @@ x_3 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
 x_4 = lean_unbox_uint32(x_2);
 lean_dec(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__u32_u32__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box_uint32(x_5);
 return x_6;
 }
@@ -2499,7 +2526,7 @@ x_6 = lean_box(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__htjhnmfbc7izmk(uint16_t x_1, uint16_t x_2) {
+LEAN_EXPORT uint16_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__hqi5gb74dbjyxo(uint16_t x_1, uint16_t x_2) {
 _start:
 {
 uint16_t x_3; 
@@ -2513,7 +2540,7 @@ _start:
 uint16_t x_3; uint16_t x_4; uint16_t x_5; lean_object* x_6; 
 x_3 = lean_unbox(x_1);
 x_4 = lean_unbox(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i16_i16__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box(x_5);
 return x_6;
 }
@@ -2545,7 +2572,7 @@ lean_dec(x_1);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bI_bI__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -2582,7 +2609,7 @@ lean_dec(x_1);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__maxScalar__bN_bN__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -2618,7 +2645,7 @@ x_6 = lean_box(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__htjhnmfbc7izmk(uint8_t x_1, uint8_t x_2) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__hqi5gb74dbjyxo(uint8_t x_1, uint8_t x_2) {
 _start:
 {
 uint8_t x_3; 
@@ -2632,7 +2659,7 @@ _start:
 uint8_t x_3; uint8_t x_4; uint8_t x_5; lean_object* x_6; 
 x_3 = lean_unbox(x_1);
 x_4 = lean_unbox(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i8_i8__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box(x_5);
 return x_6;
 }
@@ -2665,7 +2692,7 @@ x_6 = lean_box_uint32(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__htjhnmfbc7izmk(uint32_t x_1, uint32_t x_2) {
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__hqi5gb74dbjyxo(uint32_t x_1, uint32_t x_2) {
 _start:
 {
 uint32_t x_3; 
@@ -2681,7 +2708,7 @@ x_3 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
 x_4 = lean_unbox_uint32(x_2);
 lean_dec(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__i32_i32__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box_uint32(x_5);
 return x_6;
 }
@@ -2714,7 +2741,7 @@ x_6 = lean_box_uint32(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__htjhnmfbc7izmk(uint32_t x_1, uint32_t x_2) {
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__hqi5gb74dbjyxo(uint32_t x_1, uint32_t x_2) {
 _start:
 {
 uint32_t x_3; 
@@ -2730,12 +2757,12 @@ x_3 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
 x_4 = lean_unbox_uint32(x_2);
 lean_dec(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__maxScalar__c_c__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box_uint32(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__htjhnmfbc7izmk(uint64_t x_1, uint64_t x_2) {
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__hqi5gb74dbjyxo(uint64_t x_1, uint64_t x_2) {
 _start:
 {
 uint64_t x_3; 
@@ -2751,12 +2778,12 @@ x_3 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
 x_4 = lean_unbox_uint64(x_2);
 lean_dec_ref(x_2);
-x_5 = leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__htjhnmfbc7izmk(x_3, x_4);
+x_5 = leo4_lean__leo4__leo4_sample__Sample__add__u64_u64__hqi5gb74dbjyxo(x_3, x_4);
 x_6 = lean_box_uint64(x_5);
 return x_6;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 uint64_t x_2; 
@@ -2769,12 +2796,12 @@ LEAN_EXPORT lean_object* l___leo4__export__listSumU64__L__u64__l___boxed(lean_ob
 _start:
 {
 uint64_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__listSumU64__L_u64_l__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box_uint64(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__hello____hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2782,7 +2809,7 @@ x_2 = ((lean_object*)(l___leo4__export__hello___00__closed__0));
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addU128__S_Leo4_LeanU128_s_S_Leo4_LeanU128_s__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addU128__S_Leo4_LeanU128_s_S_Leo4_LeanU128_s__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -2791,7 +2818,7 @@ lean_dec_ref(x_1);
 return x_3;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 uint8_t x_2; 
@@ -2804,12 +2831,12 @@ LEAN_EXPORT lean_object* l___leo4__export__isLeaf__V__Sample__Tree__v___boxed(le
 _start:
 {
 uint8_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__isLeaf__V_Sample_Tree_v__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__parseU64__str__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__parseU64__str__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2817,7 +2844,7 @@ x_2 = lp_leo4_x2dsample_Sample_parseU64(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listConcat__L_str_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2826,7 +2853,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_b_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2835,7 +2862,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_c_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2844,7 +2871,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_str_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2853,7 +2880,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bI_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2862,7 +2889,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_bN_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2871,7 +2898,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u8_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2880,7 +2907,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u16_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2889,7 +2916,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u32_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2898,7 +2925,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_u64_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2907,7 +2934,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i8_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2916,7 +2943,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i16_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2925,7 +2952,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i32_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2934,7 +2961,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_i64_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2943,7 +2970,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f32_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2952,7 +2979,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__listLen__L_f64_l__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2961,7 +2988,7 @@ lean_dec(x_1);
 return x_2;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__htjhnmfbc7izmk(uint8_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__hqi5gb74dbjyxo(uint8_t x_1) {
 _start:
 {
 lean_object* x_2; 
@@ -2974,11 +3001,11 @@ _start:
 {
 uint8_t x_2; lean_object* x_3; 
 x_2 = lean_unbox(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__colorName__E_Sample_Color_e__hqi5gb74dbjyxo(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__htjhnmfbc7izmk(uint32_t x_1) {
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__hqi5gb74dbjyxo(uint32_t x_1) {
 _start:
 {
 uint32_t x_2; 
@@ -2992,12 +3019,12 @@ _start:
 uint32_t x_2; uint32_t x_3; lean_object* x_4; 
 x_2 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__doubleVal__u32__hqi5gb74dbjyxo(x_2);
 x_4 = lean_box_uint32(x_3);
 return x_4;
 }
 }
-LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__htjhnmfbc7izmk(lean_object* x_1) {
+LEAN_EXPORT uint8_t leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__hqi5gb74dbjyxo(lean_object* x_1) {
 _start:
 {
 uint8_t x_2; 
@@ -3010,12 +3037,12 @@ LEAN_EXPORT lean_object* l___leo4__export__eitherTaggedU64String__V__Sample__Eit
 _start:
 {
 uint8_t x_2; lean_object* x_3; 
-x_2 = leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__htjhnmfbc7izmk(x_1);
+x_2 = leo4_lean__leo4__leo4_sample__Sample__eitherTaggedU64String__V_Sample_Either_u64_str_v__hqi5gb74dbjyxo(x_1);
 x_3 = lean_box(x_2);
 return x_3;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addRat__S_Rat_s_S_Rat_s__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__addRat__S_Rat_s_S_Rat_s__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
@@ -3023,7 +3050,25 @@ x_3 = l_Rat_add(x_1, x_2);
 return x_3;
 }
 }
-LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__htjhnmfbc7izmk(uint64_t x_1) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncHalveF64__f64__hqi5gb74dbjyxo(double x_1) {
+_start:
+{
+lean_object* x_3; 
+x_3 = lp_leo4_x2dsample_Sample_asyncHalveF64(x_1);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* l___leo4__export__asyncHalveF64__f64___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+double x_3; lean_object* x_4; 
+x_3 = lean_unbox_float(x_1);
+lean_dec_ref(x_1);
+x_4 = leo4_lean__leo4__leo4_sample__Sample__asyncHalveF64__f64__hqi5gb74dbjyxo(x_3);
+return x_4;
+}
+}
+LEAN_EXPORT uint64_t leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__hqi5gb74dbjyxo(uint64_t x_1) {
 _start:
 {
 return x_1;
@@ -3035,12 +3080,12 @@ _start:
 uint64_t x_2; uint64_t x_3; lean_object* x_4; 
 x_2 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__parserId__X_Sample_ParserHandle_x__hqi5gb74dbjyxo(x_2);
 x_4 = lean_box_uint64(x_3);
 return x_4;
 }
 }
-LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__htjhnmfbc7izmk(uint32_t x_1) {
+LEAN_EXPORT uint32_t leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__hqi5gb74dbjyxo(uint32_t x_1) {
 _start:
 {
 uint32_t x_2; 
@@ -3054,17 +3099,35 @@ _start:
 uint32_t x_2; uint32_t x_3; lean_object* x_4; 
 x_2 = lean_unbox_uint32(x_1);
 lean_dec(x_1);
-x_3 = leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__htjhnmfbc7izmk(x_2);
+x_3 = leo4_lean__leo4__leo4_sample__Sample__constantFortyTwo__u32__hqi5gb74dbjyxo(x_2);
 x_4 = lean_box_uint32(x_3);
 return x_4;
 }
 }
-LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__htjhnmfbc7izmk(lean_object* x_1, lean_object* x_2) {
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__echoes__L_u32_l_bN__hqi5gb74dbjyxo(lean_object* x_1, lean_object* x_2) {
 _start:
 {
 lean_object* x_3; 
 x_3 = lp_leo4_x2dsample_Sample_echoes(x_1, x_2);
 return x_3;
+}
+}
+LEAN_EXPORT lean_object* leo4_lean__leo4__leo4_sample__Sample__asyncHalveF32__f32__hqi5gb74dbjyxo(float x_1) {
+_start:
+{
+lean_object* x_3; 
+x_3 = lp_leo4_x2dsample_Sample_asyncHalveF32(x_1);
+return x_3;
+}
+}
+LEAN_EXPORT lean_object* l___leo4__export__asyncHalveF32__f32___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+float x_3; lean_object* x_4; 
+x_3 = lean_unbox_float32(x_1);
+lean_dec_ref(x_1);
+x_4 = leo4_lean__leo4__leo4_sample__Sample__asyncHalveF32__f32__hqi5gb74dbjyxo(x_3);
+return x_4;
 }
 }
 lean_object* initialize_Init(uint8_t builtin);

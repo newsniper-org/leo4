@@ -245,6 +245,21 @@ LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2___boxed(lean_o
 uint64_t lean_uint64_shift_left(uint64_t, uint64_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncDouble(uint64_t);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncDouble___boxed(lean_object*, lean_object*);
+uint32_t lean_int32_neg(uint32_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncNegate(uint32_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncNegate___boxed(lean_object*, lean_object*);
+double l_Float_ofScientific(lean_object*, uint8_t, lean_object*);
+static lean_once_cell_t lp_leo4_x2dsample_Sample_asyncHalveF64___closed__0_once = LEAN_ONCE_CELL_INITIALIZER;
+static double lp_leo4_x2dsample_Sample_asyncHalveF64___closed__0;
+double lean_float_div(double, double);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF64(double);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF64___boxed(lean_object*, lean_object*);
+float l_Float32_ofScientific(lean_object*, uint8_t, lean_object*);
+static lean_once_cell_t lp_leo4_x2dsample_Sample_asyncHalveF32___closed__0_once = LEAN_ONCE_CELL_INITIALIZER;
+static float lp_leo4_x2dsample_Sample_asyncHalveF32___closed__0;
+float lean_float32_div(float, float);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF32(float);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF32___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -4315,6 +4330,93 @@ uint64_t x_3; lean_object* x_4;
 x_3 = lean_unbox_uint64(x_1);
 lean_dec_ref(x_1);
 x_4 = lp_leo4_x2dsample_Sample_asyncDouble(x_3);
+return x_4;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncNegate(uint32_t x_1) {
+_start:
+{
+uint32_t x_3; lean_object* x_4; lean_object* x_5; 
+x_3 = lean_int32_neg(x_1);
+x_4 = lean_box_uint32(x_3);
+x_5 = lean_alloc_ctor(0, 1, 0);
+lean_ctor_set(x_5, 0, x_4);
+return x_5;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncNegate___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint32_t x_3; lean_object* x_4; 
+x_3 = lean_unbox_uint32(x_1);
+lean_dec(x_1);
+x_4 = lp_leo4_x2dsample_Sample_asyncNegate(x_3);
+return x_4;
+}
+}
+static double _init_lp_leo4_x2dsample_Sample_asyncHalveF64___closed__0(void) {
+_start:
+{
+lean_object* x_1; uint8_t x_2; lean_object* x_3; double x_4; 
+x_1 = lean_unsigned_to_nat(1u);
+x_2 = 1;
+x_3 = lean_unsigned_to_nat(20u);
+x_4 = l_Float_ofScientific(x_3, x_2, x_1);
+return x_4;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF64(double x_1) {
+_start:
+{
+double x_3; double x_4; lean_object* x_5; lean_object* x_6; 
+x_3 = lean_float_once(&lp_leo4_x2dsample_Sample_asyncHalveF64___closed__0, &lp_leo4_x2dsample_Sample_asyncHalveF64___closed__0_once, _init_lp_leo4_x2dsample_Sample_asyncHalveF64___closed__0);
+x_4 = lean_float_div(x_1, x_3);
+x_5 = lean_box_float(x_4);
+x_6 = lean_alloc_ctor(0, 1, 0);
+lean_ctor_set(x_6, 0, x_5);
+return x_6;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF64___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+double x_3; lean_object* x_4; 
+x_3 = lean_unbox_float(x_1);
+lean_dec_ref(x_1);
+x_4 = lp_leo4_x2dsample_Sample_asyncHalveF64(x_3);
+return x_4;
+}
+}
+static float _init_lp_leo4_x2dsample_Sample_asyncHalveF32___closed__0(void) {
+_start:
+{
+lean_object* x_1; uint8_t x_2; lean_object* x_3; float x_4; 
+x_1 = lean_unsigned_to_nat(1u);
+x_2 = 1;
+x_3 = lean_unsigned_to_nat(20u);
+x_4 = l_Float32_ofScientific(x_3, x_2, x_1);
+return x_4;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF32(float x_1) {
+_start:
+{
+float x_3; float x_4; lean_object* x_5; lean_object* x_6; 
+x_3 = lean_float32_once(&lp_leo4_x2dsample_Sample_asyncHalveF32___closed__0, &lp_leo4_x2dsample_Sample_asyncHalveF32___closed__0_once, _init_lp_leo4_x2dsample_Sample_asyncHalveF32___closed__0);
+x_4 = lean_float32_div(x_1, x_3);
+x_5 = lean_box_float32(x_4);
+x_6 = lean_alloc_ctor(0, 1, 0);
+lean_ctor_set(x_6, 0, x_5);
+return x_6;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncHalveF32___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+float x_3; lean_object* x_4; 
+x_3 = lean_unbox_float32(x_1);
+lean_dec_ref(x_1);
+x_4 = lp_leo4_x2dsample_Sample_asyncHalveF32(x_3);
 return x_4;
 }
 }

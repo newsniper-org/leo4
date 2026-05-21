@@ -1710,24 +1710,20 @@ private def renderOneShim
       -- we extract the inner α via `lean_io_result_get_value`; on
       -- `.error` we return `LEO4_ERR_IO_FAILED` (SPEC §13 Lean
       -- panic / IO failure range, `0x0001_0000` base).
-      -- Pick the right unbox helper per cType. UInt32 / UInt64
-      -- heap-box on platforms where the value can exceed
-      -- size_t-1 bits, so they need their type-specific
-      -- `lean_unbox_uint{32,64}`. Smaller widths (uint8 / uint16)
-      -- always pack via `lean_unbox`. Signed / floats / etc. need
-      -- their own helpers and aren't wired yet — flagged with a
-      -- /* TODO */ comment so step 2c picks them up.
+      -- Pick the right unbox helper per cType. Reuses `scalarUnbox`
+      -- (Phase 7 step 2c, 2026-05-21) which already covers
+      -- uint8/16 via `lean_unbox`, uint32/64 via the wide-int
+      -- helpers, float via `lean_unbox_float32`, and double via
+      -- `lean_unbox_float`. Signed scalars share their unsigned
+      -- counterpart's cType in the shim (Wire and Lean native ABI
+      -- agree on bit pattern; see comment near scalarCType), so
+      -- the same dispatch handles i8..i64 with bit-identical
+      -- unbox + sign reinterpretation by C cast at the call site.
       let valueExtract : String :=
         if retH.ownsRef then
           "lean_io_result_get_value(_io_res)"
-        else if retH.cType == "uint64_t" then
-          "lean_unbox_uint64(lean_io_result_get_value(_io_res))"
-        else if retH.cType == "uint32_t" then
-          "(uint32_t)lean_unbox_uint32(lean_io_result_get_value(_io_res))"
-        else if retH.cType == "uint8_t" || retH.cType == "uint16_t" then
-          s!"({retH.cType})lean_unbox(lean_io_result_get_value(_io_res))"
         else
-          s!"({retH.cType})lean_unbox(lean_io_result_get_value(_io_res))  /* TODO Phase 7 step 2c: typed unbox for {retH.cType} */"
+          scalarUnbox retH.cType "lean_io_result_get_value(_io_res)"
       let incIfOwned :=
         if retH.ownsRef then "    lean_inc(r);\n" else ""
       "    lean_object *_io_res = " ++ invoke ++ ";\n" ++

@@ -66,6 +66,10 @@ mod sample {
         // `lean_io_result_is_ok` / `_get_value` so the wire format
         // after unwrap is the same as a sync u64 return.
         fn asyncDouble(n: u64) -> u64;
+        // Phase 7 step 2c: IO unwrap for signed + float scalars.
+        fn asyncNegate(n: i32) -> i32;
+        fn asyncHalveF64(x: f64) -> f64;
+        fn asyncHalveF32(x: f32) -> f32;
     }
 }
 
@@ -229,6 +233,19 @@ fn main() -> Result<(), leo4::LeanError> {
     let doubled = sample::asyncDouble(&lean, 21)?;
     assert_eq!(doubled, 42);
     println!("asyncDouble(21) = {doubled}");
+
+    // Phase 7 step 2c: signed / float IO unwrap.
+    let neg = sample::asyncNegate(&lean, -7_i32)?;
+    assert_eq!(neg, 7);
+    println!("asyncNegate(-7) = {neg}");
+
+    let half64 = sample::asyncHalveF64(&lean, 100.0_f64)?;
+    assert_eq!(half64, 50.0);
+    println!("asyncHalveF64(100.0) = {half64}");
+
+    let half32 = sample::asyncHalveF32(&lean, 4.0_f32)?;
+    assert_eq!(half32, 2.0);
+    println!("asyncHalveF32(4.0) = {half32}");
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

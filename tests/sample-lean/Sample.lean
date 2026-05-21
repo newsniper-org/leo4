@@ -234,5 +234,18 @@ def mulComplexF64x2 (a b : Leo4.LeanComplexF64x2) : Leo4.LeanComplexF64x2 :=
 @[leo4_export]
 def asyncDouble (n : UInt64) : IO UInt64 := return n * 2
 
+-- Phase 7 step 2c: `IO α` with signed + float return types.
+-- Exercises scalarUnbox's int{8..64} / float / double paths so
+-- the IO unwrap stays correct across the full scalar set.
+
+@[leo4_export]
+def asyncNegate (n : Int32) : IO Int32 := return -n
+
+@[leo4_export]
+def asyncHalveF64 (x : Float) : IO Float := return x / 2.0
+
+@[leo4_export]
+def asyncHalveF32 (x : Float32) : IO Float32 := return x / 2.0
+
 
 end Sample
