@@ -55,14 +55,41 @@ Follow-ups landed (2026-05-21):
   embeddings via `Rat.cast`. Lean core `Rat` IS Mathlib `ℚ`, so
   no separate `LeanRat` Lean struct exists; the bridge just
   surfaces the `ℝ`/`ℂ` lifts.
-- **Reverse-direction stubs** for the rounding-lossy cases:
-  `LeanComplexF{32,64}x2.ofComplex`, `LeanF{16,128}.ofReal`,
-  `LeanBF16.ofReal`, `LeanComplexF{16,128}x2.ofComplex`,
-  `LeanComplexBF16x2.ofComplex` — all `noncomputable def … :=
-  default`. Function symbols exist for downstream proof
-  references; real implementations land when a rounding-mode
-  policy (IEEE-754 RTNE, truncate, …) is pinned. Not for
-  runtime use.
+
+### Changed — Mathlib bridge reverse direction: RTNE pinned + real implementations (2026-05-21)
+
+Rounding mode pinned: **IEEE-754 round-to-nearest-even (RTNE)**.
+That's what `Float.div` and the host FPU already use across
+platforms (per IEEE-754 §4.3.1); adopting it as the leo4
+convention keeps the abstract-Real reverse path consistent with
+the round-trip downstream native code already performs.
+
+Three implementation layers per format, replacing the earlier
+`noncomputable … := default` stubs:
+
+1. **Float-level narrowing** (`Float.toLean{F16,BF16}RTNE`)
+   — manual IEEE bit-level conversion (guard / round / sticky
+   bits, mantissa-overflow round-up, special-case Inf / NaN /
+   subnormal / overflow / underflow). `Float.toLeanF128` widens
+   exactly (binary64 ⊂ binary128).
+2. **`Rat`-based** (`Rat.toFloat`, `Rat.toFloat32`,
+   `Rat.toLeanF{16,BF16,128}`) — computable, RTNE via Lean
+   stdlib's `Float.ofInt` / `.ofNat` + `Float.div` + the
+   narrowing helpers above. Precision loss is bounded by `num` /
+   `den` conversion (when magnitudes exceed 2^53).
+3. **Abstract `ℝ`** (`Real.toFloatRTNE`,
+   `LeanF{16,BF16,128}.ofReal`, matching complex `ofComplex`)
+   — `noncomputable` via `Classical.choice`. The mathematical
+   meaning is RTNE-rounded; the function symbol exists for
+   downstream proof references. Runtime use goes through the
+   Rat path.
+
+Sibling test fixture exercises both the computable Rat path
+(plain `example`) and the noncomputable abstract path
+(`noncomputable example`).
+
+Outstanding: subnormal binary64 → binary128 normalisation in
+`Float.toLeanF128` (rare boundary, currently returns ±0).
 
 No regression: main `lake/Leo4` lib builds in 12 jobs (bridge
 files not in import graph). `just smoke-plugin` + `cargo test
