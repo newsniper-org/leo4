@@ -41,15 +41,28 @@ them out of the main `Leo4` lib's compile graph:
   F32 carrier). Forward direction only — reverse is
   rounding-lossy and waits for a concrete rounding-mode decision.
 
-Deferred:
-- `MathlibBridge.NightlyFloats` — needs IEEE binary16 / bfloat16 /
-  binary128 bit-decode in Lean (no native types in Lean core).
-  Scoped for a future commit once we have the float-decode
-  helper code.
-- Reverse-direction `Complex ℝ → LeanComplexF*x2` — requires a
-  rounding-mode choice.
-- `ZMod / Fin (2^128)` conversions for the Wide bridge — separate
-  add-on commit when a consumer needs them.
+Follow-ups landed (2026-05-21):
+
+- **`MathlibBridge.NightlyFloats`** — `LeanF16` / `LeanBF16` /
+  `LeanF128` and the three complex carriers → `ℝ` / `ℂ` via
+  direct IEEE bit-decode arithmetic on `Nat` field extracts
+  (sidesteps subnormal-pattern mismatch the bit-widening route
+  would have). NaN / Inf map to `0 : ℝ` by convention.
+- **Wide bridge ZMod / Fin** — `LeanU128` / `LeanI128` ↔ `ZMod
+  (2^128)` (which is `Fin (2^128)` for Mathlib's positive-`n`
+  case).
+- **`MathlibBridge.Rat`** — `Rat → ℝ` / `Rat → ℂ` total
+  embeddings via `Rat.cast`. Lean core `Rat` IS Mathlib `ℚ`, so
+  no separate `LeanRat` Lean struct exists; the bridge just
+  surfaces the `ℝ`/`ℂ` lifts.
+- **Reverse-direction stubs** for the rounding-lossy cases:
+  `LeanComplexF{32,64}x2.ofComplex`, `LeanF{16,128}.ofReal`,
+  `LeanBF16.ofReal`, `LeanComplexF{16,128}x2.ofComplex`,
+  `LeanComplexBF16x2.ofComplex` — all `noncomputable def … :=
+  default`. Function symbols exist for downstream proof
+  references; real implementations land when a rounding-mode
+  policy (IEEE-754 RTNE, truncate, …) is pinned. Not for
+  runtime use.
 
 No regression: main `lake/Leo4` lib builds in 12 jobs (bridge
 files not in import graph). `just smoke-plugin` + `cargo test
