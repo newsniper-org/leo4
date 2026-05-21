@@ -99,6 +99,14 @@ spec-lint:
 schema-hash: smoke-plugin
     @jq -r '.schema_hash' {{sample_pkg}}/.lake/build/leo4/leo4_sample.leo4-handshake
 
+# Type-check every `Leo4.MathlibBridge.*` module against actual
+# Mathlib types. Heavy: Mathlib's cold build is 1-2 hours. NOT on the
+# default `just test` ladder — invoke explicitly when bridge code
+# changes. First run pulls Mathlib via Lake's reservoir; subsequent
+# runs hit the local `.lake` cache.
+mathlib-bridge-test:
+    cd sibling/mathlib-bridge-test && lake build
+
 # ─── Multi-version Lean matrix (Phase 5 prep) ───────────────────────────
 
 # Run `just test` in a hermetic container across the Lean version matrix

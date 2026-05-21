@@ -13,6 +13,13 @@ Current siblings:
   layer stays single-source. Phase 7 lights this up with concrete
   host import bindings and `block_on`-driven async dispatch
   behind a sync user-facing API.
+- **`mathlib-bridge-test/`** — Lake package pulling Mathlib +
+  `Leo4`. Type-checks every `Leo4.MathlibBridge.*` module
+  end-to-end. Mathlib's cold build is 1-2 hours, so this isn't on
+  the default `just test` ladder — `just mathlib-bridge-test`
+  drives it explicitly. First run downloads + compiles all of
+  Mathlib's transitive deps via Lake's reservoir; subsequent runs
+  hit the local `.lake` cache.
 
 Planned (deferred):
 
