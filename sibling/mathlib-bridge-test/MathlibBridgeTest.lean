@@ -82,8 +82,23 @@ noncomputable example : Leo4.LeanComplexF32x2 :=
 example : Real := Leo4.Rat.toReal (0 : Rat)
 example : Complex := Leo4.Rat.toComplex (0 : Rat)
 
--- Nightly-float reverse stubs (`noncomputable`).
+-- Nightly-float reverse — now real implementations via the Rat
+-- path (`Rat → Float → LeanF{16,BF16,128}` with RTNE) plus the
+-- noncomputable abstract-ℝ stubs.
 
+example : Leo4.LeanF16 := Leo4.Rat.toLeanF16 (1/2)
+example : Leo4.LeanBF16 := Leo4.Rat.toLeanBF16 (1/2)
+example : Leo4.LeanF128 := Leo4.Rat.toLeanF128 (1/2)
+example : Leo4.LeanComplexF16x2 :=
+  Leo4.LeanComplexF16x2.ofRat (1/2) (-1/4)
+example : Leo4.LeanComplexBF16x2 :=
+  Leo4.LeanComplexBF16x2.ofRat (1/2) (-1/4)
+example : Leo4.LeanComplexF128x2 :=
+  Leo4.LeanComplexF128x2.ofRat 1 (-2)
+
+-- Abstract `ℝ → LeanF*` still noncomputable (Mathlib's ℝ has no
+-- constructive Float-rounding); function symbols exist for proof
+-- references.
 noncomputable example : Leo4.LeanF16 := Leo4.LeanF16.ofReal 0
 noncomputable example : Leo4.LeanBF16 := Leo4.LeanBF16.ofReal 0
 noncomputable example : Leo4.LeanF128 := Leo4.LeanF128.ofReal 0
