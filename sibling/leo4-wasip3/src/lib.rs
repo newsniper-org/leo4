@@ -1,62 +1,88 @@
 //! leo4-wasip3 — WASIp3 backend for leo4.
 //!
-//! This sibling project is intentionally outside the main leo4 Cargo
-//! workspace so it can pin nightly Rust + the `wasip3` crate without
-//! perturbing the main workspace's stable-Rust contract. Its
-//! `rust-toolchain.toml` and `Cargo.toml` declare the nightly +
-//! wasm32-wasip3 target requirements.
+//! Compiles on **stable Rust** targeting `wasm32-wasip2` against
+//! the `wasip3` crate's WASIp3 API bindings. The earlier nightly
+//! requirement (and the WASIp3 target itself being tier 3) is
+//! moot for our purposes — `wasip3` v0.6 ships the WASIp3 surface
+//! as compat shims on wasip2's Component Model.
 //!
 //! ## API surface
 //!
-//! Per the discussion crystallised on 2026-05-20, the user-facing
-//! Rust API is **sync on both native and wasm targets**. The wasm
-//! side uses `futures::executor::block_on` (or `wasmtime_wasi::block_on`
-//! depending on host) inside the sync export to drive any
-//! `wasip3` async sub-task — WASIp3 explicitly avoids function
-//! coloring so a sync wasm export can call async imports. This lets
-//! the macros emitted by `leo4::import!` keep the same shape on
-//! both targets (no per-target `cfg!` at the call site, no
-//! `async-runtime` runtime dep imposed on default users).
+//! Per the design crystallised on 2026-05-20, the user-facing
+//! Rust API is **sync on both native and wasm targets**. The
+//! wasm side uses `futures::executor::block_on` inside the sync
+//! export to drive any async wasip3 import — WASIp3 explicitly
+//! avoids function coloring so a sync wasm export can call
+//! async imports. `leo4::import!` emits the same `fn add(...)`
+//! signature on native and wasm; the wasm side wraps an internal
+//! async future in `block_on`. No per-target `.await` at the
+//! call site, no `async-runtime` dep forced on default users.
 //!
 //! ## Wire format
 //!
-//! The canonical-ABI encode / decode layer is shared with the main
-//! workspace via the `leo4-abi` path-dep. Only the dispatch layer
-//! (host import call, lifetime / arena semantics) differs from
+//! The canonical-ABI encode / decode layer is shared with the
+//! main workspace via the `leo4-abi` path-dep. Only the dispatch
+//! layer (host import call vs. libloading `.so`) differs from
 //! `crates/leo4-native`.
 //!
-//! ## Status (2026-05-20)
+//! ## Status (2026-05-21)
 //!
-//! Skeleton only. The `wasip3` crate and `wasm32-wasip3` target are
-//! upstream-pending stabilisation; this file describes the planned
-//! shape so the wire-up is unambiguous when those land. Concrete
-//! glue (host import bindings, `block_on` choice, `Lean::open`
-//! equivalent for wasm) arrives in the Phase 7 landing.
+//! Skeleton with real `wasip3` dep wired in. `Lean::open` still
+//! returns an error because the leo4-specific WIT interface
+//! describing the host imports hasn't been pinned yet — that's
+//! a follow-up spec design task. Once `SPEC/wit/leo4-host.wit`
+//! exists, `wit-bindgen` (or `wasip3-bindgen`) generates the
+//! imports we wrap here.
 
 #![allow(clippy::missing_panics_doc, clippy::missing_errors_doc)]
 
 pub use leo4_abi::{LeanError, LeanMarshal};
 
-/// Placeholder. Mirrors the planned `leo4_native::Lean` surface so
-/// downstream code targeting both backends can `use leo4_wasip3::Lean`
-/// (under wasm) or `use leo4_native::Lean` (under native) interchangeably.
+/// Placeholder mirroring the planned `leo4_native::Lean` surface
+/// so downstream code targeting both backends can
+/// `use leo4_wasip3::Lean` interchangeably under wasm.
 ///
-/// **Not yet implemented.** Activates with Phase 7's WASIp3 wire-up.
+/// Future fields (when the WIT design lands):
+///   - host import handle(s) for the schema-hash / handshake
+///     entry point
+///   - import handles for each `@[leo4_export]` mangled symbol,
+///     resolved through `wasip3` Component Model interfaces
+///   - a per-callsite cache analogous to `leo4_native::Lean`'s
+///     `Mutex<HashMap>` (but probably just `RefCell` since the
+///     wasm guest is single-threaded by default)
 pub struct Lean {
     _private: (),
 }
 
 impl Lean {
-    /// Open the WASIp3 component world that exposes the leo4 wrappers.
+    /// Open the WASIp3 component world that exposes the leo4
+    /// wrappers.
+    ///
+    /// **Stub today.** Returns `Err`. The implementation needs:
+    ///
+    /// 1. A pinned WIT interface for leo4 host imports (TBD —
+    ///    `SPEC/wit/leo4-host.wit`).
+    /// 2. `wit-bindgen` / `wasip3-bindgen` invocation in this
+    ///    crate's `build.rs` to generate the imports.
+    /// 3. Replace the body with:
+    ///    `let imports = leo4::host::call_handshake_etc()?;`
+    ///    `Ok(Lean { imports })` with `block_on` wrapping any
+    ///    async wasip3 call.
     ///
     /// # Errors
     ///
-    /// Always returns `Err` today — the WASIp3 host import surface
-    /// isn't wired up yet.
+    /// Always returns `Err` until step (2) is done.
     pub fn open() -> Result<Self, LeanError> {
-        Err(LeanError::new(
-            leo4_abi::error_codes::DECODE_ERROR,
-            "leo4-wasip3: backend not yet implemented (skeleton only)",
-        ))
+        // Demonstrates the `block_on` pattern that future
+        // dispatch sites will use. Replace the future body with
+        // the actual wasip3 import call once the WIT is pinned.
+        let result: Result<Self, LeanError> =
+            futures::executor::block_on(async {
+                Err(LeanError::new(
+                    leo4_abi::error_codes::DECODE_ERROR,
+                    "leo4-wasip3: backend not yet wired (WIT interface design pending — see SPEC/wit/leo4-host.wit follow-up)",
+                ))
+            });
+        result
     }
 }

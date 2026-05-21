@@ -1,3 +1,8 @@
+# Standalone (NOT a member of the main leo4 workspace). The
+# empty `[workspace]` table tells Cargo to stop walking up the
+# directory tree looking for a workspace root.
+[workspace]
+
 [package]
 name        = "leo4-wasip3"
 version     = "0.0.0"
@@ -6,23 +11,27 @@ rust-version = "1.85"
 license     = "MIT OR Apache-2.0"
 authors     = ["윤병익 <yeun0908@gmail.com>"]
 repository  = "https://github.com/Honey-Be/leo4"
-description = "WASIp3 backend for leo4 — sibling project, nightly toolchain. Bridges the leo4 IDL/schema layer to wasip3 async imports while exposing a uniform sync API to user code via `block_on` (no function-coloring per the WASIp3 model)."
+description = "WASIp3 backend for leo4 — sibling project on stable Rust + wasm32-wasip2. Bridges the leo4 IDL/schema layer to wasip3 async imports while exposing a uniform sync API to user code via `block_on` (no function-coloring per the WASIp3 model)."
 
 # NOT a member of the main leo4 workspace. The main workspace
-# (`/Cargo.toml`) pins stable Rust; this sibling pins nightly via
-# `rust-toolchain.toml`. Path-dep into the main workspace's
-# `leo4-abi` (the canonical-ABI marshalling layer) keeps the IDL
-# / wire-format code shared — only the loader / dispatch layer
-# differs between native and wasm.
+# (`/Cargo.toml`) and this sibling each carry their own
+# Cargo.lock to insulate downstream lockfile churn. Both target
+# stable Rust as of 2026-05-21 (the `wasip3` crate stabilised on
+# wasm32-wasip2 with rust-version 1.82, so the original nightly
+# requirement is gone).
 
 [dependencies]
 leo4-abi = { path = "../../crates/leo4-abi" }
 
-# Re-enabled when the WASIp3 surface is finalised in nightly Rust
-# and the `wasip3` crate is published. Until then this sibling is
-# a placeholder showing the wire-up shape.
-# wasip3 = "0.x"
-# futures = { version = "0.3", default-features = false, features = ["executor"] }
+# WASIp3 API bindings — Component Model async I/O on wasm32-wasip2.
+wasip3 = "0.6"
+
+# `futures::executor::block_on` for the sync-API wrapping pattern
+# WASIp3's no-function-coloring model enables: a sync wasm export
+# can `block_on` an async import without coloring the surrounding
+# fn. Default-features off keeps the wasm binary small;
+# `executor` is the only feature we actually consume.
+futures = { version = "0.3", default-features = false, features = ["executor"] }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
