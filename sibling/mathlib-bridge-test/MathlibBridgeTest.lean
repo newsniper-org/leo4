@@ -14,6 +14,7 @@
 
 import Leo4
 import Leo4.MathlibBridge.Wide
+import Leo4.MathlibBridge.Complex
 import Mathlib.Init
 
 namespace MathlibBridgeTest
@@ -34,5 +35,17 @@ the test exists so a compile failure surfaces if the underlying
 Lean / Mathlib `BitVec` API drifts. -/
 example : (Leo4.LeanU128.ofBitVec128
     (Leo4.LeanU128.toBitVec128 ⟨0x1234, 0x5678⟩)) = ⟨0x1234, 0x5678⟩ := by decide
+
+-- Complex bridge type-check smoke tests
+-- (`Leo4.MathlibBridge.Complex`). We don't `decide` arithmetic on
+-- `ℂ` here — Complex equality goes through `Real` Cauchy
+-- sequences, which `decide` can't crack. Just ensuring the
+-- conversions elaborate suffices to catch upstream API drift.
+
+example : Complex :=
+  Leo4.LeanComplexF64x2.toComplex ⟨1.0, 2.0⟩
+
+example : Complex :=
+  Leo4.LeanComplexF32x2.toComplex ⟨3.0, 4.0⟩
 
 end MathlibBridgeTest
