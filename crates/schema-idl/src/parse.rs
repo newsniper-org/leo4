@@ -161,20 +161,6 @@ pub enum RawDecl {
     },
 }
 
-impl RawDecl {
-    fn fqn(&self) -> &str {
-        match self {
-            RawDecl::Record { fqn, .. }
-            | RawDecl::Enum { fqn, .. }
-            | RawDecl::Variant { fqn, .. }
-            | RawDecl::Resource { fqn, .. }
-            | RawDecl::Flags { fqn, .. }
-            | RawDecl::ExternalMarshal { fqn, .. } => fqn,
-            RawDecl::Mutual { .. } => "",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawFunc {
     pub name: String,

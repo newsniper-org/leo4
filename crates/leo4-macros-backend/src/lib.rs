@@ -263,6 +263,7 @@ fn expand_one(item: &ImportItem, mangling: &serde_json::Value) -> syn::Result<To
     // "need <N> bytes". We parse the detail back out for a single
     // retry; further retries fail with the same shim error.
     Ok(quote! {
+        #[allow(non_snake_case)]
         #vis fn #fname_ident(
             #lean: &::leo4::Lean,
             #(#arg_decls),*
