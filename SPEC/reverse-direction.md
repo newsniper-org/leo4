@@ -211,7 +211,72 @@ followed by re-spawn — the *next* call after the recycle
 returns `LEO4_ERR_RUST_WORKER_RESTARTED` on success so the
 caller can refresh persistent state.
 
-### 4.4 Worker harness binary
+### 4.4 Spawn / IPC abstraction layer
+
+The dispatcher reaches OS spawn and IPC syscalls through a
+single internal C interface, defined in the same translation
+unit as `leo4_rust_call`. OS-specific code lives behind this
+table only; the request loop, handshake verifier, worker-handle
+cache, and `catch_unwind` plumbing never name `posix_spawn`,
+`CreateProcess`, `socketpair`, or `CreateNamedPipe` directly.
+
+```c
+/* internal to libleo4_rust_bridge.a — not exported */
+typedef struct leo4_worker leo4_worker_t;   /* opaque per-backend */
+
+typedef struct {
+    /* lifecycle */
+    int  (*spawn)(const char* cdylib_path,
+                  leo4_worker_t** out,
+                  char*  err_buf, size_t err_cap);
+    void (*kill)(leo4_worker_t* w);                       /* SIGKILL / TerminateProcess */
+    int  (*reap)(leo4_worker_t* w, int* exit_status);     /* wait + free */
+
+    /* IPC */
+    int  (*send)(leo4_worker_t* w, const void* buf, size_t len);
+    int  (*recv)(leo4_worker_t* w, void* buf, size_t cap, size_t* out_len);
+
+    /* status (non-blocking) */
+    int  (*alive)(leo4_worker_t* w);
+} leo4_worker_ops_t;
+
+extern const leo4_worker_ops_t leo4_worker_ops;   /* compile-time chosen */
+```
+
+Two backends ship in the same TU, gated by `#ifdef`:
+
+- **POSIX backend** (`#if defined(__unix__) || defined(__APPLE__)`):
+  `posix_spawn` + `socketpair(AF_UNIX, SOCK_STREAM, 0)` + `wait4`.
+  The IPC end is handed to the child via
+  `posix_spawn_file_actions_adddup2`.
+- **Windows backend** (`#if defined(_WIN32)`): `CreateProcess`
+  + named pipe (`CreateNamedPipeA` with name
+  `\\.\pipe\leo4_rust_<pid>_<nonce>`) + `WaitForSingleObject`.
+
+A third **stub backend** ships unconditionally for unknown
+platforms: every operation returns `LEO4_ERR_RUST_SPAWN_FAILED`.
+This lets `libleo4_rust_bridge.a` link on every platform from
+day 1; the bridge is always present, even where reverse-direction
+is not yet ported.
+
+The "single C translation unit" promise (§11) is preserved —
+all three backends are sections of the same file gated by
+`#ifdef`. The dispatcher's request loop calls
+`leo4_worker_ops.spawn(...)` and friends, never the raw syscalls.
+
+Future 9.X isolation backends (zygote-fork, wasm sandbox)
+implement the same `leo4_worker_ops_t` table; swapping them in
+requires zero churn in the request loop, handshake verifier, or
+the Lean wrapper.
+
+This layer is the first formally-specified instance of the
+leo4-wide **OS-abstraction policy** (`OS-PORTABILITY.md`). Other
+OS-specific concerns (library extension, RPATH / DLL search,
+visibility attribute, compile flags) are tracked in that
+document's audit ledger and will receive analogous layers as
+they are touched.
+
+### 4.5 Worker harness binary
 
 leo4 ships a small harness executable `leo4-rust-worker`
 (POSIX) / `leo4-rust-worker.exe` (Windows). It is invoked as:

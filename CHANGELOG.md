@@ -7,6 +7,43 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OS-portability policy + audit ledger (2026-05-21)
+
+`OS-PORTABILITY.md` (new) — leo4-wide policy: OS-specific code
+must be confined to identified abstraction layers; new
+`#[cfg(target_os=…)]` / `cfg(unix)` / `cfg(windows)` branches
+outside an identified layer get lifted into a layer in the same
+commit or rejected. Document seeds the audit ledger with the
+current OS branches (Linux `.so` extension hardcode,
+`-Wl,-rpath` link line, gcc/clang `__attribute__((visibility))`
+in shim source, ...) and recommends a layer per concern.
+
+The Phase 9 spawn / IPC abstraction (`SPEC/reverse-direction.md`
+§4.4) is the first formally-specified instance of this policy
+and the model for follow-on layers.
+
+`CLAUDE.md` "Cross-cutting" section gains a one-line pointer to
+the policy.
+
+### Changed — Phase 9-0 follow-up: spawn / IPC abstraction (2026-05-21)
+
+`SPEC/reverse-direction.md` §4.4 (new sub-section) formalises a
+`leo4_worker_ops_t` ops-table that the dispatcher uses for all
+worker spawn, IPC, and reaping syscalls. Three backend slots:
+**stub** (always errors with `LEO4_ERR_RUST_SPAWN_FAILED`;
+ensures `libleo4_rust_bridge.a` links on every platform from
+day 1), **POSIX** (`posix_spawn` + `socketpair` + `wait4`), and
+**Windows** (`CreateProcess` + named pipe +
+`WaitForSingleObject`). All three live in the same single C
+translation unit, gated by `#ifdef`.
+
+`ROADMAP.md` Phase 9 substep 9-4 is split accordingly:
+
+- **9-4a** — dispatcher skeleton + `leo4_worker_ops_t` table
+  + stub backend.
+- **9-4b** — POSIX backend (Tier 1 exit criterion).
+- **9-4c** — Windows backend (Tier 2 schedule).
+
 ### Added — Phase 9 entry gate: reverse-direction (Rust → Lean) design (2026-05-21)
 
 leo4 grows a second pipeline so Rust functions tagged

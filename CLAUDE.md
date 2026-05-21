@@ -67,6 +67,12 @@ For each work item, "done" means all of:
   bytes are emitted big-endian into the mangled name via lowercase base32
   (no padding). Rationale and exact construction: `SPEC/mangling.md` §3.
 - Endianness for canonical ABI is little-endian per WIT spec.
+- **OS-specific code must live behind an identified abstraction
+  layer** — see `OS-PORTABILITY.md` for the policy and the audit
+  ledger. New `#[cfg(target_os=…)]` / `cfg(unix)` / `cfg(windows)`
+  branches outside an identified layer either get lifted into a
+  layer in the same commit or rejected. The Phase 9 spawn / IPC
+  layer (`SPEC/reverse-direction.md` §4.4) is the model.
 
 ## How to Work With Spec Files
 

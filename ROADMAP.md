@@ -548,10 +548,21 @@ search).
   binary. Loads cdylib, handshakes, IPC request loop. Same
   workspace as the rest; the only place that legitimately
   `dlopen`s arbitrary cdylibs.
-- **9-4** — `shim/leo4_rust_bridge.c` — the dispatcher.
-  Single C17 TU (≈150–250 lines). lazy worker spawn,
-  socketpair / named pipe IPC, `_Atomic` worker-handle cache,
-  catch-unwind passthrough.
+- **9-4a** — `shim/leo4_rust_bridge.c` skeleton: define the
+  `leo4_worker_ops_t` table (`SPEC/reverse-direction.md`
+  §4.4), the dispatcher request loop, handshake verifier,
+  worker-handle cache (`_Atomic` slots), and a **stub
+  backend** that always returns `LEO4_ERR_RUST_SPAWN_FAILED`.
+  Links on every platform from day 1; everything above the
+  spawn / IPC layer is testable against the stub.
+- **9-4b** — POSIX backend inside the same TU: `posix_spawn`
+  + `socketpair` + `wait4` filling the
+  `leo4_worker_ops_t` slots under
+  `#if defined(__unix__) || defined(__APPLE__)`. Tier 1 exit
+  criterion.
+- **9-4c** — Windows backend inside the same TU:
+  `CreateProcess` + named pipe + `WaitForSingleObject` filling
+  the same slots under `#if defined(_WIN32)`. Tier 2 schedule.
 - **9-5** — Lake plugin Rust-IDL ingestion. Reads
   `<pkg>.leo4-rust-exports.idl` and emits
   `<pkg>.leo4-rust-imports.lean` with one
@@ -569,9 +580,11 @@ search).
 
 **Out of v0 substeps**:
 
-- Windows path (`CreateProcess` + named pipe) — design
-  in-scope (`SPEC/reverse-direction.md` §1 and §11), but
-  Tier 2 implementation may slip past v0.
+- Windows path (`CreateProcess` + named pipe, 9-4c) — design
+  in-scope (`SPEC/reverse-direction.md` §1, §4.4, §11), but
+  the Tier 2 implementation may slip past v0; the stub backend
+  from 9-4a ensures `libleo4_rust_bridge.a` still links on
+  Windows in the meantime.
 - `#[leo4::export(isolated)]` and the recycle policy — design
   in-scope, implementation may land in 9.X follow-ons.
 - Callback / function-arrow ABI — out, 9.X candidate.
