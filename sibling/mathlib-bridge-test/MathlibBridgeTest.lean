@@ -13,14 +13,26 @@
 -- and a couple of `example` checks.
 
 import Leo4
--- Mathlib is pulled by the lakefile; once individual bridges land we
--- import `Leo4.MathlibBridge.<Sub>` here. For now we just confirm
--- the build environment wires together.
+import Leo4.MathlibBridge.Wide
 import Mathlib.Init
 
 namespace MathlibBridgeTest
 
 /-- Smoke check: the leo4 surface is in scope and Mathlib resolves. -/
 example : Leo4.LeanU128 := ⟨0, 0⟩
+
+-- Wide-integer bridge round-trips (`Leo4.MathlibBridge.Wide`).
+
+example : Leo4.LeanU128.ofNat 42 |>.toNat = 42 := by decide
+example : Leo4.LeanU128.ofNat (2^128 - 1) |>.toNat = 2^128 - 1 := by decide
+example : Leo4.LeanI128.toInt (Leo4.LeanI128.ofInt 0) = 0 := by decide
+example : Leo4.LeanI128.toInt (Leo4.LeanI128.ofInt (-1)) = -1 := by decide
+
+/-- Round-trip `LeanU128 → BitVec 128 → LeanU128` preserves the
+limbs at the bit level. We don't prove general bijectivity here —
+the test exists so a compile failure surfaces if the underlying
+Lean / Mathlib `BitVec` API drifts. -/
+example : (Leo4.LeanU128.ofBitVec128
+    (Leo4.LeanU128.toBitVec128 ⟨0x1234, 0x5678⟩)) = ⟨0x1234, 0x5678⟩ := by decide
 
 end MathlibBridgeTest
