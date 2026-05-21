@@ -7,6 +7,61 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-3: `leo4-rust-worker` harness binary (2026-05-21)
+
+Third code landing on the Phase 9 ladder. The harness binary
+the dispatcher (Phase 9-4) spawns once per cdylib — opens the
+cdylib, performs the handshake, then runs the canonical-ABI
+request loop serially via dlsym + catch_unwind.
+
+- `crates/leo4-rust-worker/` (new workspace member, binary).
+  CLI: `leo4-rust-worker --cdylib <path> --ipc-fd <N>` on POSIX
+  (or `--ipc-pipe <name>` on Windows; pipe path lights up with
+  9-4c).
+- Boot sequence:
+  1. `dlopen` the cdylib via `libloading`.
+  2. Resolve `leo4_rust_describe_exports`, walk the `EXPORTS`
+     slice, and copy entries out (so the cdylib lifetime can be
+     decoupled from the request loop if a future worker mode
+     needs it).
+  3. Compute the schema_hash via the same FNV-1a-64 + base32lc
+     algorithm `leo4-rust-emit` uses (pkg / iface from
+     `LEO4_RUST_HANDSHAKE_PKG` / `_IFACE` env vars the
+     dispatcher will set from the handshake JSON; sensible
+     `rust` / `Rust` fallbacks for ad-hoc runs).
+  4. Send a handshake frame (`SPEC/reverse-direction.md §5.3`)
+     containing magic + hash_len + abi_version + 13-byte hash.
+- Request loop (`SPEC §5.1 / §5.2`):
+  - Read a request frame (magic + mangled_len + args_len +
+    payload). magic=0 ⇒ graceful shutdown; bad magic ⇒ error;
+    payload >256 MiB ⇒ error.
+  - Resolve the mangled symbol via `dlsym` (cached by mangled
+    name; cache miss returns `LEO4_ERR_RUST_DLSYM_FAILED`).
+  - Call the wrapper with a shared response buffer; on
+    `LEO4_ERR_BUFFER_TOO_SMALL` (7) grow the buffer to the
+    required size (reported by the wrapper via `*ret_len`)
+    and retry.
+  - Wrap the call in `catch_unwind`. The wrapper itself (Phase
+    9-1) already catches panics inside the user fn; this outer
+    guard is a safety net for the wrapper plumbing. On panic
+    the worker `process::abort`s — the dispatcher sees IPC EOF
+    and respawns lazily.
+  - Write a response frame (magic + status + ret_len +
+    detail_len + payload + detail).
+- IPC backend: POSIX `UnixStream::from_raw_fd(fd)` reading the
+  inherited fd from the dispatcher. Windows named-pipe support
+  defers to 9-4c (stub error message until then).
+- 6 unit tests cover the wire format (handshake/request/response
+  encode + decode), magic=0 shutdown handling, `surface_form`
+  mangle-to-IDL inverse on the worker side, and the FNV
+  digest's 13-char base32lc output. Workspace test count 120 →
+  126; all green.
+
+End-to-end (dispatcher → worker → cdylib → wrapper) integration
+naturally lives in 9-4a (dispatcher) commit — `socketpair` +
+fd-inherit semantics are dispatcher-side and the wire round-trip
+is best verified there.
+
 ### Added — Phase 9-2: `leo4-rust-emit` CLI + `leo4-build::wire_rust_exports` (2026-05-21)
 
 Second code landing on the Phase 9 ladder. The emit pass that

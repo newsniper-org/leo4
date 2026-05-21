@@ -12,6 +12,7 @@ members = [
     "crates/leo4",
     "crates/leo4c",
     "crates/leo4-rust-emit",
+    "crates/leo4-rust-worker",
     "examples/01-hello",
     "examples/02-roundtrip",
     "examples/04-mutual-ast",
@@ -45,6 +46,7 @@ leo4-native           = { version = "0.1.0", path = "crates/leo4-native" }
 leo4-wasm             = { version = "0.1.0", path = "crates/leo4-wasm" }
 leo4                  = { version = "0.1.0", path = "crates/leo4" }
 leo4-rust-emit        = { version = "0.1.0", path = "crates/leo4-rust-emit" }
+leo4-rust-worker      = { version = "0.1.0", path = "crates/leo4-rust-worker" }
 
 # External
 thiserror   = "2"

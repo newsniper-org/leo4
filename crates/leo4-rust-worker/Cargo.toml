@@ -1,0 +1,24 @@
+[package]
+name        = "leo4-rust-worker"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Phase 9-3 — worker harness for the reverse-direction (Rust -> Lean) boundary. Loaded once per cdylib by `libleo4_rust_bridge.a` (Phase 9-4); runs each canonical-ABI request serially via dlsym + catch_unwind. See SPEC/reverse-direction.md."
+
+[[bin]]
+name = "leo4-rust-worker"
+path = "src/main.rs"
+
+[dependencies]
+libloading.workspace = true
+clap.workspace       = true
+# Pulls in the `ExportEntry` repr-C layout + the
+# `leo4_rust_describe_exports` extern signature. We don't host
+# the EXPORTS slice ourselves; we only walk the cdylib's via FFI.
+leo4-abi = { workspace = true, features = ["rust-exports"] }
+
+[lints]
+workspace = true

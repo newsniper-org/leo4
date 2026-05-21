@@ -218,6 +218,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "leo4-rust-worker"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "leo4-abi",
+ "libloading",
+]
+
+[[package]]
 name = "leo4-wasm"
 version = "0.1.0"
 
