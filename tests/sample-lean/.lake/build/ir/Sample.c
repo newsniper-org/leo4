@@ -242,6 +242,9 @@ double lean_float_mul(double, double);
 double lean_float_sub(double, double);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_mulComplexF64x2___boxed(lean_object*, lean_object*);
+uint64_t lean_uint64_shift_left(uint64_t, uint64_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncDouble(uint64_t);
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncDouble___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint64_t lp_leo4_x2dsample_Sample_add(uint64_t x_1, uint64_t x_2) {
 _start:
 {
@@ -4291,6 +4294,28 @@ lean_object* x_3;
 x_3 = lp_leo4_x2dsample_Sample_mulComplexF64x2(x_1, x_2);
 lean_dec_ref(x_1);
 return x_3;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncDouble(uint64_t x_1) {
+_start:
+{
+uint64_t x_3; uint64_t x_4; lean_object* x_5; lean_object* x_6; 
+x_3 = 1;
+x_4 = lean_uint64_shift_left(x_1, x_3);
+x_5 = lean_box_uint64(x_4);
+x_6 = lean_alloc_ctor(0, 1, 0);
+lean_ctor_set(x_6, 0, x_5);
+return x_6;
+}
+}
+LEAN_EXPORT lean_object* lp_leo4_x2dsample_Sample_asyncDouble___boxed(lean_object* x_1, lean_object* x_2) {
+_start:
+{
+uint64_t x_3; lean_object* x_4; 
+x_3 = lean_unbox_uint64(x_1);
+lean_dec_ref(x_1);
+x_4 = lp_leo4_x2dsample_Sample_asyncDouble(x_3);
+return x_4;
 }
 }
 lean_object* initialize_Init(uint8_t builtin);

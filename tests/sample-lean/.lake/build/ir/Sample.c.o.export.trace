@@ -1,6 +1,6 @@
 {"synthetic": false,
  "schemaVersion": "2025-09-10",
- "outputs": "e31e4706e968f7ce.o",
+ "outputs": "05483c5f4fbb179b.o",
  "log":
  [{"message":
    ".> /opt/lean4/bin/clang -c -o /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c.o.export /home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c -I /opt/lean4/include -fstack-clash-protection -fdata-sections -ffunction-sections -fPIC -fvisibility=hidden -Wno-unused-command-line-argument --sysroot /opt/lean4 -nostdinc -isystem /opt/lean4/include/clang -O3 -DNDEBUG -DLEAN_EXPORTING",
@@ -8,11 +8,11 @@
  "inputs":
  [["Sample:c",
    [["/home/ybi/leo4/tests/sample-lean/.lake/build/ir/Sample.c",
-     "9b5c49d019d1597c"],
+     "fa319dcccee6de7c"],
     ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
      "fa77a35a41db35c0"]]],
   ["Lean 4.29.1, commit f72c35b3f637c8c6571d353742168ab66cc22c00",
    "fa77a35a41db35c0"],
   ["traceArgs: #[-O3, -DNDEBUG, -DLEAN_EXPORTING]", "c1efb66122fb2b9a"],
   ["x86_64-unknown-linux-gnu", "53a0e8937c307c28"]],
- "depHash": "93bd45f290573690"}
+ "depHash": "f254b644dc4c6194"}

@@ -106,7 +106,12 @@ structure ExportAnalysis where
 def analyzeExport (n : Name) : MetaM (Option ExportAnalysis) := do
   let env ← getEnv
   let some info := env.find? n | return none
-  forallTelescopeReducing info.type fun args body => do
+  -- `forallTelescope` (NOT `…Reducing`) so the original `IO α`
+  -- shape survives — `…Reducing` unfolds `IO α =
+  -- IO.RealWorld → EStateM.Result IO.Error IO.RealWorld α`, which
+  -- makes `IO.RealWorld = Void` show up as a spurious param. Phase 7
+  -- step 2b needs `body.getAppFn = ``IO` to detect the effect.
+  forallTelescope info.type fun args body => do
     -- Classify binders. A binder counts as a type-level generic if its
     -- type is a *kind* (LEO4-DESIGN.md §5). That catches plain
     -- `{T : Type}` as well as higher-kind binders like
@@ -1606,6 +1611,19 @@ private partial def handlerFor (userDecls : Array UserDecl) : IDLType → Option
           if !variantAllCasesSupported cases' peers then none
           else some (variantHandler fqn args)
         | _ => none
+      -- Phase 7 step 2b: `.io T` unwraps to `T`'s handler. The Lean
+      -- wrapper still returns `IO α` (lean_io_result wrapper), but
+      -- the shim's `renderOneShim` checks for the `.io` shape and
+      -- inserts an `lean_io_result_is_ok` + `_get_value` extraction
+      -- before delegating to `T`'s `encodeBlock`. The wire format
+      -- after extraction is exactly `T`'s wire format — no extra
+      -- bytes for the IO wrapper. Only valid at the return position;
+      -- parameter-level `IO T` makes no semantic sense at the
+      -- boundary and is implicitly rejected by `renderOneShim`'s
+      -- per-param `paramHs` lookup (paramHs for `.io T` would also
+      -- hit this arm but the shim never invokes encode on a param,
+      -- so the type isn't observable as a param wire form today).
+      | .io t => handlerFor userDecls t
       | _      => none
 
 /-- Render one shim entry point. Signatures whose every slot has a
@@ -1641,6 +1659,14 @@ private def renderOneShim
       rb ++ "\n"
   let phs := paramHs.map (·.get!)
   let retH := retH?.get!
+  -- Phase 7 step 2b: detect IO return. The Lean wrapper for an IO
+  -- export returns `lean_io_result α` (lean_object*) at the C
+  -- level, so the extern signature uses `lean_object *` and the
+  -- invoke site unwraps via `lean_io_result_get_value` before
+  -- handing the inner value to `retH.encodeBlock`.
+  let effectIsIO : Bool := match ret with | .io _ => true | _ => false
+  let externRetType : String :=
+    if effectIsIO then "lean_object *" else retH.externCType
   -- Lean helper extern declaration. The Lean wrapper takes a dummy
   -- `Unit` (passed as `lean_box(0)`) when there are no real params,
   -- so that Lean's code generator emits it as a function rather than
@@ -1649,7 +1675,7 @@ private def renderOneShim
   let externArgsList :=
     if phs.isEmpty then ["lean_object *"] else phs.toList.map (·.externCType)
   let externDecl :=
-    s!"extern {retH.externCType} {helper}(" ++
+    s!"extern {externRetType} {helper}(" ++
     String.intercalate ", " externArgsList ++ ");\n"
   -- Decode each param; carry an LIFO cleanup string of dec_refs for
   -- already-decoded owned args, threaded into each subsequent
@@ -1674,6 +1700,42 @@ private def renderOneShim
     if phs.isEmpty then s!"{helper}(lean_box(0))" else s!"{helper}({argApp})"
   -- Post-call cleanup for the return value (only owned types need it).
   let retCleanup := if retH.ownsRef then " lean_dec(r);" else ""
+  -- Phase 7 step 2b: build the invocation block. Non-IO path is the
+  -- direct assignment; IO path adds the io_result unwrap.
+  let invokeBlock : String :=
+    if !effectIsIO then
+      s!"    {retH.externCType} r = {invoke};\n"
+    else
+      -- IO unwrap. `_io_res` is the lean_io_result wrapper; on `.ok`
+      -- we extract the inner α via `lean_io_result_get_value`; on
+      -- `.error` we return `LEO4_ERR_IO_FAILED` (SPEC §13 Lean
+      -- panic / IO failure range, `0x0001_0000` base).
+      -- Pick the right unbox helper per cType. UInt32 / UInt64
+      -- heap-box on platforms where the value can exceed
+      -- size_t-1 bits, so they need their type-specific
+      -- `lean_unbox_uint{32,64}`. Smaller widths (uint8 / uint16)
+      -- always pack via `lean_unbox`. Signed / floats / etc. need
+      -- their own helpers and aren't wired yet — flagged with a
+      -- /* TODO */ comment so step 2c picks them up.
+      let valueExtract : String :=
+        if retH.ownsRef then
+          "lean_io_result_get_value(_io_res)"
+        else if retH.cType == "uint64_t" then
+          "lean_unbox_uint64(lean_io_result_get_value(_io_res))"
+        else if retH.cType == "uint32_t" then
+          "(uint32_t)lean_unbox_uint32(lean_io_result_get_value(_io_res))"
+        else if retH.cType == "uint8_t" || retH.cType == "uint16_t" then
+          s!"({retH.cType})lean_unbox(lean_io_result_get_value(_io_res))"
+        else
+          s!"({retH.cType})lean_unbox(lean_io_result_get_value(_io_res))  /* TODO Phase 7 step 2c: typed unbox for {retH.cType} */"
+      let incIfOwned :=
+        if retH.ownsRef then "    lean_inc(r);\n" else ""
+      "    lean_object *_io_res = " ++ invoke ++ ";\n" ++
+      "    if (!lean_io_result_is_ok(_io_res)) " ++ lb ++
+        s!" lean_dec(_io_res); *ret_len = 0;{cleanup} return LEO4_ERR_IO_FAILED; " ++ rb ++ "\n" ++
+      s!"    {retH.externCType} r = {valueExtract};\n" ++
+      incIfOwned ++
+      "    lean_dec(_io_res);\n"
   let body :=
     s!"LEO4_EXPORT int32_t {entry}(\n" ++
     "    leo4_arena_t* arena,\n" ++
@@ -1684,7 +1746,7 @@ private def renderOneShim
     "    size_t off = 0;\n" ++
     decode ++
     lenCheck ++
-    s!"    {retH.externCType} r = {invoke};\n" ++
+    invokeBlock ++
     "    size_t out_off = 0;\n" ++
     retH.encodeBlock "r" retCleanup ++
     "    *ret_len = out_off;\n" ++
@@ -1741,6 +1803,8 @@ def renderShimSource
     "#define LEO4_ERR_DECODE                  0x00000001\n" ++
     "#define LEO4_ERR_HANDSHAKE_MISMATCH      0x00000005\n" ++
     "#define LEO4_ERR_RETURN_BUF_TOO_SMALL    0x00000007\n" ++
+    "/* Phase 7 step 2b: IO failure (SPEC sec 13 Lean panic / IO range). */\n" ++
+    "#define LEO4_ERR_IO_FAILED               0x00010001\n" ++
     "#define LEO4_ERR_UNIMPLEMENTED           0x00000064\n" ++
     "\n" ++
     "/* ABI version per SPEC/canonical-abi.md sec 14. */\n" ++

@@ -7,6 +7,58 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 7 step 2b: shim IO unwrap + `asyncDouble` fixture (2026-05-21)
+
+Closes the end-to-end functional path for `IO α` boundary exports.
+`asyncDouble(21) = 42` round-trips through the boundary.
+
+Plugin (`lake/Leo4Plugin/Leo4Plugin/Main.lean`):
+
+- `handlerFor`'s `.io T` arm now delegates to `T`'s handler instead
+  of returning `none`. The IO wrapping is handled at the shim emit
+  layer, not in the handler chain.
+- `analyzeExport` switches from `forallTelescopeReducing` to
+  `forallTelescope` (no reducing) so the original `IO α` shape
+  survives — `…Reducing` would unfold `IO α = IO.RealWorld →
+  EStateM.Result …` and expose a spurious `IO.RealWorld` (=Void)
+  parameter.
+- `renderOneShim` detects `effectIsIO` (return type is `.io _`)
+  and emits an IO unwrap block before the encode:
+
+      lean_object *_io_res = leo4_lean__...(args);
+      if (!lean_io_result_is_ok(_io_res)) {
+          lean_dec(_io_res); *ret_len = 0;
+          return LEO4_ERR_IO_FAILED;
+      }
+      ReturnType r = <type-specific unbox>(lean_io_result_get_value(_io_res));
+      lean_dec(_io_res);
+
+  The unbox is `lean_unbox_uint64` / `lean_unbox_uint32` /
+  `lean_unbox` for u8 / u16 — wider types route through their
+  matching helper. Float / signed / boxed-object variants are
+  flagged with `/* TODO step 2c */` comments and pick up
+  whenever a fixture demands them.
+- New SPEC §13 error code `LEO4_ERR_IO_FAILED = 0x00010001`
+  (Lean panic / IO failure passthrough range).
+
+Sample (`tests/sample-lean/Sample.lean`):
+
+- `def asyncDouble (n : UInt64) : IO UInt64 := return n * 2`
+  fixture exercises the full path.
+
+Example (`examples/01-hello/src/main.rs`):
+
+- `sample::asyncDouble(&lean, 21)` returns `42`; assertion holds.
+
+Schema hash rotates: `fbla3xr3fsp6g` → `tjhnmfbc7izmk`.
+Cross-impl mangling: **67 mangled names byte-identical**.
+
+Still TODO (step 2c, deferred): typed unbox for non-`uintN_t`
+return widths (signed integers via sign cast through size_t,
+floats via `lean_unbox_float` / `lean_unbox_float32`, etc.). The
+existing fallback path compiles but encodes garbage — the
+`/* TODO */` comments guard it.
+
 ### Added — Phase 7 step 2 main (Lean side): `IO T` → `future<T>` IDL lift (2026-05-20)
 
 Plumbing-only landing. Lean plugin now recognises `IO T` in

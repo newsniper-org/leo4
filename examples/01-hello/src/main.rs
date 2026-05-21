@@ -59,6 +59,13 @@ mod sample {
             a: leo4::LeanComplexF64x2,
             b: leo4::LeanComplexF64x2,
         ) -> leo4::LeanComplexF64x2;
+        // Phase 7 step 2b: `IO α` return. The Lean side declares
+        // `def asyncDouble (n : UInt64) : IO UInt64`; the plugin
+        // lifts the return to `future<u64>` in the canonical IDL.
+        // The shim wraps the wrapper's call in
+        // `lean_io_result_is_ok` / `_get_value` so the wire format
+        // after unwrap is the same as a sync u64 return.
+        fn asyncDouble(n: u64) -> u64;
     }
 }
 
@@ -215,6 +222,13 @@ fn main() -> Result<(), leo4::LeanError> {
     assert_eq!(prod.re, 11.0);
     assert_eq!(prod.im, 10.0);
     println!("mulComplexF64x2((2+3i)(4-i)) = {} + {}i", prod.re, prod.im);
+
+    // Phase 7 step 2b: `IO α` boundary call. Wire is identical to a
+    // sync u64 return — the shim unwraps `lean_io_result` before
+    // encoding the inner value.
+    let doubled = sample::asyncDouble(&lean, 21)?;
+    assert_eq!(doubled, 42);
+    println!("asyncDouble(21) = {doubled}");
 
     // Phase-5 exit criterion: handshake-mismatch detection. Mutate
     // the handshake JSON's `schema_hash_bytes` and re-open the same

@@ -226,5 +226,13 @@ def mulComplexF64x2 (a b : Leo4.LeanComplexF64x2) : Leo4.LeanComplexF64x2 :=
   { re := a.re * b.re - a.im * b.im
   , im := a.re * b.im + a.im * b.re }
 
+-- Phase 7 step 2b: an `IO α` boundary fixture. The plugin lifts the
+-- return to `future<u64>` in the canonical IDL; the shim wraps the
+-- Lean wrapper's invocation in `lean_io_result_is_ok` /
+-- `lean_io_result_get_value`. No actual IO side-effect — just
+-- demonstrate the wrapper unwrap path round-trips end to end.
+@[leo4_export]
+def asyncDouble (n : UInt64) : IO UInt64 := return n * 2
+
 
 end Sample
