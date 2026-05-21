@@ -44,6 +44,7 @@ written justification.
 | D13 | `wasm64` policy | Target eventually but gated behind a feature flag until `wasmtime`'s `memory64` + Component Model intersection is stable. |
 | D14 | Reference counting | Forward Lean's rc through `LeanRef<'a, T>`. `clone` = `lean_inc`, `Drop` = `lean_dec`. |
 | D15 | `oneof` constraint expression power | First version: union only. Intersection expressed via `∧`. |
+| D16 | Reverse-direction boundary (Rust → Lean) | **Adopted 2026-05-21**, design in `SPEC/reverse-direction.md` (normative), implementation tracked as Phase 9 in `ROADMAP.md`. Architecture: a single C dispatcher (`libleo4_rust_bridge.a`, statically linked into the Lean executable) routes calls through a **long-running worker process per cdylib** that loads the user cdylib via `dlopen` / `LoadLibrary`. The worker process is the unit of OS-level isolation between Lean and user Rust code (T1 memory / T2 panic / T3 thread-leak threats discussed in §16). Default mode preserves worker state across calls (SMT-solver-friendly); `#[leo4::export(isolated)]` opts a function into per-call fresh workers when stronger cross-call isolation is required. Stronger backends (zygote-fork, wasm sandbox) stay open as 9.X candidates behind the same dispatcher API. |
 
 ## 2. Architecture
 
@@ -532,6 +533,11 @@ equivalent to a hand-written `instance : LeanResource ParserHandle := ⟨⟩`.
   surface as `future<α>` in the IDL.
 - ~~Mutual recursion between nominal types — out of v0 (§4.3)~~
   Landed in Phase 6 (2026-05-20). See `SPEC/phase-6-mutual.md`.
+- ~~Reverse-direction boundary (Rust → Lean) — out of v0 in the
+  initial release~~ Adopted 2026-05-21 (D16); design in
+  `SPEC/reverse-direction.md`, implementation tracked as Phase 9
+  in `ROADMAP.md`. Stays *separable from* the forward direction:
+  a project may use one, both, or neither.
 
 ## 12. Open Questions Deferred to Implementation
 

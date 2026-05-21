@@ -7,7 +7,53 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
-(no entries yet)
+### Added — Phase 9 entry gate: reverse-direction (Rust → Lean) design (2026-05-21)
+
+leo4 grows a second pipeline so Rust functions tagged
+`#[leo4::export]` become callable from Lean as ordinary `IO α`
+actions. Motivating use case: combining a Rust-implemented SMT
+solver with Lean's proof tooling, where incremental
+`push/pop`-style state must persist across calls.
+
+Design only — no code yet. Implementation lands in substeps
+9-1 through 9-8 (see `ROADMAP.md`).
+
+- `SPEC/reverse-direction.md` (new) — normative SPEC covering
+  mangling prefix `leo4_rust__`, dispatcher API
+  (`leo4_rust_call`), long-running worker process lifecycle
+  with opt-in `#[leo4::export(isolated)]` per-call fresh
+  workers, IPC wire format, build orchestration, handshake
+  file format, cdylib path resolution (env → handshake →
+  sibling search, mirroring `LEO4_SHIM_SO`), and the C
+  standard policy (C17/C18 baseline, C23 features optional).
+- `SPEC/canonical-abi.md` §13 — extends the error-code table
+  with the `0x0002_0000..0x0002_FFFF` Rust-worker passthrough
+  range: `LEO4_ERR_RUST_PANIC` (0x00020001),
+  `LEO4_ERR_RUST_WORKER_RESTARTED` (0x00020002),
+  `LEO4_ERR_RUST_SPAWN_FAILED` (0x00020003),
+  `LEO4_ERR_RUST_CDYLIB_NOT_FOUND` (0x00020004),
+  `LEO4_ERR_RUST_DLSYM_FAILED` (0x00020005),
+  `LEO4_ERR_RUST_IPC_FAILED` (0x00020006).
+- `LEO4-DESIGN.md` — D16 adopted; §11 out-of-scope updated to
+  cite Phase 9 as the home for the reverse direction.
+- `ROADMAP.md` — Phase 9 entry section with the architecture
+  diagram, isolation matrix, and substeps 9-0 through 9-8.
+
+Isolation model: long-running worker process per cdylib by
+default (preserves user state across calls; SMT-solver friendly).
+`#[leo4::export(isolated)]` opts a function into a fresh worker
+per call for stronger cross-call isolation. T1 (memory
+corruption) / T2 (panic) / T3 (thread leak) are all caught at
+the process boundary; what happens inside the worker is the
+cdylib's responsibility.
+
+Dispatcher is a single C17 translation unit
+(`shim/leo4_rust_bridge.c`, ≈150–250 lines, statically linked
+into the Lean executable) that lazily spawns the worker via
+`posix_spawn` / `CreateProcess`. The dispatcher API
+(`leo4_rust_call(mangled, args, ret)`) is intentionally
+isolation-backend-neutral so future variants (zygote-fork, wasm
+sandbox) can be swapped in without changing callers.
 
 ## [0.1.0] — 2026-05-21
 

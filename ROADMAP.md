@@ -480,11 +480,116 @@ internally-recursive for that to be a sensible goal.
 recursion — `Polynomial R` / similar may need it depending on the
 chosen representation).
 
-## Phase 9 onwards — open
+## Phase 9 — Reverse-direction boundary (Rust → Lean) — **DESIGN 2026-05-21**
 
-Phases 0–8 are done as of 2026-05-21. Subsequent phases are not yet
-on the ladder; they will land when a concrete consumer need surfaces.
-The two known candidates are listed under *Future* below.
+Adopted 2026-05-21 (D16). leo4 grows a second pipeline so that
+Rust functions tagged `#[leo4::export]` become callable from
+Lean as ordinary `IO α` actions. Use case driver: combining a
+Rust-implemented SMT solver (z3 / cvc5 / a research prototype)
+with Lean's proof tooling, where the Lean side wants
+incremental `push/pop`-style state preserved across calls.
+
+**Normative SPEC**: `SPEC/reverse-direction.md` (drafted in this
+phase entry-gate commit, 9-0).
+
+**Architecture**:
+
+```
+Lean process
+  │
+  ├── libleo4_rust_bridge.a   (statically linked; single C TU,
+  │                            C17 baseline, optional C23)
+  │      │
+  │      ▼  posix_spawn / CreateProcess on first call
+  │   worker process          (one per cdylib; long-running by default;
+  │      │                     loads the user cdylib via dlopen /
+  │      │                     LoadLibrary; runs each request serially)
+```
+
+The dispatcher is **isolation-backend-neutral**: a single C
+entry point `leo4_rust_call(mangled, args, ret)` lets us swap
+the underlying worker model (long-running / zygote-fork / wasm
+sandbox) without touching either the Lean wrapper or the Rust
+macro.
+
+**Isolation model — long-running worker with opt-in fresh
+worker per call**:
+
+| Threat | Default mode | `#[leo4::export(isolated)]` |
+|---|---|---|
+| T1 memory corruption | Worker is a separate OS process; cannot reach Lean memory. Cross-call accumulation inside the worker is the user's responsibility. | Worker `_exit`s after each call; fresh address space next time. |
+| T2 Rust panic | `catch_unwind` + worker abort; dispatcher reports `LEO4_ERR_RUST_PANIC` and respawns lazily. Lean stack untouched. | Same. |
+| T3 Thread leak | Threads stay in the worker; recycle policy (env-driven) bounds the lifetime. | Worker `_exit` reaps all threads. |
+
+Build orchestration: Cargo emits `<pkg>.leo4-rust-exports.idl`
++ `<pkg>.leo4-rust-handshake` (via `leo4-build::wire_rust_exports`).
+Lake reads them and generates `<pkg>.leo4-rust-imports.lean`. The
+Rust cdylib is **not** in Lake's build graph — it loads at
+runtime via the path-resolution chain
+(`LEO4_RUST_CDYLIB` env → handshake `cdylib_path` → sibling
+search).
+
+**Substeps**:
+
+- **9-0 (design, 2026-05-21)** — this commit. ROADMAP entry,
+  D16 in `LEO4-DESIGN.md`, `SPEC/reverse-direction.md`,
+  `SPEC/canonical-abi.md` §13 extended with the
+  `0x0002_xxxx` Rust-worker passthrough range.
+- **9-1** — `#[leo4::export]` proc-macro in
+  `crates/leo4-macros/`. Emits per-fn wrapper shim
+  `leo4_rust__<mangled>` (canonical-ABI decode → call →
+  encode) and registers the function with `linkme` for IDL
+  collection at build time.
+- **9-2** — `leo4-build::wire_rust_exports()` reads the
+  `linkme` registry from the cdylib build, emits
+  `<pkg>.leo4-rust-exports.idl` and
+  `<pkg>.leo4-rust-handshake`.
+- **9-3** — `crates/leo4-rust-worker/` — the worker harness
+  binary. Loads cdylib, handshakes, IPC request loop. Same
+  workspace as the rest; the only place that legitimately
+  `dlopen`s arbitrary cdylibs.
+- **9-4** — `shim/leo4_rust_bridge.c` — the dispatcher.
+  Single C17 TU (≈150–250 lines). lazy worker spawn,
+  socketpair / named pipe IPC, `_Atomic` worker-handle cache,
+  catch-unwind passthrough.
+- **9-5** — Lake plugin Rust-IDL ingestion. Reads
+  `<pkg>.leo4-rust-exports.idl` and emits
+  `<pkg>.leo4-rust-imports.lean` with one
+  `@[extern "leo4_rust_call"] opaque` per export + a typed
+  Lean wrapper.
+- **9-6** — Lake link step: add `libleo4_rust_bridge.a` to
+  the leanc command line. (Forward-direction shim build path
+  already exercises a similar add-to-link flow.)
+- **9-7** — `examples/05-rust-export/` — small Rust SMT-style
+  demo (trivial constraint solver or a CNF parser exposed
+  from Rust, exercised from Lean).
+- **9-8** — `tests/conformance/` reverse-direction byte
+  parity: round-trip every primitive both ways through the
+  same wire bytes.
+
+**Out of v0 substeps**:
+
+- Windows path (`CreateProcess` + named pipe) — design
+  in-scope (`SPEC/reverse-direction.md` §1 and §11), but
+  Tier 2 implementation may slip past v0.
+- `#[leo4::export(isolated)]` and the recycle policy — design
+  in-scope, implementation may land in 9.X follow-ons.
+- Callback / function-arrow ABI — out, 9.X candidate.
+- Stronger isolation backends (zygote-fork, wasm sandbox) —
+  out, 9.X candidate; the dispatcher's single-entry API
+  preserves the swap option.
+
+**Dependencies**: Phase 4 (canonical ABI for marshal),
+Phase 5 (forward pipeline as the reference). Does **not**
+depend on Phase 7 (sync API on both sides; reverse direction
+introduces no new async surface).
+
+## Phase 10 onwards — open
+
+Phases 0–8 are done, Phase 9 design is in flight. Subsequent
+phases are not yet on the ladder; they will land when a
+concrete consumer need surfaces. Known 9.X / Phase-10 candidates
+appear under *Future* below.
 
 ## Future / not yet on the phase ladder
 

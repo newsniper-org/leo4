@@ -209,7 +209,8 @@ Error codes (reserved range `0x0000_0000`..`0xFFFF_FFFF`):
 |---|---|
 | `0x0000_0000`..`0x0000_FFFF` | leo4 runtime |
 | `0x0001_0000`..`0x0001_FFFF` | Lean panic / IO failure passthrough |
-| `0x0002_0000`..`0x000F_FFFF` | Reserved |
+| `0x0002_0000`..`0x0002_FFFF` | Rust worker passthrough (reverse direction; see `SPEC/reverse-direction.md` §10) |
+| `0x0003_0000`..`0x000F_FFFF` | Reserved |
 | `0x0010_0000`..`0xFFFF_FFFF` | User-defined |
 
 leo4 runtime error codes:
@@ -231,6 +232,18 @@ Lean-passthrough error codes (range `0x0001_0000`..`0x0001_FFFF`):
 | Code | Meaning |
 |---|---|
 | `0x0001_0001` | `LEO4_ERR_IO_FAILED` — an `IO α` boundary export returned an error result. The shim unwraps `lean_io_result` and surfaces this code instead of the inner value (Phase 7 step 2b, 2026-05-21). |
+
+Rust-worker passthrough error codes (range `0x0002_0000`..`0x0002_FFFF`,
+reverse direction; full table in `SPEC/reverse-direction.md` §10):
+
+| Code | Meaning |
+|---|---|
+| `0x0002_0001` | `LEO4_ERR_RUST_PANIC` — user Rust function panicked; worker aborted |
+| `0x0002_0002` | `LEO4_ERR_RUST_WORKER_RESTARTED` — persistent worker respawned mid-session; persistent state lost |
+| `0x0002_0003` | `LEO4_ERR_RUST_SPAWN_FAILED` — dispatcher could not spawn a worker (OS error) |
+| `0x0002_0004` | `LEO4_ERR_RUST_CDYLIB_NOT_FOUND` — no resolvable cdylib path |
+| `0x0002_0005` | `LEO4_ERR_RUST_DLSYM_FAILED` — handshake passed but `dlsym(mangled)` returned NULL |
+| `0x0002_0006` | `LEO4_ERR_RUST_IPC_FAILED` — IPC round-trip failed mid-call |
 
 ## 14. Function Call Convention
 
