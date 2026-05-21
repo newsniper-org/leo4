@@ -17,6 +17,7 @@ import Leo4.NightlyFloats
 import Leo4.MathlibBridge.Wide
 import Leo4.MathlibBridge.Complex
 import Leo4.MathlibBridge.NightlyFloats
+import Leo4.MathlibBridge.Rat
 import Mathlib.Init
 
 namespace MathlibBridgeTest
@@ -75,5 +76,10 @@ noncomputable example : Leo4.LeanComplexF64x2 :=
   Leo4.LeanComplexF64x2.ofComplex ⟨0, 0⟩
 noncomputable example : Leo4.LeanComplexF32x2 :=
   Leo4.LeanComplexF32x2.ofComplex ⟨0, 0⟩
+
+-- `Leo4.MathlibBridge.Rat` — Lean core `Rat` ↔ Mathlib `ℝ` / `ℂ`.
+
+example : Real := Leo4.Rat.toReal (0 : Rat)
+example : Complex := Leo4.Rat.toComplex (0 : Rat)
 
 end MathlibBridgeTest
