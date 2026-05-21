@@ -82,4 +82,16 @@ noncomputable example : Leo4.LeanComplexF32x2 :=
 example : Real := Leo4.Rat.toReal (0 : Rat)
 example : Complex := Leo4.Rat.toComplex (0 : Rat)
 
+-- Nightly-float reverse stubs (`noncomputable`).
+
+noncomputable example : Leo4.LeanF16 := Leo4.LeanF16.ofReal 0
+noncomputable example : Leo4.LeanBF16 := Leo4.LeanBF16.ofReal 0
+noncomputable example : Leo4.LeanF128 := Leo4.LeanF128.ofReal 0
+noncomputable example : Leo4.LeanComplexF16x2 :=
+  Leo4.LeanComplexF16x2.ofComplex ⟨0, 0⟩
+noncomputable example : Leo4.LeanComplexBF16x2 :=
+  Leo4.LeanComplexBF16x2.ofComplex ⟨0, 0⟩
+noncomputable example : Leo4.LeanComplexF128x2 :=
+  Leo4.LeanComplexF128x2.ofComplex ⟨0, 0⟩
+
 end MathlibBridgeTest

@@ -107,4 +107,26 @@ def LeanComplexBF16x2.toComplex (v : LeanComplexBF16x2) : ℂ :=
 def LeanComplexF128x2.toComplex (v : LeanComplexF128x2) : ℂ :=
   ⟨v.re.toReal, v.im.toReal⟩
 
+/-! ## Reverse direction stubs (`ℝ → LeanF*`, `ℂ → LeanComplex*x2`)
+
+All `noncomputable`. Rationale: `ℝ → Float`-style rounding is not
+constructive at Mathlib's abstract-Real level (Cauchy quotient).
+A real implementation requires pinning a rounding mode
+(IEEE-754 round-to-nearest-even / truncate / toward zero / …)
+and machinery to find the rounded value. Future commits land
+each as the use case demands.
+
+The stubs return `default` so the bridge type-checks end-to-end
+and downstream proofs can reference the function symbol. They
+are NOT for runtime use — callers needing actual rounding
+should pick a policy and implement their own. -/
+
+noncomputable def LeanF16.ofReal (_r : ℝ) : LeanF16 := default
+noncomputable def LeanBF16.ofReal (_r : ℝ) : LeanBF16 := default
+noncomputable def LeanF128.ofReal (_r : ℝ) : LeanF128 := default
+
+noncomputable def LeanComplexF16x2.ofComplex (_c : ℂ) : LeanComplexF16x2 := default
+noncomputable def LeanComplexBF16x2.ofComplex (_c : ℂ) : LeanComplexBF16x2 := default
+noncomputable def LeanComplexF128x2.ofComplex (_c : ℂ) : LeanComplexF128x2 := default
+
 end Leo4
