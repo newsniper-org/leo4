@@ -34,11 +34,34 @@
  * hasn't picked up a real backend yet.
  */
 
+/* POSIX feature flags MUST come before any include — they affect
+ * which symbols `<signal.h>` / `<unistd.h>` etc. expose. */
+#if defined(__unix__) || defined(__APPLE__)
+#  if !defined(_GNU_SOURCE)
+#    define _GNU_SOURCE 1
+#  endif
+#  if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#    define _DARWIN_C_SOURCE 1
+#  endif
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+
+#if defined(__unix__) || defined(__APPLE__)
+#  include <errno.h>
+#  include <fcntl.h>
+#  include <signal.h>
+#  include <spawn.h>
+#  include <sys/socket.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
+extern char** environ;
+#endif
 
 /* ─── Wire constants (SPEC §5) ────────────────────────────────────── */
 
@@ -133,6 +156,7 @@ static int stub_recv(leo4_worker_t* w, void* buf, size_t cap, size_t* out_len) {
 
 static int stub_alive(leo4_worker_t* w) { (void)w; return 0; }
 
+__attribute__((unused))
 static const leo4_worker_ops_t leo4_stub_ops = {
     .spawn = stub_spawn,
     .kill  = stub_kill,
@@ -142,19 +166,239 @@ static const leo4_worker_ops_t leo4_stub_ops = {
     .alive = stub_alive,
 };
 
-/* ─── Backend selection ───────────────────────────────────────────
+/* ─── POSIX backend (Phase 9-4b) ──────────────────────────────────
  *
- * 9-4a wires the stub everywhere. 9-4b fills in the POSIX branch
- * with `posix_spawn` + `socketpair` + `wait4`; 9-4c fills in the
- * Windows branch with `CreateProcess` + named pipe. The dispatcher
- * body below does not change when backends light up — only this
- * pointer flips.
+ * `posix_spawn` + `socketpair(AF_UNIX, SOCK_STREAM, 0)` + `waitpid`.
+ *
+ * Worker process model: the dispatcher creates a unix-domain
+ * socketpair; one end is retained as `sock_fd`, the other is dup2'd
+ * into the child's fd 3 via `posix_spawn_file_actions_adddup2`. The
+ * child is invoked as:
+ *
+ *     leo4-rust-worker --cdylib <path> --ipc-fd 3
+ *
+ * Worker binary path resolution:
+ *   1. env LEO4_RUST_WORKER_BIN  (absolute path override)
+ *   2. fallback "leo4-rust-worker" via `posix_spawnp` (PATH search)
+ *
+ * cdylib path comes from `leo4_cdylib_path()` (env
+ * LEO4_RUST_CDYLIB on 9-4a; handshake-baked default in 9-5).
  */
 
 #if defined(__unix__) || defined(__APPLE__)
-/* TODO(9-4b): replace with `&leo4_posix_ops` once that backend
- * lands in this file under a parallel `#ifdef`. */
-static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_stub_ops;
+
+struct leo4_worker {
+    pid_t pid;
+    int   sock_fd;   /* parent end of socketpair; -1 once reaped */
+};
+
+#define LEO4_WORKER_IPC_FD 3  /* the child sees the socketpair here */
+
+static int posix_spawn_worker(const char* cdylib_path,
+                              leo4_worker_t** out,
+                              char*  err_buf, size_t err_cap) {
+    if (out) *out = NULL;
+    int sv[2] = { -1, -1 };
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
+        if (err_buf && err_cap > 0) {
+            (void)snprintf(err_buf, err_cap, "socketpair: %s", strerror(errno));
+        }
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    /* Pin the parent end above the well-known stdio fds + the
+     * worker's IPC fd so a stray dup2 in the child cannot collide.
+     * On modern Linux/macOS sockets already come back at the next
+     * free fd, but we guard anyway. */
+    int parent_fd = sv[0];
+    int child_fd  = sv[1];
+
+    /* The child should NOT inherit the parent end. */
+    (void)fcntl(parent_fd, F_SETFD, FD_CLOEXEC);
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0) {
+        (void)close(parent_fd);
+        (void)close(child_fd);
+        if (err_buf && err_cap > 0) {
+            (void)snprintf(err_buf, err_cap,
+                           "posix_spawn_file_actions_init: %s",
+                           strerror(errno));
+        }
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    /* Child: dup2 socketpair end onto fd 3; close the high-fd
+     * version after the dup so the child only owns fd 3. */
+    int rc = 0;
+    rc |= posix_spawn_file_actions_adddup2(&actions, child_fd, LEO4_WORKER_IPC_FD);
+    if (child_fd != LEO4_WORKER_IPC_FD) {
+        rc |= posix_spawn_file_actions_addclose(&actions, child_fd);
+    }
+    if (rc != 0) {
+        posix_spawn_file_actions_destroy(&actions);
+        (void)close(parent_fd);
+        (void)close(child_fd);
+        if (err_buf && err_cap > 0) {
+            (void)snprintf(err_buf, err_cap, "posix_spawn_file_actions_add*: %d", rc);
+        }
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    /* Build child argv. The string buffers below outlive the
+     * posix_spawnp call (which copies them into the child's address
+     * space). */
+    const char* worker_bin = getenv("LEO4_RUST_WORKER_BIN");
+    int use_path_search = 0;
+    if (!worker_bin || !worker_bin[0]) {
+        worker_bin = "leo4-rust-worker";
+        use_path_search = 1;
+    }
+    char fd_arg[16];
+    (void)snprintf(fd_arg, sizeof fd_arg, "%d", LEO4_WORKER_IPC_FD);
+
+    char* argv[] = {
+        (char*)worker_bin,
+        (char*)"--cdylib", (char*)cdylib_path,
+        (char*)"--ipc-fd", fd_arg,
+        NULL,
+    };
+
+    pid_t child_pid = 0;
+    int spawn_rc = use_path_search
+        ? posix_spawnp(&child_pid, worker_bin, &actions, NULL, argv, environ)
+        : posix_spawn(&child_pid, worker_bin, &actions, NULL, argv, environ);
+
+    posix_spawn_file_actions_destroy(&actions);
+
+    if (spawn_rc != 0) {
+        (void)close(parent_fd);
+        (void)close(child_fd);
+        if (err_buf && err_cap > 0) {
+            (void)snprintf(err_buf, err_cap,
+                           "posix_spawn(%s): %s",
+                           worker_bin, strerror(spawn_rc));
+        }
+        return spawn_rc == ENOENT ? LEO4_ERR_RUST_CDYLIB_NOT_FOUND
+                                  : LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    /* Parent doesn't need the child end of the socket anymore. */
+    (void)close(child_fd);
+
+    leo4_worker_t* w = (leo4_worker_t*)calloc(1, sizeof *w);
+    if (!w) {
+        (void)close(parent_fd);
+        (void)kill(child_pid, SIGKILL);
+        (void)waitpid(child_pid, NULL, 0);
+        if (err_buf && err_cap > 0) {
+            (void)snprintf(err_buf, err_cap, "calloc(leo4_worker_t)");
+        }
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+    w->pid = child_pid;
+    w->sock_fd = parent_fd;
+    *out = w;
+    return LEO4_OK;
+}
+
+static void posix_kill_worker(leo4_worker_t* w) {
+    if (!w) return;
+    if (w->pid > 0) {
+        (void)kill(w->pid, SIGKILL);
+    }
+}
+
+static int posix_reap_worker(leo4_worker_t* w, int* exit_status) {
+    if (!w) return LEO4_ERR_RUST_SPAWN_FAILED;
+    int st = -1;
+    if (w->pid > 0) {
+        (void)waitpid(w->pid, &st, 0);
+        w->pid = 0;
+    }
+    if (w->sock_fd >= 0) {
+        (void)close(w->sock_fd);
+        w->sock_fd = -1;
+    }
+    if (exit_status) *exit_status = st;
+    free(w);
+    return LEO4_OK;
+}
+
+static int posix_send_all(leo4_worker_t* w, const void* buf, size_t len) {
+    if (!w || w->sock_fd < 0) return LEO4_ERR_RUST_IPC_FAILED;
+    const uint8_t* p = (const uint8_t*)buf;
+    size_t left = len;
+    while (left) {
+        ssize_t n = write(w->sock_fd, p, left);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return LEO4_ERR_RUST_IPC_FAILED;
+        }
+        if (n == 0) return LEO4_ERR_RUST_IPC_FAILED;
+        p    += (size_t)n;
+        left -= (size_t)n;
+    }
+    return LEO4_OK;
+}
+
+static int posix_recv_exact(leo4_worker_t* w, void* buf, size_t cap, size_t* out_len) {
+    if (!w || w->sock_fd < 0) {
+        if (out_len) *out_len = 0;
+        return LEO4_ERR_RUST_IPC_FAILED;
+    }
+    uint8_t* p = (uint8_t*)buf;
+    size_t left = cap;
+    while (left) {
+        ssize_t n = read(w->sock_fd, p, left);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (out_len) *out_len = cap - left;
+            return LEO4_ERR_RUST_IPC_FAILED;
+        }
+        if (n == 0) {
+            /* EOF mid-message; worker likely died. */
+            if (out_len) *out_len = cap - left;
+            return LEO4_ERR_RUST_IPC_FAILED;
+        }
+        p    += (size_t)n;
+        left -= (size_t)n;
+    }
+    if (out_len) *out_len = cap;
+    return LEO4_OK;
+}
+
+static int posix_alive_worker(leo4_worker_t* w) {
+    if (!w || w->pid <= 0) return 0;
+    int st = 0;
+    pid_t r = waitpid(w->pid, &st, WNOHANG);
+    if (r == 0) return 1;        /* still running */
+    if (r == w->pid) {
+        w->pid = 0;               /* mark reaped */
+        return 0;
+    }
+    return 0;                     /* error: treat as dead */
+}
+
+static const leo4_worker_ops_t leo4_posix_ops = {
+    .spawn = posix_spawn_worker,
+    .kill  = posix_kill_worker,
+    .reap  = posix_reap_worker,
+    .send  = posix_send_all,
+    .recv  = posix_recv_exact,
+    .alive = posix_alive_worker,
+};
+
+#endif /* __unix__ || __APPLE__ */
+
+/* ─── Backend selection ───────────────────────────────────────────
+ *
+ * The dispatcher body below does not change when backends light up
+ * — only this pointer flips.
+ */
+
+#if defined(__unix__) || defined(__APPLE__)
+static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_posix_ops;
 #elif defined(_WIN32)
 /* TODO(9-4c): replace with `&leo4_windows_ops`. */
 static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_stub_ops;

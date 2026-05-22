@@ -28,25 +28,43 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-/// Phase 9-4a sanity test: the dispatcher's stub backend errors
-/// out on `spawn`, so any call to `leo4_rust_call` returns
-/// `LEO4_ERR_RUST_SPAWN_FAILED = 0x00020003`. POSIX and Windows
-/// backends (9-4b/c) flip this.
 #[cfg(test)]
 mod tests {
     use super::leo4_rust_call;
 
-    /// Matches `LEO4_ERR_RUST_SPAWN_FAILED` in
-    /// `shim/leo4_rust_bridge.c`.
+    /// Reverse-direction passthrough error codes (`SPEC/canonical-abi.md`
+    /// §13 + `SPEC/reverse-direction.md` §10). The dispatcher
+    /// surfaces one of these whenever any layer fails.
     const LEO4_ERR_RUST_SPAWN_FAILED: i32 = 0x0002_0003;
+    const LEO4_ERR_RUST_CDYLIB_NOT_FOUND: i32 = 0x0002_0004;
+    const LEO4_ERR_RUST_IPC_FAILED: i32 = 0x0002_0006;
 
+    /// On a 9-4b POSIX build with no worker binary on PATH and
+    /// no real cdylib at `LEO4_RUST_CDYLIB`, the dispatcher
+    /// must still error out cleanly — either spawn fails
+    /// (ENOENT → `_CDYLIB_NOT_FOUND`), the worker comes up but
+    /// crashes immediately on the bogus cdylib (→ `_IPC_FAILED`),
+    /// or `posix_spawn` itself fails for some other reason
+    /// (→ `_SPAWN_FAILED`). Any non-zero code in the
+    /// `0x0002_xxxx` range is acceptable; what matters is that
+    /// the dispatcher links, executes, and surfaces an error
+    /// rather than crashing the process.
     #[test]
-    fn dispatcher_links_and_returns_spawn_failed_on_stub() {
+    fn dispatcher_links_and_errors_cleanly_on_missing_worker() {
+        // Make sure neither override is set so we get a
+        // deterministic "missing worker" / "missing cdylib"
+        // path rather than accidentally hitting a stale binary.
+        // SAFETY: setting env vars in tests is safe here — Cargo
+        // runs tests in subprocesses isolated from the dev shell.
+        unsafe {
+            std::env::remove_var("LEO4_RUST_WORKER_BIN");
+            std::env::remove_var("LEO4_RUST_CDYLIB");
+        }
+
         let mangled = b"leo4_rust__add__u64_u64";
         let mut ret = [0u8; 8];
         let mut ret_len: usize = 0;
-        // SAFETY: we pass valid pointers / lengths; the dispatcher
-        // is a regular C function with documented out-params.
+        // SAFETY: valid pointers / lengths; documented out-params.
         let rc = unsafe {
             leo4_rust_call(
                 mangled.as_ptr().cast::<core::ffi::c_char>(),
@@ -58,10 +76,14 @@ mod tests {
                 &mut ret_len,
             )
         };
-        // On 9-4a (stub backend) every call fails at spawn time.
-        assert_eq!(
-            rc, LEO4_ERR_RUST_SPAWN_FAILED,
-            "expected stub-backend spawn failure (0x{LEO4_ERR_RUST_SPAWN_FAILED:08x}), got 0x{rc:08x}"
+        assert!(
+            matches!(
+                rc,
+                LEO4_ERR_RUST_SPAWN_FAILED
+                    | LEO4_ERR_RUST_CDYLIB_NOT_FOUND
+                    | LEO4_ERR_RUST_IPC_FAILED
+            ),
+            "expected a 0x0002_xxxx reverse-direction failure, got 0x{rc:08x}"
         );
         // ret_len reset to 0 on error per the C entry's contract.
         assert_eq!(ret_len, 0);

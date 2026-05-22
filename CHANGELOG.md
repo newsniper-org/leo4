@@ -7,6 +7,70 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-4b: POSIX backend (`posix_spawn` + socketpair + waitpid) (2026-05-21)
+
+Fifth code landing on the Phase 9 ladder. Fills the
+`leo4_worker_ops_t` table's POSIX branch — the dispatcher body
+itself does not change.
+
+Same `shim/leo4_rust_bridge.c` translation unit; the POSIX
+backend lives behind `#if defined(__unix__) || defined(__APPLE__)`
+next to the stub backend. Workflow:
+
+1. `socketpair(AF_UNIX, SOCK_STREAM, 0, sv)` — parent retains
+   `sv[0]` (with `FD_CLOEXEC`), child receives `sv[1]` dup'd onto
+   `fd 3` via `posix_spawn_file_actions_adddup2`.
+2. `posix_spawnp` (or `posix_spawn` when `LEO4_RUST_WORKER_BIN` is
+   an absolute path) launches `leo4-rust-worker --cdylib <path>
+   --ipc-fd 3`. Worker binary resolution: env override first,
+   `posix_spawnp` PATH search otherwise. `ENOENT` from spawn
+   maps to `LEO4_ERR_RUST_CDYLIB_NOT_FOUND` (0x00020004) so
+   callers can distinguish missing worker vs other failures.
+3. `posix_send_all` / `posix_recv_exact` loop over `write` /
+   `read` with `EINTR` retry and short-read detection. Short
+   read / EOF mid-message → `LEO4_ERR_RUST_IPC_FAILED`
+   (0x00020006).
+4. `posix_alive_worker` calls `waitpid(.., WNOHANG)`; reaped
+   PIDs are zeroed so the dispatcher can lazily respawn (a
+   future Phase 9.X recycle / persistent-worker-restart will
+   build on top of this).
+5. `posix_reap_worker` does the blocking `waitpid` + `close` on
+   shutdown.
+
+Source-level changes:
+
+- `_GNU_SOURCE` / `_DARWIN_C_SOURCE` defined before any `#include`
+  so the POSIX symbols (`kill`, `posix_spawn`, `waitpid`, ...) are
+  visible under strict `-std=c17` / `-std=c2x` modes.
+- `<stdio.h>` added for `snprintf` in error-message formatting.
+- `__attribute__((unused))` on `leo4_stub_ops` so the POSIX build
+  doesn't warn about an unused fallback ops table (the stub stays
+  in the file as the unconditional safety net).
+- `extern char** environ;` declared at file scope so `posix_spawn`
+  inherits the parent's environment — relevant for forwarding
+  `LEO4_RUST_HANDSHAKE_PKG` / `_IFACE` / etc to the worker.
+
+Backend selection chain in this same file: unix/macOS now picks
+`&leo4_posix_ops` instead of the stub.
+
+The existing `leo4-rust-bridge` Rust sanity test is updated:
+it removes any `LEO4_RUST_WORKER_BIN` / `LEO4_RUST_CDYLIB`
+overrides and asserts that the dispatcher cleanly returns one
+of the `0x0002_xxxx` reverse-direction error codes. With no
+worker binary on PATH and no cdylib it surfaces
+`_CDYLIB_NOT_FOUND` (ENOENT) or `_IPC_FAILED` (worker crashed
+on the bogus cdylib). The point is that the dispatcher links,
+executes the full POSIX `posix_spawn` + `socketpair` +
+`waitpid` codepath, and errors gracefully — not that it
+succeeds without a real cdylib.
+
+Workspace test count stays at 127 (the test count didn't grow
+but the test now covers more code). End-to-end (dispatcher →
+worker → cdylib → wrapper) integration with a real fixture
+cdylib + `cargo build`-linked worker binary lands when the
+Lake wrapper (9-5) gives us a natural cite for the
+`LEO4_RUST_HANDSHAKE_PKG/_IFACE` env injection.
+
 ### Added — Phase 9-4a: dispatcher skeleton + `leo4_worker_ops_t` + stub backend (2026-05-21)
 
 Fourth code landing on the Phase 9 ladder. The single-entry C
