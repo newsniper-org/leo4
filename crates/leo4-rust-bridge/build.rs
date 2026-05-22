@@ -21,12 +21,20 @@ fn main() {
     build
         .file(&c_source)
         .warnings(true)
-        .extra_warnings(true)
-        // -std=c2x (C23) is the leo4 preference; fall back to
-        // -std=c17 when the compiler doesn't recognise it. Both
-        // ship the `_Atomic` + `static_assert` semantics the
-        // dispatcher uses.
-        .std("c17");
+        .extra_warnings(true);
+
+    // C standard selection per SPEC/reverse-direction.md §11:
+    // C17 is the baseline; upgrade to C23 when the compiler
+    // accepts it. The `-std=` flag is last-wins on every supported
+    // compiler (clang, gcc), so we add the baseline first and let
+    // `flag_if_supported` drop in the higher upgrade if available.
+    // Result on common toolchains:
+    //   * clang ≥ 18 / gcc ≥ 14 → -std=c23
+    //   * clang 16-17 / gcc 13  → -std=c2x
+    //   * older                 → -std=c17 (baseline)
+    build.flag("-std=c17");
+    build.flag_if_supported("-std=c2x");
+    build.flag_if_supported("-std=c23");
 
     // Targets:
     //   * Linux / macOS: rely on clang/gcc defaults (visibility =
