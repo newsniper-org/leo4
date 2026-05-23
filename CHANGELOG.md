@@ -7,6 +7,64 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 user records complete — `Decl::Inductive` integration (2026-05-22)
+
+OX2 user-records sub-blocker **fully closed**. The previous
+commit landed `synthesize_enum_type` as a library piece;
+this commit wires it into `transpile_source_to_unit` so a
+Lean source with `@[leo4_export] inductive Either : Type |
+left : Nat -> Either | right : String -> Either` produces a
+type-only `TranspileUnit` whose `type_decls[0]` is the
+emitted `pub enum Either { … }` + `LeanMarshal` impl, and
+whose name is registered in `registry.user_types` so
+subsequent decls can use it.
+
+New private helper:
+
+- `unfold_ctor_payload(&Located<SurfaceExpr>) -> Vec<&…>`
+  — peels the Pi chain of a Lean ctor type
+  (`Pi (_ : Nat), Pi (_ : String), Either` → `[&Nat, &String]`).
+  Unit ctors (no Pi) return an empty slice.
+
+`transpile_source_to_unit` branches:
+- `Decl::Definition` → fn / wrapper / mangled-dispatch path
+- `Decl::Structure` → struct type-only unit (existing)
+- `Decl::Inductive` → enum type-only unit (this commit)
+- anything else → loud `ENCODE_ERROR` with the kind label
+
+OxiLean parser quirk documented: `inductive N : Type | ctor :
+T1 -> ... -> N` form is required — every ctor needs an
+explicit `: <type>` annotation, even unit ctors (`Red : Color`,
+not bare `Red`). Test sources reflect this.
+
+Tests 80 → 83 (+3):
+
+  + `transpile_source_to_unit_handles_all_unit_inductive` —
+    `Color { Red, Green, Blue }` → unit-form enum.
+  + `transpile_source_to_unit_handles_payload_inductive` —
+    `Either { left(Nat), right(String) }` → payload enum.
+  + `transpile_source_to_unit_inductive_references_prior_user_type`
+    — `Shape { dot(Point), line(Point, Point) }` after Point
+    structure has been registered.
+
+Also factored a small `unit_is_type_only(&TranspileUnit)`
+test helper for the type-only assertion pattern.
+
+clippy --all-targets -D warnings clean.
+
+**OX2 user records sub-blocker now fully closed for v1.0
+RC**. The complete OX2 surface for user-defined types:
+- Lean `structure` → Rust struct + LeanMarshal impl
+- Lean `inductive` → Rust enum + LeanMarshal impl
+- Carrier-type fields (BigNat / BigInt / LeanRat / complex)
+- Generic-container fields (Vec / Option / Result / Box /
+  tuples 2..=5)
+- User-type fields (Point inside Edge / Shape, etc.)
+- Rust-keyword field & variant names → raw-ident escaped
+- Wire form byte-compatible with `#[derive(LeanMarshal)]`
+
+ROADMAP OX2 entry updated to reflect closure.
+
 ### Added — `leo4-oxilean-build`: OX2 user records — `synthesize_enum_type` for inductive types (2026-05-22)
 
 OX2 user-records final lib piece. Lean inductive types (Lean

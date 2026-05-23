@@ -773,13 +773,54 @@ pub fn transpile_source_to_unit(
                 mangled: String::new(),
             }));
         }
+        Decl::Inductive { name, ctors, .. } => {
+            // Inductives surface as Rust enums. Register the
+            // type name first so subsequent ctor-payload
+            // references to other user types resolve.
+            registry.register_user_type(name);
+
+            let mut evariants: Vec<EnumVariant> = Vec::with_capacity(ctors.len());
+            for c in ctors {
+                let payloads = unfold_ctor_payload(&c.ty);
+                let mut fields: Vec<RustType> = Vec::with_capacity(payloads.len());
+                for p in payloads {
+                    let ty = surface_to_rust_type(p, &registry.user_types)
+                        .map_err(|e| LeanError::new(
+                            e.code,
+                            format!(
+                                "leo4-oxilean-build: inductive `{name}` ctor \
+                                 `{cname}` payload: {emsg}",
+                                cname = c.name,
+                                emsg = e.message,
+                            ),
+                        ))?;
+                    fields.push(ty);
+                }
+                evariants.push(EnumVariant {
+                    name: c.name.clone(),
+                    fields,
+                });
+            }
+            let enum_src = synthesize_enum_type_with_users(
+                name,
+                &evariants,
+                &registry.user_types,
+            )?;
+            return Ok(Some(TranspileUnit {
+                type_decls: vec![enum_src],
+                fn_src: String::new(),
+                wrapper_src: String::new(),
+                fn_name: name.clone(),
+                mangled: String::new(),
+            }));
+        }
         Decl::Definition { .. } => {} // fall through to fn path
         _ => {
             return Err(LeanError::new(
                 leo4_abi::error::error_codes::ENCODE_ERROR,
                 format!(
-                    "leo4-oxilean-build: only `def` or `structure` declarations \
-                     are transpilable today; got {kind}",
+                    "leo4-oxilean-build: only `def` / `structure` / `inductive` \
+                     declarations are transpilable today; got {kind}",
                     kind = decl_kind_label(&inner.value),
                 ),
             ));
@@ -837,6 +878,26 @@ pub fn transpile_source_to_unit(
         mangled: mangled.to_string(),
         type_decls: Vec::new(),
     }))
+}
+
+/// Unfold a Lean inductive constructor's type into the
+/// sequence of its payload types. A ctor like
+/// `left : Nat → String → Either` has type
+/// `Pi (_ : Nat), Pi (_ : String), Either`; this fn returns
+/// `[&Nat, &String]`. Unit ctors (type = just the inductive
+/// itself, no Pi) return an empty slice.
+fn unfold_ctor_payload(ty: &Located<SurfaceExpr>) -> Vec<&Located<SurfaceExpr>> {
+    let mut acc: Vec<&Located<SurfaceExpr>> = Vec::new();
+    let mut cur = &ty.value;
+    while let SurfaceExpr::Pi(binders, body) = cur {
+        for b in binders {
+            if let Some(bty) = &b.ty {
+                acc.push(bty.as_ref());
+            }
+        }
+        cur = &body.value;
+    }
+    acc
 }
 
 fn decl_kind_label(decl: &Decl) -> &'static str {
@@ -2422,6 +2483,15 @@ mod tests {
         RustFn::new(name, p, ret, vec![])
     }
 
+    /// True if a `TranspileUnit` is the type-only shape
+    /// (empty fn/wrapper/mangled, non-empty type_decls).
+    fn unit_is_type_only(u: &TranspileUnit) -> bool {
+        u.fn_src.is_empty()
+            && u.wrapper_src.is_empty()
+            && u.mangled.is_empty()
+            && !u.type_decls.is_empty()
+    }
+
     #[test]
     fn wrapper_emits_call_fn_for_u64_to_u64() {
         let f = rfn("addOne", vec![("n", RustType::U64)], Some(RustType::U64));
@@ -2867,6 +2937,78 @@ mod tests {
         assert!(sd.contains("pub head: Point,"));
         assert!(sd.contains("pub tail: Point,"));
         assert!(sd.contains("<Point as ::leo4_abi::LeanMarshal>"));
+    }
+
+    #[test]
+    fn transpile_source_to_unit_handles_all_unit_inductive() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        // OxiLean requires `inductive N : Type | ctor : T` —
+        // every ctor needs an explicit `: <type>` annotation,
+        // even unit ctors. The result enum is still a pure
+        // all-unit shape because none of the ctors take args.
+        let src = "@[leo4_export] inductive Color : Type | Red : Color | Green : Color | Blue : Color";
+        let out = transpile_source_to_unit(&env, &mut registry, src, "")
+            .expect("inductive parses")
+            .expect("must yield unit");
+        assert!(unit_is_type_only(&out));
+        assert_eq!(out.fn_name, "Color");
+        assert!(registry.user_types.contains("Color"));
+        let ed = &out.type_decls[0];
+        assert!(ed.contains("pub enum Color {"));
+        assert!(ed.contains("    Red,"));
+        assert!(ed.contains("    Green,"));
+        assert!(ed.contains("    Blue,"));
+    }
+
+    #[test]
+    fn transpile_source_to_unit_handles_payload_inductive() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        // `left : Nat → Either` unfolds into Pi(_, _, Nat,
+        // Either); `right : String → Either` analogous.
+        let src = "@[leo4_export] inductive Either : Type | left : Nat -> Either | right : String -> Either";
+        let out = transpile_source_to_unit(&env, &mut registry, src, "")
+            .expect("payload inductive parses")
+            .expect("must yield unit");
+        assert!(unit_is_type_only(&out));
+        let ed = &out.type_decls[0];
+        assert!(ed.contains("pub enum Either {"));
+        assert!(
+            ed.contains("    left(u64),"),
+            "expected left(u64) variant; got:\n{ed}"
+        );
+        assert!(ed.contains("    right(::std::string::String),"));
+        // Disc emit + decode dispatch present.
+        assert!(ed.contains("0u32.to_le_bytes()"));
+        assert!(ed.contains("1u32.to_le_bytes()"));
+    }
+
+    #[test]
+    fn transpile_source_to_unit_inductive_references_prior_user_type() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        // Define Point first.
+        let _ = transpile_source_to_unit(
+            &env,
+            &mut registry,
+            "@[leo4_export] structure Point where x : UInt32 y : UInt32",
+            "",
+        )
+        .expect("Point parses");
+
+        // Inductive referencing Point as a payload type.
+        let out = transpile_source_to_unit(
+            &env,
+            &mut registry,
+            "@[leo4_export] inductive Shape : Type | dot : Point -> Shape | line : Point -> Point -> Shape",
+            "",
+        )
+        .expect("Shape parses")
+        .expect("must yield unit");
+        let ed = &out.type_decls[0];
+        assert!(ed.contains("    dot(Point),"));
+        assert!(ed.contains("    line(Point, Point),"));
     }
 
     #[test]

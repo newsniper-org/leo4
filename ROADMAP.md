@@ -726,14 +726,19 @@ all wait for the v1.0 RC window or later.
     AND `RustType::Generic("Vec"|"Option"|"Result"|"Box", _)`
     forms are recognised — upstream may lower to either.
 
-  Still pending for v1.0 RC: **user-defined records /
-  inductives**. Blocked on upstream `RustTargetBackend`
-  v0.1.2 emitting only `RustItem::Fn` — no struct / impl
-  shapes. Decision (wait for upstream vs. synthesise from
-  elaborated `Decl::Inductive` / `Decl::Structure` in
-  leo4-oxilean-build) deferred to the first real-fixture
-  pass with a non-trivial Lean export. Tracked as the
-  OX2-user-records sub-blocker.
+  User-defined records / inductives **landed 2026-05-22**
+  (option (b) per the OX2-user-records decision):
+  leo4-oxilean-build synthesises Rust struct / enum shapes
+  from the parser-AST `Decl::Structure` / `Decl::Inductive`
+  directly. `synthesize_struct_type` /
+  `synthesize_enum_type` + `transpile_source_to_unit`
+  recognise `@[leo4_export]`-tagged structures + inductives
+  in the source stream, register the names in
+  `Leo4ExportRegistry::user_types`, and emit type decls
+  alongside the fn / wrapper sources. Rust-keyword field /
+  variant names are raw-ident-escaped via
+  `escape_rust_ident`. Wire form byte-compatible with
+  hand-written `#[derive(LeanMarshal)]`.
 
 **Deferred to ≥ v1.x** (all of P10.4 minus C4 above):
 
