@@ -7,6 +7,26 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — `rust-version = "1.95"` unified across all 4 workspaces (2026-05-21)
+
+Bumps MSRV from `1.85` to `1.95` (current stable as of
+2026-04-14) across the main workspace and all three
+sibling projects. `1.85` was the original baseline pinned
+during Phase 0 — well below what current stable supports;
+keeping it forced unnecessary `#[allow]`s on features that
+1.95-stable already accepts.
+
+Files touched:
+
+  • `Cargo.toml` (`[workspace.package].rust-version`)
+  • `sibling/leo4-wasip3/Cargo.toml`
+  • `sibling/leo4-oxilean/Cargo.toml`
+  • `sibling/leo4-oxilean-build/Cargo.toml`
+
+Verification: `cargo check --workspace` clean on main +
+each sibling builds cleanly under 1.95. System rustc is
+`1.95.0 (59807616e 2026-04-14)`.
+
 ### Fixed — OxiLean upstream-hook status: 1-of-3 present, not 0-of-3 (2026-05-21)
 
 Corrects an overgeneralisation in the previous adapter
