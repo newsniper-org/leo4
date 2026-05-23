@@ -519,20 +519,24 @@ forever, this path doesn't need them.
         │ oxilean-codegen::lcnf normalisation
         ▼
 [LcnfFunDecl[]]
-        │ RustTargetBackend::emit_module(name, decls)
+        │ RustTargetBackend::compile_decl → RustFn (Rust AST)
         ▼
-[RustModule (Rust AST)]
-        │ RustFn::emit() / RustModule::emit() → String
+[RustFn]
+        │ RustFn::emit() → "pub fn <name>(args...) -> R { ... }"
+        │ + leo4_oxilean_build::synthesize_canonical_wrapper
+        │     → "pub fn <name>_call(args: &[u8])
+        │         -> Result<Vec<u8>, LeanError> { ... }"
+        │     decode-each-arg → call → encode-return
         ▼
-[Generated .rs source files written to a Cargo crate dir]
+[Pair of Rust source strings per export]
         │ leo4-oxilean-build helper crate orchestrates:
         │   * Cargo.toml setup with leo4-abi dep
-        │   * Per-#[leo4::export]-style wrapper that delegates
-        │     to the transpiled fn + does canonical-ABI
-        │     encode/decode at the boundary
+        │   * LeanProc impl emitting a mangled-name → _call
+        │     dispatch table (§6 — next)
         ▼
 [A user-facing crate that exposes the original Lean exports
- as ordinary Rust pub fns, ready to import + call directly.]
+ as ordinary Rust pub fns + their canonical-ABI shims, ready
+ to import + call directly OR plug into a `LeanProc` host.]
 ```
 
 The result is *not* a `LeanProc`-style dispatcher — it's a

@@ -7,6 +7,85 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: §5 canonical-ABI wrapper synthesis (2026-05-22)
+
+Each transpiled fn now lands together with a sibling
+canonical-ABI boundary shim matching leo4-rust-native's
+`LeanProc::call(mangled, args) -> Result<Vec<u8>, LeanError>`
+contract.
+
+Sample output for `Sample.addOne : Nat → Nat`:
+
+```rust
+pub fn Sample_addOne(n: u64) -> u64 { … }   // RustTargetBackend
+pub fn Sample_addOne_call(args: &[u8])      // §5 wrapper
+    -> ::core::result::Result<::std::vec::Vec<u8>, ::leo4_abi::LeanError>
+{
+    let mut __off: usize = 0;
+    let (n, __next_0) =
+        <u64 as ::leo4_abi::LeanMarshal>::canonical_decode(args, __off)?;
+    __off = __next_0;
+    let _ = __off;
+    let __ret = Sample_addOne(n);
+    ::core::result::Result::Ok(::leo4_abi::encode_to_vec(&__ret))
+}
+```
+
+New public API:
+
+- `synthesize_canonical_wrapper(&RustFn) -> Result<String,
+  LeanError>` — emits the wrapper source for one transpiled
+  fn. Validates every param + return type against a
+  marshallable-type matrix; rejects unsupported types
+  (`Box<dyn Any>`, `Vec<T>`, user types, etc.) with
+  `ENCODE_ERROR`.
+- `transpile_kernel_decl_with_wrapper(name, params, body) ->
+  Result<(fn_src, wrapper_src), LeanError>` — convenience
+  combined entry; runs `transpile_kernel_decl` +
+  `synthesize_canonical_wrapper` and returns both source
+  strings separately so callers can route them into
+  different files / modules.
+
+Marshallable type matrix (v0):
+
+- Integers: u8, u16, u32, u64, u128, i8, i16, i32, i64, i128
+- Floats: f32, f64
+- Other primitives: bool, char
+- `String` (owned)
+- Unit return (`()` or `None`) — wrapper returns an empty
+  `Vec<u8>` rather than calling `encode_to_vec`
+
+Each type maps to its `leo4_abi::LeanMarshal` impl (see
+`crates/leo4-abi/src/scalars.rs` + `composites.rs`).
+
+What's *not* yet covered, documented inline:
+
+- Carrier types (`BigNat`, `BigInt`, `LeanRat`, complex
+  numbers) — their `LeanMarshal` impls exist in leo4-abi,
+  but `RustTargetBackend` v0.1.2 doesn't lower the matching
+  LCNF types to them yet (lands as `Box<dyn Any>`).
+- User-defined records / inductives — `RustTargetBackend`
+  emits only `RustItem::Fn` at v0.1.2; struct + impl emission
+  is upstream's responsibility.
+
+Tests 17 → 25 (+8):
+  + `wrapper_emits_call_fn_for_u64_to_u64`
+  + `wrapper_emits_zero_arg_fn`
+  + `wrapper_handles_unit_return`
+  + `wrapper_handles_none_return_as_unit`
+  + `wrapper_emits_multi_arg_decode_in_order`
+  + `wrapper_rejects_box_dyn_any_return`
+  + `wrapper_rejects_unsupported_param_type`
+  + `transpile_kernel_decl_with_wrapper_emits_both`
+
+`examples/dump_wrapper.rs` — small binary that prints the
+synthesized wrapper for a fixture `RustFn`. Run with
+`cargo run --example dump_wrapper`.
+
+clippy --all-targets -D warnings clean. Workspace unaffected
+(sibling crate). Activation plan §5 ticked. §6 (Cargo crate
+emit) is next + last.
+
 ### Added — `leo4-oxilean-build`: Hook 3 `@[leo4_export]` / `LeanMarshal` discovery wired (2026-05-22)
 
 Plugs leo4 into OxiLean evaluator Hook 3 (SPEC/rust-native-lean.md

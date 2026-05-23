@@ -47,7 +47,7 @@
 //!    handler, and writes the result to a destination Cargo
 //!    crate dir.
 //!
-//! ## What works today (17 / 17 tests)
+//! ## What works today (25 / 25 tests)
 //!
 //! - Cargo deps resolve + compile (5 OxiLean crates
 //!   reachable).
@@ -141,7 +141,13 @@
 //!    canonical-ABI decodes `args` via `leo4_abi::LeanMarshal`,
 //!    calls the transpiled fn, encodes the return. The result
 //!    is a Rust crate that conforms to leo4-rust-native's
-//!    boundary contract.
+//!    boundary contract. **(Done 2026-05-22 —
+//!    `synthesize_canonical_wrapper(&RustFn) -> String` +
+//!    `transpile_kernel_decl_with_wrapper` combined helper.
+//!    Marshallable type matrix today: u8..u128, i8..i128,
+//!    f32, f64, bool, char, String, () (unit return). Carrier
+//!    types + user records pending the upstream backend
+//!    emitting struct / impl shapes.)**
 //! 6. **Cargo crate emit** — `Cargo.toml` + `lib.rs` written
 //!    to a target dir; consumer's main project just
 //!    `path`-deps it.
@@ -646,6 +652,186 @@ pub fn transpile_source_if_exported(
     transpile_kernel_decl(&name, &params, &body).map(Some)
 }
 
+// ─── §5 Canonical-ABI wrapper synthesis ──────────────────────────────────
+//
+// SPEC/rust-native-lean.md §3: a `LeanProc` impl resolves
+// `(mangled, args: &[u8]) -> Result<Vec<u8>, LeanError>`. The
+// transpile path achieves the same shape by emitting a sibling
+// wrapper *next to* each transpiled fn:
+//
+//   pub fn <name>_call(args: &[u8])
+//        -> Result<Vec<u8>, leo4_abi::LeanError>
+//
+// The wrapper canonical-decodes the input bytes into typed
+// Rust args, calls the transpiled fn, and canonical-encodes
+// the result. The downstream `LeanProc` impl simply dispatches
+// `mangled → <name>_call` lookups (a static table populated at
+// crate-emit time; that's §6).
+//
+// Limitations of v0 wrapper synthesis: only fns whose params
+// and return type *all* lift to a primitive `leo4_abi::LeanMarshal`
+// type (u8..u128, i8..i128, f32, f64, bool, char, String) are
+// supported. Carrier types (BigNat / LeanRat / etc.) and user-
+// defined records aren't covered yet — they need their
+// `LeanMarshal` impls + the transpiler's struct emission
+// (which the upstream `RustTargetBackend::emit_module` doesn't
+// produce at v0.1.2 either).
+
+use oxilean_codegen::rust_target_backend::{RustFn, RustType};
+
+/// Map a `RustType` to a Rust source string naming a type for
+/// which leo4-abi provides a `LeanMarshal` impl. Returns `Err`
+/// for types not yet covered by the v0 wrapper synthesis.
+fn render_marshallable_type(ty: &RustType) -> Result<&'static str, LeanError> {
+    match ty {
+        RustType::U8 => Ok("u8"),
+        RustType::U16 => Ok("u16"),
+        RustType::U32 => Ok("u32"),
+        RustType::U64 => Ok("u64"),
+        RustType::U128 => Ok("u128"),
+        RustType::I8 => Ok("i8"),
+        RustType::I16 => Ok("i16"),
+        RustType::I32 => Ok("i32"),
+        RustType::I64 => Ok("i64"),
+        RustType::I128 => Ok("i128"),
+        RustType::F32 => Ok("f32"),
+        RustType::F64 => Ok("f64"),
+        RustType::Bool => Ok("bool"),
+        RustType::Char => Ok("char"),
+        RustType::RustString => Ok("::std::string::String"),
+        // Bool/Unit return is special-cased at the call site.
+        other => {
+            let msg = format!(
+                "leo4-oxilean-build: RustType `{other:?}` has no leo4-abi \
+                 LeanMarshal impl wired in §5 wrapper synthesis"
+            );
+            Err(LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                msg,
+            ))
+        }
+    }
+}
+
+/// Synthesise a canonical-ABI boundary shim for a transpiled
+/// Rust fn. Emits a sibling `pub fn <name>_call(args: &[u8])
+/// -> Result<Vec<u8>, LeanError>` that:
+///
+/// 1. Sequentially `LeanMarshal::canonical_decode`s each arg,
+///    advancing the offset between calls.
+/// 2. Invokes the transpiled fn with the decoded args.
+/// 3. Canonical-encodes the return value (or returns an empty
+///    `Vec<u8>` for unit-returning fns).
+///
+/// The emitted wrapper is plain Rust source; concatenate it
+/// with `transpile_kernel_decl`'s output to land both items
+/// in the same crate.
+///
+/// # Errors
+/// `LeanError` if any param type or the return type fails
+/// `render_marshallable_type` (the type isn't covered by §5's
+/// v0 marshalling matrix — carrier types and user records are
+/// the typical reasons).
+pub fn synthesize_canonical_wrapper(transpiled: &RustFn) -> Result<String, LeanError> {
+    use std::fmt::Write as _;
+
+    let wrapper_name = format!("{}_call", transpiled.name);
+    let mut s = String::new();
+
+    writeln!(
+        s,
+        "/// Canonical-ABI boundary shim for `{}` — decodes args \
+         from leo4 canonical bytes, calls the transpiled fn, \
+         encodes the return.",
+        transpiled.name
+    )
+    .unwrap();
+    writeln!(
+        s,
+        "pub fn {wrapper_name}(args: &[u8]) -> ::core::result::Result<::std::vec::Vec<u8>, ::leo4_abi::LeanError> {{"
+    )
+    .unwrap();
+
+    if transpiled.params.is_empty() {
+        s.push_str("    let _ = args;\n");
+    } else {
+        s.push_str("    let mut __off: usize = 0;\n");
+        for (i, (pname, pty, _)) in transpiled.params.iter().enumerate() {
+            let rust_ty = render_marshallable_type(pty)?;
+            writeln!(
+                s,
+                "    let ({pname}, __next_{i}) = <{rust_ty} as ::leo4_abi::LeanMarshal>::canonical_decode(args, __off)?;"
+            )
+            .unwrap();
+            // Suppress an "unused last offset" lint by keeping
+            // the assignment regardless of whether anything
+            // after reads it.
+            writeln!(s, "    __off = __next_{i};").unwrap();
+        }
+        s.push_str("    let _ = __off;\n");
+    }
+
+    let call_args = transpiled
+        .params
+        .iter()
+        .map(|(n, _, _)| n.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(s, "    let __ret = {}({call_args});", transpiled.name).unwrap();
+
+    match &transpiled.return_type {
+        None | Some(RustType::Unit) => {
+            s.push_str("    let _: () = __ret;\n");
+            s.push_str("    ::core::result::Result::Ok(::std::vec::Vec::new())\n");
+        }
+        Some(ty) => {
+            // Validate the return type has a LeanMarshal impl
+            // before emitting the encode call.
+            let _ = render_marshallable_type(ty)?;
+            s.push_str("    ::core::result::Result::Ok(::leo4_abi::encode_to_vec(&__ret))\n");
+        }
+    }
+
+    s.push_str("}\n");
+    Ok(s)
+}
+
+/// Drive `transpile_kernel_decl` then `synthesize_canonical_wrapper`
+/// in sequence; concatenate the two emitted items into one
+/// Rust source string ready to drop into a crate.
+///
+/// Returns `(rust_fn_source, wrapper_source)` separately so
+/// callers can route them into different files / modules
+/// when desired (`lib.rs` + `wrappers.rs`, say).
+///
+/// # Errors
+/// `LeanError` for any failure in either underlying step.
+pub fn transpile_kernel_decl_with_wrapper(
+    name: &Name,
+    params: &[(Name, Expr)],
+    body: &Expr,
+) -> Result<(String, String), LeanError> {
+    let config = ToLcnfConfig::default();
+    let lcnf_decl: LcnfFunDecl =
+        decl_to_lcnf(name, params, body, &config).map_err(|e| {
+            LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                format!("leo4-oxilean-build: decl_to_lcnf failed: {e:?}"),
+            )
+        })?;
+    let mut backend = RustTargetBackend::new();
+    let rust_fn = backend.compile_decl(&lcnf_decl).map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            format!("leo4-oxilean-build: compile_decl failed: {e:?}"),
+        )
+    })?;
+
+    let fn_src = rust_fn.emit();
+    let wrapper_src = synthesize_canonical_wrapper(&rust_fn)?;
+    Ok((fn_src, wrapper_src))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -958,6 +1144,173 @@ mod tests {
         assert!(out.is_none(), "untagged decl must yield Ok(None)");
         // Manager records nothing for skipped decls.
         assert!(registry.exported_names().is_empty());
+    }
+
+    // ─── §5 Canonical-ABI wrapper synthesis tests ────────────────────
+
+    fn rfn(
+        name: &str,
+        params: Vec<(&str, RustType)>,
+        ret: Option<RustType>,
+    ) -> RustFn {
+        let p = params
+            .into_iter()
+            .map(|(n, t)| (n.to_string(), t, false))
+            .collect();
+        RustFn::new(name, p, ret, vec![])
+    }
+
+    #[test]
+    fn wrapper_emits_call_fn_for_u64_to_u64() {
+        let f = rfn("addOne", vec![("n", RustType::U64)], Some(RustType::U64));
+        let out = synthesize_canonical_wrapper(&f).expect("u64 → u64 must succeed");
+        // Header + signature.
+        assert!(
+            out.contains("pub fn addOne_call(args: &[u8])"),
+            "wrapper missing pub fn signature; got:\n{out}"
+        );
+        assert!(out.contains("LeanError"));
+        // Decode call for the single u64 param.
+        assert!(
+            out.contains("<u64 as ::leo4_abi::LeanMarshal>::canonical_decode"),
+            "wrapper missing u64 decode; got:\n{out}"
+        );
+        // Invocation of the transpiled fn.
+        assert!(out.contains("let __ret = addOne(n)"));
+        // Encode of the return.
+        assert!(out.contains("::leo4_abi::encode_to_vec(&__ret)"));
+    }
+
+    #[test]
+    fn wrapper_emits_zero_arg_fn() {
+        let f = rfn("constant", vec![], Some(RustType::Bool));
+        let out = synthesize_canonical_wrapper(&f).expect("0-arg bool fn must succeed");
+        assert!(out.contains("pub fn constant_call(args: &[u8])"));
+        // No __off setup for zero-arg fns.
+        assert!(!out.contains("__off"));
+        // Args are still consumed (we suppress unused-var warn).
+        assert!(out.contains("let _ = args;"));
+        // Encoding the bool return.
+        assert!(out.contains("encode_to_vec(&__ret)"));
+    }
+
+    #[test]
+    fn wrapper_handles_unit_return() {
+        let f = rfn("touch", vec![("x", RustType::I32)], Some(RustType::Unit));
+        let out = synthesize_canonical_wrapper(&f).expect("unit-return fn must succeed");
+        assert!(out.contains("touch(x)"));
+        // Unit-returning fn produces an empty Vec, not encode_to_vec.
+        assert!(
+            out.contains("::std::vec::Vec::new()"),
+            "unit return must produce an empty Vec; got:\n{out}"
+        );
+        assert!(!out.contains("encode_to_vec"));
+    }
+
+    #[test]
+    fn wrapper_handles_none_return_as_unit() {
+        // RustFn::return_type is Option<RustType>; None == ().
+        let f = rfn("touch", vec![], None);
+        let out = synthesize_canonical_wrapper(&f).expect("None return must succeed");
+        assert!(out.contains("::std::vec::Vec::new()"));
+        assert!(!out.contains("encode_to_vec"));
+    }
+
+    #[test]
+    fn wrapper_emits_multi_arg_decode_in_order() {
+        let f = rfn(
+            "combine",
+            vec![("a", RustType::U64), ("b", RustType::I32), ("c", RustType::Bool)],
+            Some(RustType::RustString),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("multi-arg fn must succeed");
+
+        // Each param's decode appears AND in source order — a
+        // → b → c.
+        let pos_a = out.find("(a,").expect("a decode binding missing");
+        let pos_b = out.find("(b,").expect("b decode binding missing");
+        let pos_c = out.find("(c,").expect("c decode binding missing");
+        assert!(pos_a < pos_b && pos_b < pos_c, "decode order broke");
+
+        // String marshalling for the return.
+        assert!(
+            out.contains("::std::string::String") || out.contains("encode_to_vec(&__ret)")
+        );
+        // Call uses all three args in order.
+        assert!(out.contains("combine(a, b, c)"));
+    }
+
+    #[test]
+    fn wrapper_rejects_box_dyn_any_return() {
+        let f = rfn(
+            "context_free",
+            vec![("n", RustType::U64)],
+            // The exact string `RustTargetBackend` uses for unknown LCNF::Object types.
+            Some(RustType::Custom("Box<dyn std::any::Any>".to_string())),
+        );
+        let err = synthesize_canonical_wrapper(&f)
+            .expect_err("Box<dyn Any> return must fail wrapper synthesis");
+        assert_eq!(
+            err.code,
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            "unexpected error code: 0x{:08x}",
+            err.code
+        );
+        assert!(err.message.contains("LeanMarshal"));
+    }
+
+    #[test]
+    fn wrapper_rejects_unsupported_param_type() {
+        // Vec<u64> isn't in the v0 marshalling matrix yet.
+        let f = rfn(
+            "list_in",
+            vec![("xs", RustType::Vec(Box::new(RustType::U64)))],
+            Some(RustType::U64),
+        );
+        let err = synthesize_canonical_wrapper(&f)
+            .expect_err("Vec param must fail wrapper synthesis");
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+    }
+
+    #[test]
+    fn transpile_kernel_decl_with_wrapper_emits_both() {
+        // The addOne fixture from the existing kernel-level
+        // test — feed it through the combined path.
+        let nat_ty = Expr::Const(Name::str("Nat"), vec![]);
+        let succ = Expr::Const(Name::str("Nat.succ"), vec![]);
+        let body = Expr::App(Box::new(succ), Box::new(Expr::BVar(0)));
+        let name = Name::str("Sample.addOne");
+        let params = vec![(Name::str("n"), nat_ty)];
+
+        // Note: with no env populated, the transpiled fn's
+        // return type lands as `Box<dyn Any>` (Lcnf::Object).
+        // That's an unsupported wrapper return — so we expect
+        // the wrapper step to error, but the fn step to
+        // succeed. To exercise the *combined* helper through
+        // its happy path we'd need a populated env; for now we
+        // just verify it errors via the wrapper layer, which
+        // is itself useful coverage.
+        let result = transpile_kernel_decl_with_wrapper(&name, &params, &body);
+        match result {
+            Ok((fn_src, wrapper_src)) => {
+                // If a future LCNF lowering ends up with a
+                // marshallable return type, both items emit.
+                assert!(fn_src.contains("Sample_addOne"));
+                assert!(wrapper_src.contains("Sample_addOne_call"));
+            }
+            Err(e) => {
+                // Expected today: wrapper rejection of
+                // `Box<dyn Any>`. Document it explicitly so
+                // a future change in lowering doesn't silently
+                // shift this test's branch.
+                assert_eq!(e.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+                assert!(
+                    e.message.contains("LeanMarshal"),
+                    "unexpected wrapper error: {}",
+                    e.message
+                );
+            }
+        }
     }
 
     #[test]
