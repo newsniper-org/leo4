@@ -172,6 +172,20 @@ fn lower_type(
                 "Cyc<i> token escaped resolution into the WIT lowering pass"
             )
         }
+        Fn { .. } => {
+            // Phase 10-B1 entry-gate: function-arrow types are accepted
+            // by the IDL parser and mangling layer, but WIT lowering
+            // has no first-class equivalent. Component-Model WIT
+            // doesn't expose first-class function values to imports /
+            // exports; the closest fit would be a synthetic opaque
+            // `resource` per arrow shape. That mapping lands with the
+            // B1.x runtime; for now lowering an export that uses
+            // `fn(…) -> …` is a build-time error.
+            panic!(
+                "function-arrow types are not yet WIT-lowerable (Phase 10-B1.x runtime deferred); \
+                 do not use `fn(…) -> …` in IDL that needs a `.wit` companion"
+            )
+        }
     }
 }
 
@@ -211,6 +225,7 @@ fn type_contains_self(t: &IDLType) -> bool {
         Record { args, .. } | Variant { args, .. } | Resource { args, .. } => {
             args.iter().any(type_contains_self)
         }
+        Fn { args, ret } => args.iter().any(type_contains_self) || type_contains_self(ret),
         _ => false,
     }
 }

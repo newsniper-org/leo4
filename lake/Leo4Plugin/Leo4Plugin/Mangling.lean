@@ -58,6 +58,12 @@ partial def mangleType : IDLType → String
   -- Mirrors `crates/schema-idl/src/mangle.rs`'s `Cyc(i)` arm
   -- byte-for-byte.
   | .cyc i      => "c" ++ toString i ++ "c"
+  -- Phase 10-B1 function-arrow: `fn(T₁,…,Tₙ) -> R` mangles as
+  -- `A_<tuple-of-args>_<ret>_a`. Mirrors `mangle_type` in
+  -- `crates/schema-idl/src/mangle.rs` byte-for-byte.
+  | .fn args ret =>
+      let argsTuple := mangleType (.tuple args)
+      "A_" ++ argsTuple ++ "_" ++ mangleType ret ++ "_a"
 
 /-! ## Schema hash (SPEC/mangling.md §3) -/
 
@@ -161,6 +167,12 @@ partial def idlToLeanType : IDLType → String
   -- and the deriving handler closes the cycle through its own
   -- `mutual ... end` block, so a wildcard suffices here.
   | .cyc _          => "_"
+  -- Phase 10-B1 entry-gate: function-arrow types parse + mangle but
+  -- the Lean wrapper template doesn't yet emit closure thunks for
+  -- them (that's the B1.x runtime). Underscore lets the wrapper
+  -- type-check; the actual runtime substitutes a typed
+  -- `Leo4.LeanCallback` once it lands.
+  | .fn _ _         => "_"
 
 /-! ## Function-name mangling (SPEC/mangling.md §1) -/
 
@@ -256,6 +268,8 @@ partial def idlForm : IDLType → String
   | .self            => "Self"
   | .selfApp args    => "Self<" ++ String.intercalate ", " (args.toList.map idlForm) ++ ">"
   | .cyc i           => "Cyc<" ++ toString i ++ ">"
+  | .fn args ret     =>
+      "fn(" ++ String.intercalate ", " (args.toList.map idlForm) ++ ") -> " ++ idlForm ret
 
 /-- Render the `<T0, T1>` generic-params suffix that immediately follows
 the fqn in a nominal declaration. Empty when there are no generics. -/

@@ -44,6 +44,18 @@ pub enum IDLType {
     /// `mutual { … }` block; resolvers reject `Cyc<i>` references that
     /// escape their group or that point past the group's last member.
     Cyc(u32),
+    /// `fn(T1, …, Tn) -> R` — first-class function-arrow type (Phase
+    /// 10-B1, 2026-05-21). Wire format is a single `u64` callback_id
+    /// per `SPEC/canonical-abi.md` §15. Mangles as
+    /// `A_<tuple-of-args>_<ret>_a` per `SPEC/mangling.md` §2 (filling
+    /// the previously-TBD function-arrow slot).
+    ///
+    /// The IDL parser accepts the surface syntax `fn(T1, T2) -> R`
+    /// at any type position. Re-entrant dispatch (Lean ↔ Rust
+    /// callbacks) is a runtime concern landed in a later substep
+    /// (B1.x); the IDL / mangling layer is callable on its own for
+    /// cross-impl conformance.
+    Fn { args: Vec<IDLType>, ret: Box<IDLType> },
 }
 
 /// User-defined nominal type declarations the plugin discovers by walking

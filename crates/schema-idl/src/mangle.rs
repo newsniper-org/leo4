@@ -60,6 +60,14 @@ pub fn mangle_type(t: &IDLType) -> String {
         Self_ => "self".into(),
         SelfApp(args) => format!("self_{}_x", join_underscore(args)),
         Cyc(i) => format!("c{i}c"),
+        Fn { args, ret } => {
+            // SPEC/mangling.md §2 "Function arrow": fn(T1,…,Tn) -> R
+            // mangles as `A_<tuple-of-args>_<ret>_a`. Reuses the tuple
+            // mangling for args to keep delimiter parsing
+            // unambiguous (the `_t` suffix terminates the arg list).
+            let args_tuple = mangle_type(&IDLType::Tuple(args.clone()));
+            format!("A_{args_tuple}_{}_a", mangle_type(ret))
+        }
     }
 }
 
@@ -192,5 +200,49 @@ mod tests {
         let h = Hash { value: 0 };
         let m = mangle("p", "i", "hello", &[], h);
         assert!(m.starts_with("leo4__p__i__hello____h"));
+    }
+
+    #[test]
+    fn fn_arrow_basic() {
+        // Phase 10-B1: `fn(u32) -> u64` → `A_T_u32_t_u64_a`.
+        let f = IDLType::Fn {
+            args: vec![IDLType::U32],
+            ret: Box::new(IDLType::U64),
+        };
+        assert_eq!(mangle_type(&f), "A_T_u32_t_u64_a");
+    }
+
+    #[test]
+    fn fn_arrow_multi_arg() {
+        // `fn(u8, u16) -> bool` → `A_T_u8_u16_t_b_a`.
+        let f = IDLType::Fn {
+            args: vec![IDLType::U8, IDLType::U16],
+            ret: Box::new(IDLType::Bool),
+        };
+        assert_eq!(mangle_type(&f), "A_T_u8_u16_t_b_a");
+    }
+
+    #[test]
+    fn fn_arrow_nullary() {
+        // `fn() -> string` → `A_T__t_str_a` (empty tuple body).
+        let f = IDLType::Fn {
+            args: vec![],
+            ret: Box::new(IDLType::String),
+        };
+        assert_eq!(mangle_type(&f), "A_T__t_str_a");
+    }
+
+    #[test]
+    fn fn_arrow_higher_order() {
+        // `fn(u8) -> (fn(u32) -> u64)`: nested arrow.
+        let inner = IDLType::Fn {
+            args: vec![IDLType::U32],
+            ret: Box::new(IDLType::U64),
+        };
+        let outer = IDLType::Fn {
+            args: vec![IDLType::U8],
+            ret: Box::new(inner),
+        };
+        assert_eq!(mangle_type(&outer), "A_T_u8_t_A_T_u32_t_u64_a_a");
     }
 }

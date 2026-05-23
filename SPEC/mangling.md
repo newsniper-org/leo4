@@ -115,6 +115,16 @@ mangle_type(Cyc<i>)          = "c" ++ toString i ++ "c"
                               -- members; the index is 0-based in
                               -- declaration order. See
                               -- SPEC/phase-6-mutual.md §2.
+
+mangle_type(fn(T1,…,Tn) -> R) = "A_" ++ mangle_type(tuple<T1,…,Tn>)
+                              ++ "_" ++ mangle_type(R) ++ "_a"
+                              -- Phase 10-B1 (2026-05-21): first-class
+                              -- function-arrow type. The args are
+                              -- wrapped in the tuple mangling
+                              -- (`T_…_t`) so the inner separators
+                              -- don't collide with the outer `_a`
+                              -- terminator. A 0-arg fn mangles as
+                              -- `A_T__t_R_a` (empty tuple body).
 ```
 
 ### Fully-qualified names
@@ -177,10 +187,11 @@ Example: `func map<F : Type -> Type, A, B>(x: F<A>, f: A -> B) -> F<B>;`
 with the instantiation `F = list, A = u32, B = u64` substitutes to
 `map(x: list<u32>, f: u32 -> u64) -> list<u64>`; the parameter type
 list `[list<u32>, u32 -> u64]` mangles as
-`L_u32_l_<arrow-mangling-TBD>`. Function-arrow mangling for callback
-parameters is unspecified — the function-pointer ABI is not on the
-phase ladder, and no callback-bearing export exists yet. The slot
-exists in case a downstream caller needs it.
+`L_u32_l_A_T_u32_t_u64_a` (Phase 10-B1 wired the previously-TBD
+function-arrow slot per the rule in §2 above). The IDL surface
+syntax for a function-arrow type is `fn(T1, …, Tn) -> R`; consumers
+that author IDL by hand SHOULD prefer the `fn(…) -> …` form because
+it is the production parser's accepted spelling.
 
 ## 4. Kind discipline
 

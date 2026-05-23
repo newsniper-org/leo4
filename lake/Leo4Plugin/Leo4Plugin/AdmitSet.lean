@@ -50,6 +50,12 @@ inductive IDLType where
   resolver rejects `Cyc<i>` outside any group or with `i ≥ group_size`.
   Mangles as `c<i>c`. -/
   | cyc (i : UInt32)
+  /-- `fn(T₁, …, Tₙ) -> R` — first-class function-arrow type (Phase
+  10-B1, 2026-05-21). Wire format is a single `u64` callback_id;
+  mangles as `A_<tuple-of-args>_<ret>_a` per `SPEC/mangling.md` §2.
+  Re-entrant dispatch (Lean ↔ Rust callbacks) lands as a runtime
+  follow-up (B1.x); this layer is the cross-impl-conformance surface. -/
+  | fn (args : Array IDLType) (ret : IDLType)
   deriving Repr, Inhabited, BEq
 
 /-- A user-package nominal type declaration. The plugin discovers these by
@@ -123,6 +129,7 @@ partial def substIDL (env : Array (String × IDLType)) : IDLType → IDLType
   | .tuple ts          => .tuple (ts.map (substIDL env))
   | .io inner          => .io (substIDL env inner)
   | .selfApp args      => .selfApp (args.map (substIDL env))
+  | .fn args ret       => .fn (args.map (substIDL env)) (substIDL env ret)
   | other              => other
 
 /-- Zip a declaration's `generics : Array Name` with concrete `args :

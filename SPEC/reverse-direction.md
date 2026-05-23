@@ -648,6 +648,83 @@ dispatcher may surface include: `0x05` (handshake mismatch),
 `0x07` (return buffer too small — propagated identically to
 forward direction).
 
+## 10a. Re-entrant callbacks (Phase 10-B1 design landing, runtime deferred)
+
+A `#[leo4::export]` Rust function whose signature includes a
+function-arrow parameter (e.g. `fn(formula: Formula, ask: fn(SubFormula) -> bool) -> bool`)
+will, at runtime, need to **call back into the Lean process** to
+invoke the closure that the Lean caller passed. The wire shape for
+`fn(…) -> R` is a single `u64 callback_id` (see
+`SPEC/canonical-abi.md` §13a); converting that id into an actual
+invocation is what this section specifies.
+
+This section is the **design landing** that pins the protocol shape
+so cross-impl IDL / mangling conformance can ship now (Phase
+10-B1). The runtime implementation (frames, dispatcher state
+machine, Lean-side closure registry) is deferred to a Phase
+10-B1.x follow-up.
+
+### Wire-level frame extension
+
+The IPC protocol gains two new frame kinds in the worker → main
+direction, interleaved with normal `RESPONSE` frames during an
+in-flight `REQUEST`:
+
+| Magic | Direction | Payload |
+|---|---|---|
+| `0x4C45 4351 'LECQ'` | worker → main | u64 callback_id, u32 args_len, args_bytes |
+| `0x4C45 4352 'LECR'` | main → worker | u32 status, u32 ret_len, ret_bytes |
+
+(`LECQ` = "leo4 callback query", `LECR` = "leo4 callback
+response". The earlier-defined `LEAN`/`LEAR` magics remain the
+outer request/response envelope.)
+
+While a worker is executing a `REQUEST` that includes function-arrow
+arguments, every invocation of the closure inside Rust code blocks
+the worker on `read()` until the main process answers `LECR`. The
+main process side, on dispatching the original request, enters a
+**callback-receiving loop** that handles any number of `LECQ`
+frames before the final `LEAR` carrying the outer request's
+return value.
+
+### Lean-side closure registry
+
+The Lean wrapper that generates the outbound call allocates a
+fresh `u64` from a thread-local counter for each closure being
+sent, stores `id → IO α` in a `HashMap`, then deallocates the
+entry as soon as the outer call returns (success OR error). Reusing
+an id across calls is permitted; the registry is per-call-scope.
+
+### Rust-side closure thunks
+
+The `leo4-macros::export` proc-macro recognises function-arrow
+parameter types and substitutes a typed `LeanCallback<R, Args>`
+wrapper struct holding the opaque `callback_id` and a method
+`invoke(args) -> Result<R, LeanError>` that:
+1. encodes the args via canonical-ABI,
+2. emits a `LECQ` frame on the IPC channel,
+3. blocks on `LECR`,
+4. decodes the return.
+
+The macro statically rejects function-arrow parameters that
+themselves contain `Self` / `Cyc<i>` (no nested boundary
+recursion for v0).
+
+### Lifetime + cleanup invariants
+
+- The Lean main process MUST deregister the closure id immediately
+  after the outer call returns, even if the worker crashes.
+  `LEO4_RUST_WORKER_RESTARTED` (Phase 10-A5 follow-up) is the
+  signal that triggers this purge.
+- The Rust worker MUST NOT retain a `LeanCallback` past the body
+  of the export it was passed to. Holding one until later (e.g.
+  in a `static`) is undefined behaviour and the runtime is
+  permitted to abort the worker on detection.
+- Schema hash includes the function-arrow type and its
+  args/return in the same way as any other type, via the
+  mangling above. A `fn(u8) -> u8` parameter rotates the schema
+  hash compared to its absence.
+
 ## 11. C Standard for `libleo4_rust_bridge.a`
 
 The dispatcher is a single C translation unit. **Baseline:

@@ -90,6 +90,11 @@ pub fn idl_form(t: &IDLType) -> String {
             args.iter().map(idl_form).collect::<Vec<_>>().join(", ")
         ),
         Cyc(i) => format!("Cyc<{i}>"),
+        Fn { args, ret } => format!(
+            "fn({}) -> {}",
+            args.iter().map(idl_form).collect::<Vec<_>>().join(", "),
+            idl_form(ret)
+        ),
     }
 }
 

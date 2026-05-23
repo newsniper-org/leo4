@@ -58,6 +58,10 @@ pub fn substitute(ty: &IDLType, env: &[(String, IDLType)]) -> IDLType {
         Tuple(ts) => Tuple(ts.iter().map(|x| substitute(x, env)).collect()),
         Io(t) => Io(Box::new(substitute(t, env))),
         SelfApp(ts) => SelfApp(ts.iter().map(|x| substitute(x, env)).collect()),
+        Fn { args, ret } => Fn {
+            args: args.iter().map(|x| substitute(x, env)).collect(),
+            ret: Box::new(substitute(ret, env)),
+        },
         // Primitives + Enum + Flags + bare Self: identity.
         t => t.clone(),
     }

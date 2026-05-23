@@ -7,6 +7,88 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-B1: function-arrow / callback ABI (IDL + mangling entry-gate, 2026-05-21)
+
+Wires the previously-TBD function-arrow mangling slot
+(`SPEC/mangling.md` §2 "function-arrow mangling for callback
+parameters is unspecified") and lifts the IDL grammar to accept
+`fn(T1, …, Tn) -> R` as a first-class type. The runtime —
+re-entrant Lean ↔ Rust dispatch through the worker IPC — lands
+in a Phase 10-B1.x follow-up; this commit ships the IDL +
+mangling layer that the cross-impl conformance harness can
+already exercise.
+
+**IDL surface**: `fn(T1, …, Tn) -> R` at any type position.
+The parser (both `crates/schema-idl` and the Lake plugin) accepts
+the syntax verbatim.
+
+**Mangling rule**: `mangle_type(fn(T1,…,Tn) -> R) =
+"A_" ++ mangle_type(tuple<T1,…,Tn>) ++ "_" ++ mangle_type(R)
+++ "_a"`. Wrapping the args in tuple mangling keeps inner
+separators unambiguous; an empty arg list mangles as
+`A_T__t_R_a`. Identical implementation in
+`crates/schema-idl/src/mangle.rs` and
+`lake/Leo4Plugin/Leo4Plugin/Mangling.lean` — cross-impl
+mangling stays green (`70` mangled names byte-identical;
+schema_hash `qi5gb74dbjyxo` unchanged because no fixture
+in `tests/sample-lean/` uses the new type yet).
+
+**Wire format** (SPEC/canonical-abi.md §13a, new): a single
+`u64 callback_id`. `callback_id == 0` is reserved as the null
+sentinel (matches §12's `INVALID_RESOURCE_HANDLE`): encoders
+reject with `LEO4_ERR_ENCODE_ERROR` (0x02), decoders with
+`LEO4_ERR_INVALID_HANDLE` (0x03). Lifetime is bound to the
+enclosing call.
+
+**Re-entrant callback frame protocol** (SPEC/reverse-direction.md
+§10a, new): designed but **not yet implemented**. While a
+worker is processing a `REQUEST` that carries function-arrow
+args, every closure invocation emits a `LECQ` (callback query)
+frame back to the Lean main process, which responds with a
+`LECR` frame. The Lean wrapper holds a per-call-scope
+`HashMap<u64, IO α>` closure registry; ids are allocated from
+a thread-local counter and freed when the outer call returns.
+
+**Type-level additions**:
+* `schema_idl::IDLType::Fn { args, ret }` variant + match
+  arms in `mangle`, `render`, `subst`.
+* `Leo4Plugin.AdmitSet.IDLType.fn` constructor + `substIDL`
+  case.
+* Parser support: `fn(...) -> ...` keyword in both impls.
+* `idl_form` round-trip: `fn(u32, str) -> bool` ↔
+  `Fn { args: [U32, String], ret: Bool }`.
+
+**Guards** for layers that don't yet support function-arrow:
+* `leo4-idl::wit::lower_type` panics with a clear "Phase
+  10-B1.x runtime deferred" message if a function-arrow type
+  reaches WIT lowering. The plugin's admit-set machinery
+  shouldn't produce such IDL until the runtime lands; users
+  who add `fn(…) -> …` to a Lean export by hand will hit this
+  guard at `lake exe leo4plugin --with-lower` time.
+* `Mangling.lean::idlToLeanType` returns `_` for `.fn` so the
+  Lean wrapper template type-checks; the actual closure thunk
+  gets substituted by the B1.x runtime.
+
+Tests:
+* 4 new `mangle_type` cases (`fn(u32) -> u64`, multi-arg,
+  nullary, higher-order nesting).
+* 2 new parser cases (`fn` in function param, nullary).
+* `tests/mangling/run.sh` still green (70 mangled names
+  byte-identical, schema_hash unchanged).
+* Lean plugin compiles + smoke-plugin runs green.
+
+Workspace test count: 150 → 156.
+
+**B1.x follow-ups** (not in this commit):
+* Re-entrant dispatcher state machine in
+  `shim/leo4_rust_bridge.c` (LECQ/LECR frame handling).
+* Lean-side `Leo4.LeanCallback` closure registry +
+  per-call-scope GC.
+* Rust-side `LeanCallback<R, Args>` wrapper in
+  `crates/leo4-macros::export` proc-macro.
+* WIT lowering: `fn(…) -> …` → opaque resource alias once
+  the wasm path has a use case.
+
 ### Fixed — Phase 10-F1: reserved LeanError code fixtures (2026-05-21)
 
 Phase 4's "every reserved `LeanError` code has at least one

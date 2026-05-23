@@ -255,6 +255,32 @@ reverse direction; full table in `SPEC/reverse-direction.md` §10):
 | `0x0002_0005` | `LEO4_ERR_RUST_DLSYM_FAILED` — handshake passed but `dlsym(mangled)` returned NULL |
 | `0x0002_0006` | `LEO4_ERR_RUST_IPC_FAILED` — IPC round-trip failed mid-call |
 
+## 13a. Function-arrow types — `fn(T₁,…,Tₙ) -> R`  (Phase 10-B1)
+
+Wire format:
+```
+callback_id:u64
+```
+- `callback_id` is opaque to the receiving side. The producing side
+  (the one *passing* a closure across the boundary) is responsible
+  for resolving the id back to a concrete callable; the receiving
+  side stores it as an opaque token and invokes it via the
+  re-entrant dispatch path documented in `SPEC/reverse-direction.md`
+  §11 (Lean ↔ Rust closure callbacks).
+- `callback_id == 0` is reserved as the null sentinel
+  (`INVALID_RESOURCE_HANDLE` shape from §12). Encoders reject with
+  `LEO4_ERR_ENCODE_ERROR` (`0x02`); decoders reject with
+  `LEO4_ERR_INVALID_HANDLE` (`0x03`).
+- IDL surface syntax is `fn(T₁, …, Tₙ) -> R`; mangling is
+  `A_<tuple-of-args>_<ret>_a` per `SPEC/mangling.md` §2.
+- Lifetime: a `callback_id` is valid only for the duration of the
+  enclosing call. The receiving side MUST NOT retain the id past the
+  return; doing so produces undefined behaviour. (`own<fn(…) -> R>`
+  for transferable closures is reserved but not yet specified.)
+- Re-entrant dispatch runtime lands in a Phase 10-B1.x follow-up;
+  this section pins the wire shape so cross-impl conformance tests
+  (mangling + IDL round-trip) can ship ahead of the runtime.
+
 ## 14. Function Call Convention
 
 Every leo4 function, regardless of signature, is callable from Rust via this

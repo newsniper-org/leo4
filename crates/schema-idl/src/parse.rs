@@ -828,6 +828,34 @@ impl<'a> Parser<'a> {
             self.expect_char('>')?;
             return Ok(RawType::Builtin(IDLType::Io(Box::new(raw_to_builtin(t)?))));
         }
+        // Phase 10-B1: `fn(T1, …, Tn) -> R` first-class function-arrow type.
+        if self.peek_keyword("fn") {
+            self.expect_keyword("fn")?;
+            self.skip_ws();
+            self.expect_char('(')?;
+            let mut args: Vec<IDLType> = Vec::new();
+            self.skip_ws();
+            if self.peek_char() != Some(')') {
+                loop {
+                    args.push(raw_to_builtin(self.parse_type()?)?);
+                    self.skip_ws();
+                    if self.peek_char() == Some(',') {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.expect_char(')')?;
+            self.skip_ws();
+            self.expect_char('-')?;
+            self.expect_char('>')?;
+            let ret = raw_to_builtin(self.parse_type()?)?;
+            return Ok(RawType::Builtin(IDLType::Fn {
+                args,
+                ret: Box::new(ret),
+            }));
+        }
         // D-i 2026-05-19: `future<T>` and `stream<T>` are effect
         // markers, valid only at a func's immediate return position
         // (handled in `parse_func_decl`). Anywhere else — inside a
@@ -1962,5 +1990,39 @@ mod tests {
         .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("Cyc<5>"), "{msg}");
+    }
+
+    #[test]
+    fn fn_arrow_in_param() {
+        // Phase 10-B1: function-arrow as a function parameter.
+        let s = parse(
+            "package p; interface i { func solve(_0: u32, _1: fn(u32) -> bool) -> bool; }",
+        )
+        .unwrap();
+        assert_eq!(s.funcs.len(), 1);
+        let f = &s.funcs[0];
+        assert_eq!(f.params.len(), 2);
+        assert_eq!(
+            f.params[1].1,
+            IDLType::Fn {
+                args: vec![IDLType::U32],
+                ret: Box::new(IDLType::Bool)
+            }
+        );
+    }
+
+    #[test]
+    fn fn_arrow_nullary_parses() {
+        let s = parse(
+            "package p; interface i { func run(_0: fn() -> string) -> string; }",
+        )
+        .unwrap();
+        assert_eq!(
+            s.funcs[0].params[0].1,
+            IDLType::Fn {
+                args: vec![],
+                ret: Box::new(IDLType::String)
+            }
+        );
     }
 }
