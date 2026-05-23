@@ -1068,6 +1068,169 @@ pub fn transpile_kernel_decl_with_wrapper(
     Ok((fn_src, wrapper_src))
 }
 
+// ─── OX2 user-record synthesis (option (b) per ROADMAP) ─────────────────
+//
+// Upstream `RustTargetBackend` v0.1.2 emits only `RustItem::Fn`
+// — no struct / enum / impl shapes. leo4-oxilean-build's
+// option (b) per ROADMAP is to synthesise these shapes
+// ourselves from the elaborated `Decl::Inductive` /
+// `Decl::Structure`.
+//
+// Structures land first (this commit): a Lean `structure Point
+// where x : UInt32; y : UInt32` becomes a Rust `pub struct
+// Point { pub x: u32, pub y: u32 }` plus an inline
+// `impl ::leo4_abi::LeanMarshal for Point` whose
+// canonical_encode / canonical_decode body sequences the
+// fields in declaration order (matching the leo4 derive
+// macro's expansion).
+//
+// We emit an **inline impl** rather than a `#[derive(LeanMarshal)]`
+// attribute so the generated crate's only leo4 dep is
+// `leo4-abi` — no need to drag in `leo4-macros` (which would
+// require a procedural-macro toolchain in the consumer's
+// build environment) or `leo4` itself.
+
+/// One named field of a Lean structure, lowered to its Rust
+/// representation. Used to drive `synthesize_struct_type`.
+#[derive(Debug, Clone)]
+pub struct StructField {
+    /// Field name (verbatim from Lean — no mangling applied,
+    /// since structure fields can already be valid Rust idents).
+    pub name: String,
+    /// Field's Rust type. Must be marshallable per
+    /// `render_marshallable_type`; the helper validates this
+    /// and rejects non-marshallable types loudly.
+    pub ty: RustType,
+}
+
+/// Synthesise a Rust struct declaration + matching
+/// `LeanMarshal` impl for a Lean `structure`. The emitted
+/// source has the shape:
+///
+/// ```rust,ignore
+/// pub struct <name> { pub <field1>: <ty1>, pub <field2>: <ty2>, ... }
+///
+/// impl ::leo4_abi::LeanMarshal for <name> {
+///     fn canonical_encode(&self, buf: &mut Vec<u8>) {
+///         self.field1.canonical_encode(buf);
+///         self.field2.canonical_encode(buf);
+///         ...
+///     }
+///     fn canonical_decode(buf: &[u8], off: usize)
+///         -> Result<(Self, usize), ::leo4_abi::LeanError>
+///     {
+///         let (field1, off) = <ty1 as ::leo4_abi::LeanMarshal>::canonical_decode(buf, off)?;
+///         let (field2, off) = <ty2 as ::leo4_abi::LeanMarshal>::canonical_decode(buf, off)?;
+///         ...
+///         Ok((Self { field1, field2, ... }, off))
+///     }
+/// }
+/// ```
+///
+/// Encode / decode order matches the leo4 derive macro's
+/// expansion (`crates/leo4-macros-backend/src/lib.rs` —
+/// fields in declaration order), so a struct synthesised
+/// this way is byte-compatible with a hand-written
+/// `#[derive(LeanMarshal)] struct` of the same shape.
+///
+/// # Errors
+/// `LeanError(ENCODE_ERROR)` if any field's type isn't
+/// marshallable per `render_marshallable_type` (the OX2
+/// matrix — primitives + carriers + recursive containers).
+pub fn synthesize_struct_type(
+    name: &str,
+    fields: &[StructField],
+) -> Result<String, LeanError> {
+    use std::fmt::Write as _;
+
+    if fields.is_empty() {
+        // A 0-field unit-like struct is technically valid Lean
+        // (`structure Foo where`), but the marshal wire form
+        // is zero bytes — caller probably didn't intend this.
+        // Allow it but emit a unit struct for clarity.
+        let mut s = String::new();
+        writeln!(s, "pub struct {name};").unwrap();
+        writeln!(s).unwrap();
+        writeln!(s, "impl ::leo4_abi::LeanMarshal for {name} {{").unwrap();
+        writeln!(s, "    fn canonical_encode(&self, _buf: &mut ::std::vec::Vec<u8>) {{}}").unwrap();
+        writeln!(s, "    fn canonical_decode(_buf: &[u8], off: usize)").unwrap();
+        writeln!(s, "        -> ::core::result::Result<(Self, usize), ::leo4_abi::LeanError>").unwrap();
+        writeln!(s, "    {{ ::core::result::Result::Ok((Self, off)) }}").unwrap();
+        writeln!(s, "}}").unwrap();
+        return Ok(s);
+    }
+
+    // Pre-validate every field type; bail before emitting
+    // anything so a partial struct never lands.
+    let mut rendered_tys: Vec<String> = Vec::with_capacity(fields.len());
+    for f in fields {
+        rendered_tys.push(render_marshallable_type(&f.ty)?);
+    }
+
+    let mut s = String::new();
+
+    // Struct decl
+    writeln!(s, "#[derive(Debug, Clone)]").unwrap();
+    writeln!(s, "pub struct {name} {{").unwrap();
+    for (f, rty) in fields.iter().zip(rendered_tys.iter()) {
+        writeln!(s, "    pub {fname}: {rty},", fname = f.name).unwrap();
+    }
+    writeln!(s, "}}").unwrap();
+    writeln!(s).unwrap();
+
+    // LeanMarshal impl
+    writeln!(s, "impl ::leo4_abi::LeanMarshal for {name} {{").unwrap();
+
+    // encode: sequence fields in declaration order
+    writeln!(
+        s,
+        "    fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {{"
+    )
+    .unwrap();
+    for f in fields {
+        writeln!(
+            s,
+            "        ::leo4_abi::LeanMarshal::canonical_encode(&self.{fname}, buf);",
+            fname = f.name
+        )
+        .unwrap();
+    }
+    writeln!(s, "    }}").unwrap();
+
+    // decode: walk offsets in declaration order, build Self
+    writeln!(s, "    fn canonical_decode(buf: &[u8], off: usize)").unwrap();
+    writeln!(
+        s,
+        "        -> ::core::result::Result<(Self, usize), ::leo4_abi::LeanError>"
+    )
+    .unwrap();
+    writeln!(s, "    {{").unwrap();
+    writeln!(s, "        let mut __off = off;").unwrap();
+    for (f, rty) in fields.iter().zip(rendered_tys.iter()) {
+        writeln!(
+            s,
+            "        let ({fname}, __next) = <{rty} as ::leo4_abi::LeanMarshal>::canonical_decode(buf, __off)?;",
+            fname = f.name
+        )
+        .unwrap();
+        s.push_str("        __off = __next;\n");
+    }
+    s.push_str("        ::core::result::Result::Ok((Self {");
+    for (i, f) in fields.iter().enumerate() {
+        if i > 0 {
+            s.push_str(", ");
+        } else {
+            s.push(' ');
+        }
+        s.push_str(&f.name);
+    }
+    s.push_str(" }, __off))\n");
+    writeln!(s, "    }}").unwrap();
+
+    writeln!(s, "}}").unwrap();
+    Ok(s)
+}
+
 // ─── §6 Cargo crate emit ─────────────────────────────────────────────────
 //
 // SPEC/rust-native-lean.md §3 + §9.3 endpoint: a Cargo crate
@@ -2028,6 +2191,143 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ─── OX2 user-record synthesis tests ──────────────────────────────
+
+    fn field(name: &str, ty: RustType) -> StructField {
+        StructField {
+            name: name.to_string(),
+            ty,
+        }
+    }
+
+    #[test]
+    fn struct_emits_decl_and_marshal_impl() {
+        let out = synthesize_struct_type(
+            "Point",
+            &[
+                field("x", RustType::U32),
+                field("y", RustType::U32),
+            ],
+        )
+        .expect("Point must synth");
+
+        // Struct decl with derives + pub fields.
+        assert!(out.contains("pub struct Point {"));
+        assert!(out.contains("pub x: u32,"));
+        assert!(out.contains("pub y: u32,"));
+
+        // LeanMarshal impl.
+        assert!(out.contains("impl ::leo4_abi::LeanMarshal for Point {"));
+
+        // Encode: fields in declaration order.
+        let enc_x = out.find("canonical_encode(&self.x,").expect("x encode");
+        let enc_y = out.find("canonical_encode(&self.y,").expect("y encode");
+        assert!(enc_x < enc_y, "encode must be in declaration order");
+
+        // Decode: fully-qualified marshal call per field, in
+        // declaration order; builds Self struct literal at end.
+        let dec_x = out.find("(x, __next)").expect("x decode binding");
+        let dec_y = out.find("(y, __next)").expect("y decode binding");
+        assert!(dec_x < dec_y, "decode must be in declaration order");
+        assert!(out.contains("Self { x, y }"));
+    }
+
+    #[test]
+    fn struct_emits_carrier_field_types() {
+        let out = synthesize_struct_type(
+            "MoneyBag",
+            &[
+                field("major", RustType::Custom("BigNat".to_string())),
+                field("minor", RustType::U32),
+            ],
+        )
+        .expect("MoneyBag must synth");
+        assert!(out.contains("pub major: ::leo4_abi::BigNat,"));
+        assert!(out.contains("<::leo4_abi::BigNat as ::leo4_abi::LeanMarshal>"));
+    }
+
+    #[test]
+    fn struct_emits_generic_container_field() {
+        let out = synthesize_struct_type(
+            "Bucket",
+            &[field(
+                "items",
+                RustType::Vec(Box::new(RustType::RustString)),
+            )],
+        )
+        .expect("Bucket<Vec<String>> must synth");
+        assert!(out.contains("pub items: ::std::vec::Vec<::std::string::String>,"));
+    }
+
+    #[test]
+    fn struct_rejects_unmarshallable_field_atomically() {
+        // First field is fine (u64); second field is bogus
+        // (user type with no marshalling support). The emit
+        // must fail and emit nothing — no partial struct.
+        let result = synthesize_struct_type(
+            "Bad",
+            &[
+                field("good", RustType::U64),
+                field("bad", RustType::Custom("UnknownThing".to_string())),
+            ],
+        );
+        let err = result.expect_err("unmarshallable field must reject");
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+        assert!(err.message.contains("UnknownThing"));
+    }
+
+    #[test]
+    fn struct_with_zero_fields_emits_unit_form() {
+        let out = synthesize_struct_type("Empty", &[]).expect("0-field must synth");
+        // Unit-struct syntax.
+        assert!(out.contains("pub struct Empty;"));
+        // Marshal impl is a no-op encoder + zero-byte decoder.
+        assert!(out.contains("impl ::leo4_abi::LeanMarshal for Empty {"));
+        assert!(out.contains("Self, off"));
+    }
+
+    #[test]
+    fn struct_with_single_field_builds_correct_literal() {
+        let out = synthesize_struct_type(
+            "Wrapper",
+            &[field("inner", RustType::I64)],
+        )
+        .expect("single-field must synth");
+        // Single-field literal — no leading comma.
+        assert!(out.contains("Self { inner }"));
+        assert!(out.contains("pub inner: i64,"));
+    }
+
+    #[test]
+    fn struct_emit_is_compatible_with_derive_macro_order() {
+        // The leo4 derive macro (`crates/leo4-macros-backend/`)
+        // encodes fields in declaration order. We assert this
+        // emit produces the same encode sequence so a struct
+        // synthesised this way is byte-compatible with a
+        // hand-written `#[derive(LeanMarshal)]` of the same
+        // shape (the OX2 invariant).
+        let out = synthesize_struct_type(
+            "Triple",
+            &[
+                field("a", RustType::U32),
+                field("b", RustType::U64),
+                field("c", RustType::Bool),
+            ],
+        )
+        .expect("Triple must synth");
+
+        let pa = out.find("canonical_encode(&self.a,").expect("a encode");
+        let pb = out.find("canonical_encode(&self.b,").expect("b encode");
+        let pc = out.find("canonical_encode(&self.c,").expect("c encode");
+        assert!(pa < pb && pb < pc, "encode order broke: {pa} {pb} {pc}");
+
+        // Decode also walks a → b → c in source order.
+        let da = out.find("(a, __next)").expect("a decode");
+        let db = out.find("(b, __next)").expect("b decode");
+        let dc = out.find("(c, __next)").expect("c decode");
+        assert!(da < db && db < dc, "decode order broke");
     }
 
     // ─── §6 Cargo crate emit tests ────────────────────────────────────

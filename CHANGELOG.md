@@ -7,6 +7,105 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 user records — `synthesize_struct_type` layer (2026-05-22)
+
+OX2 user-records sub-blocker, option (b) per ROADMAP
+(leo4-oxilean-build synthesises struct shapes itself; upstream
+`RustTargetBackend` v0.1.2 emits only `RustItem::Fn`).
+First increment: hand-built `RustType` fixture → emitted
+struct + LeanMarshal impl. SurfaceExpr lifter +
+elab-driven `Decl::Structure` integration are the next two
+increments.
+
+New public API:
+
+- `StructField { name: String, ty: RustType }` — one
+  named field, validated against the OX2 marshalling
+  matrix.
+- `synthesize_struct_type(name, fields) -> Result<String, LeanError>`
+  — emits the struct declaration + matching inline
+  `LeanMarshal` impl. Field encode / decode order matches
+  the leo4 derive macro's expansion
+  (`crates/leo4-macros-backend/`) so a struct synthesised
+  this way is byte-compatible with a hand-written
+  `#[derive(LeanMarshal)]` of the same shape.
+
+Sample output (from `examples/dump_struct.rs`,
+`pub struct MoneyBag { major: BigNat, minor: u32, label: String, flags: Vec<bool> }`):
+
+```rust
+#[derive(Debug, Clone)]
+pub struct MoneyBag {
+    pub major: ::leo4_abi::BigNat,
+    pub minor: u32,
+    pub label: ::std::string::String,
+    pub flags: ::std::vec::Vec<bool>,
+}
+
+impl ::leo4_abi::LeanMarshal for MoneyBag {
+    fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
+        ::leo4_abi::LeanMarshal::canonical_encode(&self.major, buf);
+        ::leo4_abi::LeanMarshal::canonical_encode(&self.minor, buf);
+        …
+    }
+    fn canonical_decode(buf: &[u8], off: usize)
+        -> ::core::result::Result<(Self, usize), ::leo4_abi::LeanError>
+    {
+        let mut __off = off;
+        let (major, __next) =
+            <::leo4_abi::BigNat as ::leo4_abi::LeanMarshal>::canonical_decode(buf, __off)?;
+        __off = __next;
+        …
+        ::core::result::Result::Ok((Self { major, minor, label, flags }, __off))
+    }
+}
+```
+
+Why inline impl, not `#[derive(LeanMarshal)]`: keeps the
+emitted crate's only leo4 dep at `leo4-abi`. A derive would
+need `leo4-macros` (proc-macro toolchain in the consumer's
+build env) + `leo4` itself (since the derive expands to
+`::leo4::LeanMarshal` fully-qualified). Inline-impl bypass
+preserves version-independence for the emitted crate.
+
+Coverage:
+
+- 0-field structs → unit-struct form (`pub struct Foo;`)
+  with a no-op encoder + zero-byte decoder.
+- 1-field structs → single-binding struct literal
+  (`Self { inner }` not `Self { inner, }`).
+- N-field structs (N≥2) → comma-separated bindings.
+- Field types must pass `render_marshallable_type` —
+  unmarshallable fields reject atomically before any
+  source is emitted (no partial structs).
+
+Tests 46 → 53 (+7):
+  + `struct_emits_decl_and_marshal_impl`
+  + `struct_emits_carrier_field_types`
+  + `struct_emits_generic_container_field`
+  + `struct_rejects_unmarshallable_field_atomically`
+  + `struct_with_zero_fields_emits_unit_form`
+  + `struct_with_single_field_builds_correct_literal`
+  + `struct_emit_is_compatible_with_derive_macro_order`
+
+`examples/dump_struct.rs` prints the synthesised source
+for a four-field `MoneyBag` fixture.
+
+clippy --all-targets -D warnings clean (sibling crate;
+main workspace unaffected).
+
+**Next OX2 increments** (sub-blocker still open):
+1. `SurfaceExpr` → `RustType` lifter so structures parsed
+   from real Lean source feed `synthesize_struct_type`
+   automatically.
+2. `transpile_source_to_unit` extension to recognise
+   `Decl::Structure` decls in the source stream.
+3. User-type pass-through in `render_marshallable_type` so
+   transpiled fns can reference user-defined structures by
+   name in their params / return types.
+4. Inductive (multi-ctor enums) — analogous
+   `synthesize_enum_type` with variant-payload widening.
+
 ### Added — `leo4-oxilean-build`: OX1 step a — `leo4-oxilean-build` CLI binary (2026-05-22)
 
 v1.0 RC blocker OX1 (step a — subprocess invocation
