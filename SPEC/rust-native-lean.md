@@ -492,6 +492,13 @@ forever, this path doesn't need them.
 
 ```
 [Lean source: lake/Leo4/Leo4/* + user package's @[leo4_export]s]
+        │ oxilean-elab::lean4_compat (textual pre-processor:
+        │                              `Lean4TermRewriter::standard`
+        │                              + `Lean4SyntaxAdapter::adapt_all`
+        │                              normalise ` => → -> `, `← → <-`,
+        │                              `where; → where`, `∧∨¬ → &&||!`)
+        ▼
+[Lean source in OxiLean parser dialect]
         │ oxilean-parse + oxilean-elab (parses, elaborates,
         │                                runs `@[leo4_export]` /
         │                                `deriving LeanMarshal`
@@ -556,10 +563,21 @@ Rust source**.
 
 ### 9.6 Open questions for the transpile path
 
-- [ ] **Does `oxilean-elab` parse arbitrary Lean 4 source
-      reliably?** Mathlib4's 99.7% parse-rate claim is a good
-      sign; the leo4 runtime library (`lake/Leo4/Leo4/*.lean`)
-      is small enough to be a useful litmus test.
+- [x] **Does `oxilean-elab` parse arbitrary Lean 4 source
+      reliably?** Partial — `oxilean-elab::lean4_compat` v0.1.2
+      provides a *textual* pre-processor (`Lean4TermRewriter::
+      standard` + `Lean4SyntaxAdapter::adapt_all`) that handles
+      arrow / bind / where / logic-op surface differences, but
+      *not* parser-level shape differences. Specifically,
+      OxiLean's `parse_definition` accepts
+      `def name {univs} : type := value` only — Lean 4
+      header binders `def f (x : T) : R := body` need an
+      *AST-level* lift above the parser (not yet implemented).
+      The leo4 runtime library (`lake/Leo4/Leo4/*.lean`) is
+      written in OxiLean-native body-lambda shape; user
+      packages that use header-binder syntax will need a
+      pre-pass. Wired in `sibling/leo4-oxilean-build/src/lib.rs::lean4_normalize`
+      (2026-05-22).
 - [ ] **Does the LCNF lowering preserve attribute metadata
       (specifically `@[leo4_export]` tags)?** Hook 3 is
       present at the elaborator level but its propagation to

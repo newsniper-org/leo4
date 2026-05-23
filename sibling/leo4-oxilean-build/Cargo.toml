@@ -37,3 +37,6 @@ unsafe_op_in_unsafe_fn = "warn"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 missing_errors_doc = "allow"
+# Product name `OxiLean` appears in docs unbracketed. Don't
+# force backticks around it — it's a brand, not a code symbol.
+doc_markdown = "allow"
