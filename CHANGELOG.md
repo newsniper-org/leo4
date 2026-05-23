@@ -7,6 +7,72 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-B5: variant payload widening (all-scalars multi-field, 2026-05-21)
+
+Widens the plugin's variant case-payload coverage one step
+beyond the W7-2d-iii minimum-viable shape that landed
+2026-05-20. The minimum supported:
+
+* 0 fields
+* all-Self N fields
+* single scalar / string / Cyc<i> field
+
+is now extended with:
+
+* **N scalar fields** (Phase 10-B5)
+
+i.e. an inductive case like `| mkPair (a : UInt32) (b : UInt64)`
+no longer falls through to the `LEO4_ERR_UNIMPLEMENTED` stub —
+the plugin emits a real per-instantiation
+`leo4_dec_<suffix>` / `leo4_enc_<suffix>` helper that:
+
+* decode: reads each field's wire bytes in order, allocates
+  `lean_alloc_ctor(disc, 0, total_sz)`, and writes each
+  scalar at its running byte offset via
+  `lean_ctor_set_<scalar-kind>(r, byte_offset, fN)`.
+* encode: reads each scalar from `lean_ctor_get_<kind>(v,
+  byte_offset)` and writes its bytes to the output buffer.
+
+Implementation:
+* New `CaseKind.allScalars (specs : Array (String × Nat ×
+  String))` constructor in
+  `lake/Leo4Plugin/Leo4Plugin/Main.lean`. Each spec carries
+  `(cType, wire size, ctor scalar-accessor suffix)`.
+* `variantCaseSupported` accepts multi-field cases when every
+  field passes `scalarCType.isSome`.
+* `classifyCase` computes the per-field `specs` array.
+* `renderVariantHelpers` gains decode + encode arms for
+  `.allScalars` that match the spec wire format
+  (`SPEC/canonical-abi.md` §9: discriminator u32 LE +
+  payload bytes, no padding).
+
+The wire format stays identical to what the cross-impl
+Rust side emits (sequence of canonically-encoded scalars,
+no padding), so the schema hash does NOT rotate just from
+this code path being present — `tests/sample-lean/` doesn't
+yet have a multi-scalar variant case, so the existing
+fixture's `schema_hash qi5gb74dbjyxo` and 70 mangled names
+stay byte-identical.
+
+`cargo test --workspace`: 156 unchanged. `lake build` +
+`tests/mangling/run.sh` green.
+
+**B5.x follow-ups** (still stub'd in the
+`LEO4_ERR_UNIMPLEMENTED` fall-through path):
+
+* Mixed scalar/object multi-field payloads (e.g.
+  `| mkPair (s : String) (n : UInt64)`). Needs the
+  `(objSlot, scalarOff)` two-axis layout `recordHandler`
+  already computes; lifting that to variants requires
+  threading `TyHandler`s into `renderVariantHelpers`.
+* Single-composite payloads (`list<T>`, `option<T>`,
+  nested record / variant). These would route through the
+  existing `TyHandler.decodeBlock` / `encodeBlock` API
+  rather than the variant's per-case-kind switch.
+* A fixture under `tests/sample-lean/` that exercises a
+  multi-scalar variant case for end-to-end byte-parity
+  validation. The schema hash WILL rotate when this lands.
+
 ### Added — Phase 10-D2: `lake run Leo4Rust/regenerate` script (2026-05-21)
 
 Moves the reverse-direction `leo4-rust-emit` invocation

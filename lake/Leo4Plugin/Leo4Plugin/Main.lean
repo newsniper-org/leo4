@@ -1322,7 +1322,12 @@ private def variantCaseSupported (fields : Array IDLType) (peers : Array String)
     | .string => true
     | .cyc i => i.toNat < peers.size
     | t       => (scalarCType t).isSome
-  else false
+  -- Phase 10-B5 (2026-05-21): multi-field where every field is a
+  -- scalar. Allocates `lean_alloc_ctor(disc, 0, total_sz)` and
+  -- packs each scalar at its running byte offset. Mixed
+  -- scalar/object multi-field payloads + single composite
+  -- (list/option/record/variant) cases stay deferred to B5.x.
+  else fields.all (fun t => (scalarCType t).isSome)
 
 private def variantAllCasesSupported
     (cases : Array (Name × Array IDLType)) (peers : Array String) : Bool :=
@@ -1344,6 +1349,11 @@ private inductive CaseKind
   | scalar (c : String) (sz : Nat) (kind : String)  -- single scalar (cType, wire size, ctor accessor suffix)
   | str                         -- single `string`
   | cyc (peerSuffix : String)   -- single `Cyc<i>` field, resolved to a peer's helper suffix
+  /-- Phase 10-B5: N scalar fields. `specs` carries
+  `(cType, wire size, ctor scalar-accessor suffix)` per field
+  in declaration order; per-field byte offset is computed as
+  the running sum of preceding `sz`s. -/
+  | allScalars (specs : Array (String × Nat × String))
 deriving Inhabited
 
 private def classifyCase
@@ -1360,7 +1370,16 @@ private def classifyCase
       match scalarCType t with
       | some sc => some (.scalar sc.c sc.size (scalarCtorKind sc.c))
       | none    => none
-  else none
+  else
+    -- Phase 10-B5: multi-field all-scalars.
+    let specs : Option (Array (String × Nat × String)) := Id.run do
+      let mut out : Array (String × Nat × String) := #[]
+      for f in fields do
+        match scalarCType f with
+        | some sc => out := out.push (sc.c, sc.size, scalarCtorKind sc.c)
+        | none    => return none
+      return some out
+    specs.map .allScalars
 
 /-- Emit forward decls + definitions for the self-recursive
 encoder/decoder helpers of one variant declaration. F-step shape
@@ -1443,6 +1462,29 @@ private def renderVariantHelpers
         "        *out = r;\n" ++
         "        return LEO4_OK;\n" ++
         "    " ++ rb ++ "\n"
+    | .allScalars specs =>
+      -- Phase 10-B5: N scalar fields. Wire format is the
+      -- concatenation of each field's bytes; Lean ctor packs them
+      -- as `lean_alloc_ctor(disc, 0, total_sz)` with each scalar
+      -- at its running byte offset.
+      let totalSz := specs.foldl (init := 0) fun acc (_, sz, _) => acc + sz
+      let mut localBody : String := s!"        if (buf_len - *off < {totalSz}u) return LEO4_ERR_DECODE;\n"
+      for j in [0 : specs.size] do
+        let (c, sz, _) := specs[j]!
+        localBody := localBody ++
+          s!"        {c} f{j}; leo4_memcpy(&f{j}, buf + *off, {sz}); *off += {sz}u;\n"
+      localBody := localBody ++
+        s!"        lean_object *r = lean_alloc_ctor({i}, 0, {totalSz});\n"
+      let mut byteOff : Nat := 0
+      for j in [0 : specs.size] do
+        let (_, sz, ctorKind) := specs[j]!
+        localBody := localBody ++ s!"        lean_ctor_set_{ctorKind}(r, {byteOff}, f{j});\n"
+        byteOff := byteOff + sz
+      localBody := localBody ++
+        "        *out = r;\n" ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
+      decBody := decBody ++ localBody
   decBody := decBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
   -- Encoder. SPEC/canonical-abi.md §9 mandates u32 LE disc on the
   -- wire ("encoders MUST emit 4 bytes"); we write 4 bytes here so
@@ -1490,6 +1532,24 @@ private def renderVariantHelpers
         s!"          if (st) return st; " ++ rb ++ "\n" ++
         "        return LEO4_OK;\n" ++
         "    " ++ rb ++ "\n"
+    | .allScalars specs =>
+      -- Phase 10-B5 encoder: pack N scalars at their running byte
+      -- offsets in the ctor's scalar area; emit them in order.
+      let totalSz := specs.foldl (init := 0) fun acc (_, sz, _) => acc + sz
+      let mut localBody : String :=
+        s!"        if (cap - *off < {totalSz}u) " ++ lb ++
+          s!" *needed_out = *off + {totalSz}u; return LEO4_ERR_RETURN_BUF_TOO_SMALL; " ++ rb ++ "\n"
+      let mut byteOff : Nat := 0
+      for j in [0 : specs.size] do
+        let (c, sz, ctorKind) := specs[j]!
+        localBody := localBody ++
+          s!"        {c} f{j} = lean_ctor_get_{ctorKind}(v, {byteOff});\n" ++
+          s!"        leo4_memcpy(buf + *off, &f{j}, {sz}); *off += {sz}u;\n"
+        byteOff := byteOff + sz
+      localBody := localBody ++
+        "        return LEO4_OK;\n" ++
+        "    " ++ rb ++ "\n"
+      encBody := encBody ++ localBody
   encBody := encBody ++ "    return LEO4_ERR_DECODE;\n" ++ rb ++ "\n"
   -- Forward decls: this decl's helpers + every peer's helpers in the
   -- cluster. The peers' definitions come later in the same TU when
