@@ -7,6 +7,48 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Planned — Phase 10 plan locked (2026-05-21)
+
+Phase 10 substep order locked after the
+"organise Phase 10 candidates" pass:
+
+1. **D1** — `leo4 run` CLI (forward + reverse + env wiring).
+2. **F1** — reserved `LeanError` code fixtures (0x02, 0x03,
+   0x04, 0x06, 0x08).
+3. **B1** — callback / function-arrow ABI (function-pointer
+   mangling + re-entrant dispatcher; schema hash rotates).
+4. **D2** — lake-side `leo4-rust-emit` auto-call (collapse
+   2-step reverse build to 1).
+5. **B5** — variant payload widening
+   (schema-idl-shortcomings #12 W7-2d-iii).
+6. **A4 + A5** — `LEO4_RUST_WORKER_RECYCLE_SECONDS` time
+   recycle + `LEO4_ERR_RUST_WORKER_RESTARTED` side-channel
+   surfacing.
+7. **C4** — `leo4-wasm` proper implementation (out of
+   scaffold).
+8. **P10-Docs** (single commit, E1+E2+E3) — Typst books'
+   Phase 9 chapter (4 langs × 2 books),
+   reverse-direction byte-parity conformance harness,
+   SPEC quickstart page.
+
+Each numbered line ships as its own commit (except
+P10-Docs, which is one combined commit). See
+`ROADMAP.md` Phase 10 section for the full rationale,
+deferral list, and flagship-demo split.
+
+Deferred to v1.0 RC window: **C1** Windows runtime CI
+verification, **G2** crates.io publish. Deferred to ≥
+v1.x: A1 zygote backend, A2 wasm sandbox, B2
+ConstraintExpr<Atom>, B3 async reverse exports, C2 macOS
+Tier 1, C3 wasm64 sibling, D3 VS Code extension, D4
+logicutils removal.
+
+Flagship SMT-solver consumer of Phase 9 / Phase 10-B1
+lives outside leo4 at
+[`Honey-Be/adsmt`](https://github.com/Honey-Be/adsmt).
+leo4 ships the building blocks; adsmt proves them out by
+integrating with z3 / cvc5 / its own solver backend.
+
 ### Fixed — Phase 9 runtime: dispatcher handshake-consume + glue ABI + first true e2e run (2026-05-23)
 
 The Phase 9-6 follow-up landed a 3-commit declarative-link

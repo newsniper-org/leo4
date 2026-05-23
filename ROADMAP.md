@@ -601,37 +601,101 @@ search).
   existing Cargo crate (idempotent Cargo.toml append +
   lean/ scaffold). `forward` / `reverse` directions.
 
-**9.X candidates still open**:
+**9.X candidates — promoted to Phase 10 or deferred (2026-05-21):**
 
-- Callback / function-arrow ABI — for Rust functions taking
-  a Lean closure. Pulls in function-pointer mangling
-  (`SPEC/mangling.md` §3 TBD slot) + re-entrant dispatcher.
-- Stronger isolation backends (zygote-fork, wasm sandbox).
-  Dispatcher's single-entry API preserves the swap option.
-- Windows runtime verification — Tier 2 CI matrix when it
-  lands. Code is compiled-clean against the gnullvm target.
-- `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing on recycle —
-  reserved as 0x00020002 in `SPEC/canonical-abi.md` §13 but
-  currently the dispatcher recycles transparently. Needs a
-  side-channel (env var or returned-buffer flag) when a
-  consumer wants to detect state loss.
-- Time-based recycle (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) —
-  call-based ships; time-based would need a clock probe per
-  request.
+- Callback / function-arrow ABI → **Phase 10-B1**.
+- `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing → **Phase 10-A5**.
+- Time-based recycle (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) →
+  **Phase 10-A4**.
+- Stronger isolation backends (zygote-fork, wasm sandbox) →
+  deferred ≥ v1.x. Dispatcher's single-entry API preserves
+  the swap option.
+- Windows runtime verification (Tier 2 CI matrix) →
+  deferred to v1.0 RC pre-release window. gnullvm code path
+  already compiles clean.
 
 **Dependencies**: Phase 4 (canonical ABI for marshal),
 Phase 5 (forward pipeline as the reference). Does **not**
 depend on Phase 7 (sync API on both sides; reverse direction
 introduces no new async surface).
 
-## Phase 10 onwards — open
+## Phase 10 — DX consolidation + callback ABI — **PLAN LOCKED 2026-05-21**
 
 Phases 0–9 are done (Phase 9 code landed 2026-05-23, with
 declarative Lake-DSL integration as the one residual
-follow-up). Subsequent phases are not yet on the ladder;
-they will land when a concrete consumer need surfaces. Known
-9.X / Phase-10 candidates
-appear under *Future* below.
+follow-up). Phase 10 is a **locked, ordered sequence** of
+small commits; each substep ships in one commit unless noted.
+
+The intent is to round out leo4 to a v0.2.0-cuttable state:
+DX gaps, SPEC compliance for reserved error codes, the one
+new ABI surface (callbacks) that the **adsmt** flagship
+demo needs, and a docs sweep. Larger isolation /
+backend-swap work, Windows runtime CI, and crates.io publish
+all wait for the v1.0 RC window or later.
+
+**Locked substep order:**
+
+- **P10-D1** — `leo4 run` CLI: forward + reverse build +
+  env wiring + execute as one command. Eliminates the
+  manual `cargo build && lake build && leanc -o && ./bin`
+  ladder from each scaffold's README.
+- **P10-F1** — Reserved `LeanError` code fixtures:
+  trigger 0x02 / 0x03 / 0x04 / 0x06 / 0x08 in
+  `tests/conformance/`. Closes Phase 4 exit criterion that
+  shipped partial-coverage.
+- **P10-B1** — Callback / function-arrow ABI. Adds
+  function-pointer mangling (`SPEC/mangling.md` §3 TBD slot)
+  + re-entrant dispatcher path. Unblocks the **adsmt**
+  flagship integration's `push/pop` + sub-formula inquiry
+  pattern. Schema hash will rotate.
+- **P10-D2** — Lake-side `leo4-rust-emit` auto-call:
+  reverse-direction build collapses from 2 commands to 1.
+  `cargo build && lake build` is enough; lake invokes
+  `leo4-rust-emit` transparently when the cdylib changes.
+- **P10-B5** — Variant payload widening
+  (schema-idl-shortcomings #12 W7-2d-iii): multi-field /
+  composite-payload variants in the plugin emitter. Schema
+  hash will rotate for any variant in user code that picks
+  the new shape.
+- **P10-A4 + A5** — `LEO4_RUST_WORKER_RECYCLE_SECONDS`
+  time-based recycle + `LEO4_ERR_RUST_WORKER_RESTARTED`
+  side-channel surfacing on recycle. Both currently
+  reserved in SPEC §13 but unwired.
+- **P10-C4** — `leo4-wasm` proper implementation
+  (out of the scaffold-only state it has shipped in since
+  Phase 5). Native-equivalent surface via wasmtime;
+  WASIp3-sibling stays where it is.
+- **P10-Docs** (single commit, E1+E2+E3) — Typst books'
+  Phase 9 chapter in all four implementation languages,
+  reverse-direction byte-parity harness under
+  `tests/conformance/reverse/`, and a SPEC quickstart page
+  alongside `SPEC/reverse-direction.md`.
+
+**Deferred to the v1.0 RC pre-release window**:
+
+- **C1** Windows runtime CI matrix. Code compiles clean
+  against `*-pc-windows-gnullvm`; runtime verification
+  waits for CI infra.
+- **G2** Publish to crates.io. API surface stabilises
+  through Phase 10 first.
+
+**Deferred to ≥ v1.x** (all of P10.4 minus C4 above):
+
+- A1 zygote-fork backend / A2 wasm-sandbox backend.
+- B2 ConstraintExpr<Atom> typed AST.
+- B3 async reverse exports.
+- C2 macOS Tier 1 promotion / C3 wasm64 sibling project.
+- D3 VS Code extension.
+- D4 logicutils removal in favor of native
+  `buildFileUnlessUpToDate'`.
+
+**Flagship Phase 10 demo (SMT solver integration)** —
+lives outside this repo at
+[`Honey-Be/adsmt`](https://github.com/Honey-Be/adsmt). leo4
+ships the building blocks (B1 is the critical one); adsmt
+proves them out by integrating with z3 / cvc5 / its own
+solver backend. Do NOT bundle SMT-specific types
+(`Term`, `Sort`, …) into leo4.
 
 ## Future / not yet on the phase ladder
 

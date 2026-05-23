@@ -372,6 +372,23 @@ would be expensive to relitigate:
   Implemented as `leo4_consume_handshake(w)` called inside
   both `leo4_get_or_spawn_persistent` and
   `leo4_dispatch_isolated` right after `spawn` succeeds.
+- **2026-05-21 — Phase 10 plan locked**. Ordered substep
+  sequence: D1 (`leo4 run`) → F1 (reserved error fixtures)
+  → B1 (callback ABI) → D2 (lake-side emit auto-call) →
+  B5 (variant payload widening) → A4+A5 (time-based
+  recycle + WORKER_RESTARTED side-channel) → C4 (leo4-wasm
+  proper) → P10-Docs (E1+E2+E3 in one commit). Each line =
+  one commit unless noted. P10.4 minus C4 deferred to ≥
+  v1.x. C1 (Windows runtime CI) + G2 (crates.io publish)
+  deferred to v1.0 RC pre-release window. Larger context
+  in `ROADMAP.md` Phase 10 section.
+- **2026-05-21 — Flagship reverse-direction demo lives in
+  `Honey-Be/adsmt`, not in leo4 repo**. leo4's
+  `examples/05-rust-export/` mini-solver suffices as an
+  in-repo smoke. The real SMT solver integration is a
+  separate project at https://github.com/Honey-Be/adsmt
+  that consumes leo4 as a dependency. Do not bundle
+  SMT-specific types (`Term`, `Sort`, …) into leo4.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from
