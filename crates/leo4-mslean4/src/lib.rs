@@ -1,4 +1,4 @@
-//! leo4-native — load and dispatch into a `<pkg>.leo4-shim.so`.
+//! leo4-mslean4 — load and dispatch into a `<pkg>.leo4-shim.so`.
 //!
 //! API surface as of **P5-a₃** (2026-05-20):
 //!
@@ -27,7 +27,7 @@ use std::sync::Once;
 
 use libloading::Library;
 
-/// Result of any leo4-native fallible operation.
+/// Result of any leo4-mslean4 fallible operation.
 pub type LeanResult<T> = Result<T, LeanError>;
 
 /// Errors surfaced by the loader / handshake / dispatch paths.
@@ -53,7 +53,7 @@ impl LeanError {
 
 impl std::fmt::Display for LeanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "leo4-native: code={:#010x} {}", self.code as u32, self.detail)
+        write!(f, "leo4-mslean4: code={:#010x} {}", self.code as u32, self.detail)
     }
 }
 
@@ -548,7 +548,7 @@ pub struct Arena<'a> {
 /// `LeanRef` is `!Send + !Sync` for the same reasons as `Arena<'_>`.
 pub struct LeanRef<'a, T: ?Sized> {
     /// `lean_object *`. Opaque from this crate's perspective —
-    /// `leo4-native` only passes it back into shim entry points.
+    /// `leo4-mslean4` only passes it back into shim entry points.
     ptr: *mut c_void,
     /// Cached `lean_dec_ref` pointer from the `Lean` instance the
     /// handle was minted by. Stashing it on the handle means `Drop`
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn parse_handshake_round_trip() {
-        let dir = std::env::temp_dir().join("leo4-native-handshake");
+        let dir = std::env::temp_dir().join("leo4-mslean4-handshake");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.handshake");
         std::fs::write(
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn handshake_bad_hex_len_rejected() {
-        let dir = std::env::temp_dir().join("leo4-native-handshake-bad");
+        let dir = std::env::temp_dir().join("leo4-mslean4-handshake-bad");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.handshake");
         std::fs::write(

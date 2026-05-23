@@ -52,7 +52,7 @@
   [IV],  [Canonical-ABI マーシャル: Lean 側 (`LeanMarshal` 型クラス) と
           Rust 側 (`LeanMarshal` トレイト)。],
   [V],   [C シム発行: export ごとの `leo4_call_<mangled>` 翻訳単位。],
-  [VI],  [Rust ローダ (`leo4-native`) と `leo4::import!` proc-macro。],
+  [VI],  [Rust ローダ (`leo4-mslean4`) と `leo4::import!` proc-macro。],
   [VII], [WIT 変換パスと `wasm-tools` 検証 (任意、綺麗に分離可能)。],
   [VIII],[相互再帰 + `Cyc<i>`。],
   [IX],  [非同期 `io<T>`、WASIp3 姉妹プロジェクト。],
@@ -701,9 +701,9 @@ RPATH でリンクしてラッパがユーザのコンパイル済み export を
 シム `.so`、handshake ファイル、mangling テーブルがある。Rust 側が
 これらをバインドする番だ。
 
-== `leo4-native` --- ローダ
+== `leo4-mslean4` --- ローダ
 
-`crates/leo4-native/` が `Lean::open` を公開:
+`crates/leo4-mslean4/` が `Lean::open` を公開:
 
 ```rust
 pub struct Lean { /* libloading::Library + メタ */ }
@@ -949,7 +949,7 @@ lean_dec(io_res);
 固定。`wasip3` クレート (WASIp3 API バインディングを wasip2 の Component
 Model 上の互換シムとして出荷) に依存。
 
-姉妹は `leo4_native::Lean::open` と類似の `leo4_wasip3::Lean::open`
+姉妹は `leo4_mslean4::Lean::open` と類似の `leo4_wasip3::Lean::open`
 を実装するが、ディスパッチは wasip3 host import (ホストが実装する WIT
 ファイル定義) を通る。`futures::executor::block_on` がすべての async
 import を駆動し、ユーザ向け Rust API は sync を保つ。

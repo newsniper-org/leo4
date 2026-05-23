@@ -1,5 +1,5 @@
 [package]
-name        = "leo4-native"
+name        = "leo4-mslean4"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true

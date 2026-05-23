@@ -123,7 +123,7 @@ leo4 は六つの可動部品で構成されます。各々の責務を知れば
 サポートされる全型について Lean エンコーダと Rust エンコーダ
 がバイト単位で同一の出力を生成することを検証します。
 
-== `leo4-native` (loader + dispatch)
+== `leo4-mslean4` (loader + dispatch)
 
 `Lean::open`、`Arena<'a>`、`LeanRef<'a, T>` を提供する Rust
 クレート。ローダは `libloading` でシムの `.so` を取り込み、
@@ -288,7 +288,7 @@ leo4 開発は phase ラダーに従います。各機能がどの phase 由来
   [2], [Rust `leo4-idl` + cross-impl mangling 適合性。],
   [3], [WIT lowering パス + `wasm-tools` 検証。],
   [4], [正規 ABI 適合性 harness、`bignat` / `bigint`。],
-  [5], [C シム合成 + `leo4-native` + `leo4-macros` +
+  [5], [C シム合成 + `leo4-mslean4` + `leo4-macros` +
         `examples/01-hello`、`examples/02-roundtrip`。
         エンドツーエンドパイプライン。],
   [6], [nominal 型間の相互再帰 (`mutual { … }` IDL ブロック、

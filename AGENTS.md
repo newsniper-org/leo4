@@ -40,7 +40,7 @@ other. Always know which one you're touching:
 | `lean.h` allowed in | the `.leo4-shim.c` Lake plugin emits | **only** `shim/leo4_rust_bridge_lean.c` |
 | Schema-hash suffix in mangled name | yes — `__h<hash>` | **no** — handshake JSON only |
 | Build order (D8) | Lake first, Cargo second | Cargo first, emit, Lake second |
-| Loader | `leo4-native` (Rust uses `libloading`) | `libleo4_rust_bridge.a` (dispatcher via worker process) |
+| Loader | `leo4-mslean4` (Rust uses `libloading`) | `libleo4_rust_bridge.a` (dispatcher via worker process) |
 
 **Hard rule**: do not import `<lean/lean.h>` from any Rust crate
 or any C file other than the two designated shims. The whole

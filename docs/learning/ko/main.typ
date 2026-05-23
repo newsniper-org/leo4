@@ -122,7 +122,7 @@ mirror 하는 Rust crate. 양 측이 `LeanMarshal` trait / 타입클래스를
 타입에 대해 Lean encoder 와 Rust encoder 가 바이트 단위로 동일한
 출력을 생성함을 검증합니다.
 
-== `leo4-native` (loader + dispatch)
+== `leo4-mslean4` (loader + dispatch)
 
 `Lean::open`, `Arena<'a>`, `LeanRef<'a, T>` 를 제공하는 Rust
 crate. 로더는 `libloading` 으로 shim 의 `.so` 를 가져오고, 프로세스
@@ -284,7 +284,7 @@ leo4 개발은 phase 사다리를 따릅니다. 각 기능이 어느 phase 에�
   [2], [Rust `leo4-idl` + cross-impl mangling 컴포넌스.],
   [3], [WIT lowering 패스 + `wasm-tools` 검증.],
   [4], [Canonical-ABI 컴포넌스 harness, `bignat` / `bigint`.],
-  [5], [C shim 합성 + `leo4-native` + `leo4-macros` +
+  [5], [C shim 합성 + `leo4-mslean4` + `leo4-macros` +
         `examples/01-hello`, `examples/02-roundtrip`.
         엔드 투 엔드 파이프라인.],
   [6], [nominal 타입 간 mutual recursion (`mutual { … }` IDL

@@ -44,7 +44,7 @@ For each work item, "done" means all of:
 - Edition `2024`. MSRV pinned in `rust-toolchain.toml`.
 - `#![warn(clippy::pedantic)]` at workspace level, with explicit
   `#![allow(clippy::xxx)]` per crate as needed.
-- No `unsafe` outside `leo4-abi`, `leo4-native`, and `leo4-wasm`. Each
+- No `unsafe` outside `leo4-abi`, `leo4-mslean4`, and `leo4-wasm`. Each
   `unsafe` block must have a `// SAFETY:` comment.
 - Public API uses `Result<T, LeanError>` for fallible operations.
   `LeanError` is in `leo4::err`.

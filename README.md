@@ -59,7 +59,7 @@ What works today:
   `crates/leo4-abi` (canonical-ABI marshal for scalars / composites /
   `BigNat` / `BigInt` / `LeanRat` / `LeanU128` / `LeanI128` /
   `LeanComplexF{32,64}x2`, optional `nightly-floats` feature),
-  `crates/leo4-native` (loader, `Arena<'a>`, `LeanRef<'a, T>`,
+  `crates/leo4-mslean4` (loader, `Arena<'a>`, `LeanRef<'a, T>`,
   dispatch cache), `crates/leo4-macros` (`leo4::import!`,
   `#[derive(LeanMarshal)]`), `crates/leo4-build` (build-script
   helper), `crates/leo4` (top-level façade).
@@ -214,7 +214,7 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │   │                       # bignat / bigint / LeanRat / LeanU128/I128 /
 │   │                       # LeanComplexF{32,64}x2 (+ optional nightly floats);
 │   │                       # rust_exports module under `rust-exports` feature
-│   ├── leo4-native/        # native loader (libloading) + Arena + LeanRef
+│   ├── leo4-mslean4/        # native loader (libloading) + Arena + LeanRef
 │   ├── leo4-macros/        # user-facing proc-macros (leo4::import!,
 │   │                       # leo4::export, derive LeanMarshal)
 │   ├── leo4-macros-backend # macro expander (syn + quote)

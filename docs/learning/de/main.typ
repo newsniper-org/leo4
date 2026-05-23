@@ -135,7 +135,7 @@ das `LeanMarshal`-Trait / die Typklasse; die Testsuite
 dass der Lean-Encoder und der Rust-Encoder byteweise identische
 Ausgaben erzeugen.
 
-== `leo4-native` (Loader + Dispatch)
+== `leo4-mslean4` (Loader + Dispatch)
 
 Eine Rust-Crate, die `Lean::open`, `Arena<'a>` und
 `LeanRef<'a, T>` bereitstellt. Der Loader nutzt `libloading`,
@@ -319,7 +319,7 @@ Commit-Nachrichten.
   [3], [WIT-Lowering-Pass + `wasm-tools`-Validierung.],
   [4], [Kanonische ABI-Conformance-Harness, `bignat` /
         `bigint`.],
-  [5], [C-Shim-Synthese + `leo4-native` + `leo4-macros` +
+  [5], [C-Shim-Synthese + `leo4-mslean4` + `leo4-macros` +
         `examples/01-hello`, `examples/02-roundtrip`.
         End-to-End-Pipeline.],
   [6], [Gegenseitige Rekursion zwischen nominalen Typen

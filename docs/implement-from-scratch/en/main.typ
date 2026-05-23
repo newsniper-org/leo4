@@ -63,7 +63,7 @@ demo and see something move.
           `LeanMarshal` trait).],
   [V],   [C shim emission: per-export `leo4_call_<mangled>`
           translation units.],
-  [VI],  [Rust loader (`leo4-native`) and the
+  [VI],  [Rust loader (`leo4-mslean4`) and the
           `leo4::import!` proc-macro.],
   [VII], [WIT lowering pass and `wasm-tools` validation
           (optional but cleanly separable).],
@@ -758,9 +758,9 @@ user's compiled exports.
 You have a shim `.so`, a handshake file, and a mangling table.
 The Rust side now binds against them.
 
-== `leo4-native` --- the loader
+== `leo4-mslean4` --- the loader
 
-`crates/leo4-native/` exposes `Lean::open`:
+`crates/leo4-mslean4/` exposes `Lean::open`:
 
 ```rust
 pub struct Lean { /* libloading::Library + meta */ }
@@ -1025,7 +1025,7 @@ ships WASIp3 API bindings as compat shims on wasip2's
 Component Model).
 
 The sibling implements `leo4_wasip3::Lean::open` analogously
-to `leo4_native::Lean::open`, but the dispatch goes through
+to `leo4_mslean4::Lean::open`, but the dispatch goes through
 wasip3 host imports (defined in a WIT file the host
 implements). `futures::executor::block_on` drives any async
 import while the user-facing Rust API remains sync.

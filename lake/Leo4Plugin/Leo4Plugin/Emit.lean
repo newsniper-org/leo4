@@ -66,13 +66,13 @@ to `emit` below. -/
 structure EmitBundle where
   package         : String
   /-- Lean module name the user `@[leo4_export]`s live in (e.g.
-  `Sample`). leo4-native uses this at load time to know which
+  `Sample`). leo4-mslean4 uses this at load time to know which
   `initialize_<Module>` symbol to dlsym before any shim entry point
   is called. (P5-a₂ wires this through to the Rust loader.) -/
   targetModule    : String
   /-- Linker-visible `initialize_*` symbol emitted by `lean -c` for
   the auto-generated wrapper file. Loading it (one call from
-  leo4-native) transitively initialises `initialize_Init` and the
+  leo4-mslean4) transitively initialises `initialize_Init` and the
   user package's `initialize_<targetModule>`, so the loader doesn't
   need to know either of those individually. Computed by the plugin
   from the wrapper file's stem via `manglerLeanModuleName`. -/

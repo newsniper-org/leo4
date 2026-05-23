@@ -10,7 +10,7 @@
 //! `encode_resource_handle`, `decode_resource_handle`, and the
 //! `LeanError::*` convenience constructors). End-to-end shim-level
 //! triggers (libloading `dlsym` miss, allocator OOM under a real
-//! workload) remain Phase 5+ / leo4-native concerns.
+//! workload) remain Phase 5+ / leo4-mslean4 concerns.
 
 use std::collections::HashMap;
 
@@ -97,7 +97,7 @@ fn handshake_mismatch_triggered_by_check_schema_hash() {
 #[test]
 fn unknown_function_triggered_by_missing_table_entry() {
     // Static lookup-table miss is the in-leo4-abi proxy for
-    // libloading's `dlsym` miss (which lives in leo4-native).
+    // libloading's `dlsym` miss (which lives in leo4-mslean4).
     let table: HashMap<&str, fn(u64) -> u64> = HashMap::from([("doubler", (|x| x * 2) as fn(u64) -> u64)]);
     let missing = "halver";
     let err = table

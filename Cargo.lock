@@ -531,7 +531,7 @@ version = "0.1.0"
 dependencies = [
  "leo4-abi",
  "leo4-macros",
- "leo4-native",
+ "leo4-mslean4",
  "linkme",
 ]
 
@@ -615,7 +615,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "leo4-native"
+name = "leo4-mslean4"
 version = "0.1.0"
 dependencies = [
  "leo4-abi",

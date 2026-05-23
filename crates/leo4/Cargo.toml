@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "Top-level façade re-exporting `leo4-native` (loader / dispatch) and `leo4-abi` (canonical-ABI marshalling). Downstream Rust crates depend on this one. See LEO4-DESIGN.md §9."
+description = "Top-level façade re-exporting `leo4-mslean4` (loader / dispatch) and `leo4-abi` (canonical-ABI marshalling). Downstream Rust crates depend on this one. See LEO4-DESIGN.md §9."
 
 [features]
 # Pass-through to `leo4-abi`'s `nightly-floats` feature. Nightly
@@ -20,7 +20,7 @@ rust-exports = ["leo4-abi/rust-exports", "dep:linkme"]
 
 [dependencies]
 leo4-abi.workspace    = true
-leo4-native.workspace = true
+leo4-mslean4.workspace = true
 leo4-macros.workspace = true
 # Re-exported through `leo4::__private::linkme` when the
 # `rust-exports` feature is on, so user cdylibs invoking

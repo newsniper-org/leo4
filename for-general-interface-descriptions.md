@@ -231,7 +231,7 @@ discovery hooks — is reused unmodified.
   generic parameter rotating the hash should reject pickled weights,
   same way leo4 rejects a stale shim.
 - **Multi-implementation backends** (CPU / GPU / TPU). Treat each as
-  an emitter with its own dispatch table, like leo4's `leo4-native`
+  an emitter with its own dispatch table, like leo4's `leo4-mslean4`
   vs the future `leo4-wasm`. Mangling stays one source of truth; the
   emitter decides what `<prefix>_<mangled>` resolves to.
 - **Forward / backward asymmetry**. leo4 funcs are uni-directional.

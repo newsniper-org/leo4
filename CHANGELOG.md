@@ -7,10 +7,44 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — `leo4-native` → `leo4-mslean4` rename (2026-05-21)
+
+Mechanical workspace-wide rename of the "reference Lean 4
+path" crate. Motivation: the old `leo4-native` name became
+ambiguous once two more transports landed —
+"native" doesn't disambiguate against "rust-native".
+
+  | Old | New | Transport |
+  |---|---|---|
+  | `leo4-native` | **`leo4-mslean4`** | reference Lean (MS-style impl) via `<lean/lean.h>` C ABI shim |
+  | `leo4-wasm` | unchanged | WASM Component Model |
+  | (out-of-tree adapter) | `leo4-rust-native` | rust-native Lean impl via direct Rust call |
+
+What changed (mechanical only — no code logic):
+
+  * `crates/leo4-native/` → `crates/leo4-mslean4/`
+    (git-tracked rename).
+  * Cargo package name: `leo4-native` → `leo4-mslean4`.
+  * Workspace dep entry renamed.
+  * `use leo4_native::…` → `use leo4_mslean4::…`
+    (workspace-wide sed).
+  * Every prose / doc mention (CLAUDE.md, AGENTS.md,
+    LEO4-DESIGN.md, README.md, ROADMAP.md, SPEC/*.md,
+    docs/{learning,implement-from-scratch}/{en,ko,ja,de}/main.typ,
+    for-general-interface-descriptions.md) updated.
+
+Verification: `cargo build --workspace` + `cargo test
+--workspace` (162 tests, unchanged).
+
+Downstream impact: any out-of-repo crate that depends on
+`leo4-native` needs to update its `Cargo.toml`. leo4 isn't
+on crates.io yet, so the in-repo workspace + local
+checkouts are the full impact radius.
+
 ### Added — `SPEC/rust-native-lean.md` — third transport path for Rust-native Lean impls (2026-05-21)
 
 Documentation-only. Defines a third integration path (alongside
-leo4-native + leo4-wasm) for Rust-native Lean implementations
+leo4-mslean4 + leo4-wasm) for Rust-native Lean implementations
 that **bypasses the `<lean/lean.h>` C ABI entirely**.
 Motivation: 병익's observation that C ABI is a layer of
 indirection that buys nothing when the target Lean impl is
@@ -18,7 +52,7 @@ itself Rust-native (e.g. OxiLean).
 
 Three-paths comparison table now part of the SPEC stack:
 
-| Aspect | leo4-native | leo4-wasm | leo4-rust-native |
+| Aspect | leo4-mslean4 | leo4-wasm | leo4-rust-native |
 |---|---|---|---|
 | Transport | dlopen + shim | WASM CM | direct Rust call |
 | C ABI | yes | no | **no** |
@@ -413,9 +447,9 @@ entry point.
 
 Promotes `crates/leo4-wasm` from an empty placeholder (the
 v0.1.0 cut shipped just `#![allow(dead_code)]`) to a real
-scaffold whose public API surface mirrors `leo4-native`.
+scaffold whose public API surface mirrors `leo4-mslean4`.
 Cfg-gated downstream code can now `use leo4_wasm::{Lean,
-LeanError}` / `use leo4_native::{Lean, LeanError}`
+LeanError}` / `use leo4_mslean4::{Lean, LeanError}`
 interchangeably; structurally wasm-vs-native user code
 compiles cleanly on both.
 
@@ -761,7 +795,7 @@ Triggers in `crates/leo4-abi/tests/error_codes.rs`:
 `SPEC/canonical-abi.md` §8.1 + §12 extended with the new
 helper references and sentinel reservation. End-to-end
 shim-level triggers (libloading `dlsym` miss, allocator
-OOM under a real workload) remain a leo4-native concern;
+OOM under a real workload) remain a leo4-mslean4 concern;
 those layers can lift the new constructors directly
 instead of building their own `code: u32` literals.
 
@@ -1537,7 +1571,7 @@ dispatcher's byte-pointer signature in
   leo4-side place that includes `<lean/lean.h>`. The
   dispatcher and its backends stay free of Lean ABI details,
   matching the forward-direction split
-  (`<pkg>.leo4-shim.c` vs `crates/leo4-native/`).
+  (`<pkg>.leo4-shim.c` vs `crates/leo4-mslean4/`).
 - `leo4_rust_call_lean(b_lean_obj_arg mangled, b_lean_obj_arg
   args, lean_object* world) -> lean_object*`:
   1. Extract `(cstr, size)` from `mangled` via
@@ -2375,7 +2409,7 @@ follow this pattern.
 
 ### Added — Phase 5 (2026-05-16 → 2026-05-20)
 
-- **`crates/leo4-native/`** — `Lean::open` (handshake + Lean runtime
+- **`crates/leo4-mslean4/`** — `Lean::open` (handshake + Lean runtime
   init + wrapper-module init), `Arena<'a>`, `LeanRef<'a, T>`, a
   per-callsite `Mutex<HashMap>` dispatch cache, inline
   `lean_io_result_is_ok` and `lean_dec_ref` (with `lean_dec_ref_cold`
@@ -2584,7 +2618,7 @@ workspace, pinning `nightly` Rust via its own
   `crates/leo4-abi` (the canonical-ABI marshalling layer is
   shared between native and wasm; only dispatch / loader differs).
 - `src/lib.rs` carries a placeholder `pub struct Lean` mirroring
-  the planned `leo4_native::Lean` surface so downstream code can
+  the planned `leo4_mslean4::Lean` surface so downstream code can
   `use leo4_wasip3::Lean` interchangeably under wasm.
 - `sibling/README.md` documents the convention for non-workspace
   projects + the planned `leo4-wasm64/` sibling deferred until

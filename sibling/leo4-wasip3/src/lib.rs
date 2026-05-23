@@ -23,7 +23,7 @@
 //! The canonical-ABI encode / decode layer is shared with the
 //! main workspace via the `leo4-abi` path-dep. Only the dispatch
 //! layer (host import call vs. libloading `.so`) differs from
-//! `crates/leo4-native`.
+//! `crates/leo4-mslean4`.
 //!
 //! ## Status (2026-05-21)
 //!
@@ -38,7 +38,7 @@
 
 pub use leo4_abi::{LeanError, LeanMarshal};
 
-/// Placeholder mirroring the planned `leo4_native::Lean` surface
+/// Placeholder mirroring the planned `leo4_mslean4::Lean` surface
 /// so downstream code targeting both backends can
 /// `use leo4_wasip3::Lean` interchangeably under wasm.
 ///
@@ -47,7 +47,7 @@ pub use leo4_abi::{LeanError, LeanMarshal};
 ///     entry point
 ///   - import handles for each `@[leo4_export]` mangled symbol,
 ///     resolved through `wasip3` Component Model interfaces
-///   - a per-callsite cache analogous to `leo4_native::Lean`'s
+///   - a per-callsite cache analogous to `leo4_mslean4::Lean`'s
 ///     `Mutex<HashMap>` (but probably just `RefCell` since the
 ///     wasm guest is single-threaded by default)
 pub struct Lean {

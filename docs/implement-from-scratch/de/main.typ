@@ -66,7 +66,7 @@ sehen.
           (`LeanMarshal`-Trait).],
   [V],   [C-Shim-Emission: Übersetzungseinheit
           `leo4_call_<mangled>` pro Export.],
-  [VI],  [Rust-Loader (`leo4-native`) und das
+  [VI],  [Rust-Loader (`leo4-mslean4`) und das
           `leo4::import!`-Proc-Makro.],
   [VII], [WIT-Tieferlegung und `wasm-tools`-Validierung
           (optional, sauber abtrennbar).],
@@ -785,9 +785,9 @@ Benutzers aufrufen kann.
 Sie haben ein Shim-`.so`, eine Handshake-Datei und eine
 Mangling-Tabelle. Jetzt bindet die Rust-Seite daran.
 
-== `leo4-native` --- der Loader
+== `leo4-mslean4` --- der Loader
 
-`crates/leo4-native/` exponiert `Lean::open`:
+`crates/leo4-mslean4/` exponiert `Lean::open`:
 
 ```rust
 pub struct Lean { /* libloading::Library + Meta */ }
@@ -1065,7 +1065,7 @@ Pinnt stable Rust + das Ziel `wasm32-wasip2`; hängt vom
 Shims auf wasip2s Component-Model ausliefert).
 
 Die Schwester implementiert `leo4_wasip3::Lean::open` analog
-zu `leo4_native::Lean::open`, aber der Dispatch läuft über
+zu `leo4_mslean4::Lean::open`, aber der Dispatch läuft über
 WASIp3-Host-Imports (definiert in einer WIT-Datei, die der
 Host implementiert). `futures::executor::block_on` treibt
 jede async Import, während das nutzerseitige Rust-API sync

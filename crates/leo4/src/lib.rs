@@ -23,10 +23,10 @@
 //! ```
 //!
 //! The proc-macro (`leo4::import!`) lands in P5-b₂; until then the
-//! facade exposes the loader (`leo4_native`) and the canonical-ABI
+//! facade exposes the loader (`leo4_mslean4`) and the canonical-ABI
 //! marshalling helpers (`leo4_abi`).
 
-pub use leo4_native::{Arena, Lean, LeanError, LeanRef, LeanResult};
+pub use leo4_mslean4::{Arena, Lean, LeanError, LeanRef, LeanResult};
 
 pub use leo4_abi::{bignat, bigint, complex, composites, error_codes, rat, scalars, LeanMarshal};
 pub use leo4_abi::bignat::BigNat;
@@ -48,7 +48,7 @@ pub use leo4_abi::floats_nightly::{
 /// from the loader's [`LeanError`], which carries dispatch /
 /// handshake failures). `#[derive(LeanMarshal)]` returns this; the
 /// `From<leo4_abi::LeanError> for leo4::LeanError` impl in
-/// `leo4_native` lets `?` propagate across both.
+/// `leo4_mslean4` lets `?` propagate across both.
 pub use leo4_abi::LeanError as AbiError;
 
 /// `leo4::import! { fn add(a: u64, b: u64) -> u64; }` — generate

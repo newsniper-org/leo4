@@ -22,7 +22,7 @@ them) impose different surface requirements:
 
 | Pipeline | What's needed from Lean | Owning crate |
 |---|---|---|
-| **Forward** (Rust → Lean) | Meta-programming API, Lake plugin hooks, `lean.h` C ABI in the user package, `leanc` C-compile path | `lake/Leo4/`, `lake/Leo4Plugin/`, `crates/leo4-native` |
+| **Forward** (Rust → Lean) | Meta-programming API, Lake plugin hooks, `lean.h` C ABI in the user package, `leanc` C-compile path | `lake/Leo4/`, `lake/Leo4Plugin/`, `crates/leo4-mslean4` |
 | **Reverse** (Lean → Rust) | `@[extern]` declarations, `dlopen` of native cdylibs (or wasm import in C4.x.x), `IO ByteArray` lowering | `lake/Leo4Rust/`, `crates/leo4-rust-bridge`, `shim/leo4_rust_bridge_lean.c` |
 
 ## 1. Surface table
@@ -59,7 +59,7 @@ ABI (or a header-shim must alias them):
 | IO result wrapping | `lean_io_result_mk_ok`, `lean_io_result_is_ok`, `lean_io_result_get_value`, `lean_io_result_show_error`, `lean_io_mark_end_initialization` |
 | Reference counting | `lean_dec`, `lean_dec_ref`, `lean_inc`, `lean_inc_ref` (and the `_cold` variants for the slow path) |
 | Initialization | `lean_initialize_runtime_module`, `initialize_<ModuleName>` (one per user module that the loader brings up) |
-| Logging / errors | `lean_io_result_show_error` (printed by `leo4-native` on `LEO4_ERR_IO_FAILED`) |
+| Logging / errors | `lean_io_result_show_error` (printed by `leo4-mslean4` on `LEO4_ERR_IO_FAILED`) |
 
 ABI commitments:
 - `lean_object*` is a pointer-sized opaque handle. Reference-

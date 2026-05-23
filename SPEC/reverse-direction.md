@@ -503,7 +503,7 @@ the table below pins which mode handles which.
 leo4 does *not* try to detect or prevent user-side concurrency
 inside the worker process. The contract is process-level
 isolation — what happens inside the worker is the user's
-problem, exactly the same way leo4-native's
+problem, exactly the same way leo4-mslean4's
 `<pkg>.leo4-shim.so` puts the user's Lean code in charge of
 its own thread safety.
 

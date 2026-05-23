@@ -163,7 +163,7 @@ paths.
 - `crates/leo4-abi/`: Rust counterpart to Lean's `LeanMarshal`.
   - Scalar encode/decode (mirroring `lake/Leo4/Leo4/Builtins.lean`).
   - Error types matching `LeanError` codes.
-- `crates/leo4-native/` (skeleton): just enough to host one shim and
+- `crates/leo4-mslean4/` (skeleton): just enough to host one shim and
   call into it through a mock symbol.
 - A minimal "handshake-only" example:
   - `examples/handshake/` — Lean export side that returns
@@ -216,7 +216,7 @@ extended with the v4.30 data point.
 
 The C shim that bridges the canonical-ABI wire format to Lean's
 native ABI (lean.h symbols), built from the Lake plugin and linked
-into a shared library that `crates/leo4-native/` loads via
+into a shared library that `crates/leo4-mslean4/` loads via
 `libloading`.
 
 **Status (2026-05-20):** every deliverable below landed on Tier 1
@@ -247,7 +247,7 @@ generic `listLen`) — pass.
   on Linux. `.dll` and `.dylib` not yet exercised (Tier 2 / 3).
   Links `libleanshared` + the user package's `.so` (resolved via
   `lake-manifest.json`'s `packages[].dir`) with the matching RPATH.
-- ✅ **`crates/leo4-native/`** — `Lean::open` (= `Lean::init` +
+- ✅ **`crates/leo4-mslean4/`** — `Lean::open` (= `Lean::init` +
   handshake + wrapper-module init), `Arena<'a>`, `LeanRef<'a, T>`,
   per-callsite `Mutex<HashMap>` dispatch cache, inline
   `lean_io_result_is_ok` / `lean_dec_ref`, `lean_dec_ref_cold` via

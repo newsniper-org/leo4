@@ -1,8 +1,8 @@
 //! leo4-wasm — wasm host runtime (Phase 10-C4 + C4.x landings, 2026-05-21).
 //!
-//! Mirrors the public API surface of `crates/leo4-native` so consumers
+//! Mirrors the public API surface of `crates/leo4-mslean4` so consumers
 //! targeting wasm-or-native can `use leo4_wasm::{Lean, LeanError}` /
-//! `use leo4_native::{Lean, LeanError}` interchangeably (cfg-gated at
+//! `use leo4_mslean4::{Lean, LeanError}` interchangeably (cfg-gated at
 //! the user's call site). The wire-format encode/decode layer is
 //! shared via `leo4-abi`; only dispatch differs.
 //!
@@ -70,7 +70,7 @@ pub use leo4_abi::{error::error_codes, LeanError, LeanMarshal};
 pub mod runtime;
 pub mod backend;
 
-/// Wasm-host counterpart of `leo4_native::Lean`. Owns the handshake
+/// Wasm-host counterpart of `leo4_mslean4::Lean`. Owns the handshake
 /// metadata + (eventually) a wasmtime `Engine` + `Store`.
 #[derive(Debug, Clone)]
 pub struct Lean {

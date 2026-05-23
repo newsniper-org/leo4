@@ -7,7 +7,7 @@ members = [
     "crates/leo4-build",
     "crates/leo4-macros",
     "crates/leo4-macros-backend",
-    "crates/leo4-native",
+    "crates/leo4-mslean4",
     "crates/leo4-wasm",
     "crates/leo4",
     "crates/leo4c",
@@ -45,7 +45,7 @@ leo4-abi              = { version = "0.1.0", path = "crates/leo4-abi" }
 leo4-build            = { version = "0.1.0", path = "crates/leo4-build" }
 leo4-macros           = { version = "0.1.0", path = "crates/leo4-macros" }
 leo4-macros-backend   = { version = "0.1.0", path = "crates/leo4-macros-backend" }
-leo4-native           = { version = "0.1.0", path = "crates/leo4-native" }
+leo4-mslean4           = { version = "0.1.0", path = "crates/leo4-mslean4" }
 leo4-wasm             = { version = "0.1.0", path = "crates/leo4-wasm" }
 leo4                  = { version = "0.1.0", path = "crates/leo4" }
 leo4-rust-emit        = { version = "0.1.0", path = "crates/leo4-rust-emit" }

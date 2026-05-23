@@ -49,7 +49,7 @@
   [IV],  [Canonical-ABI 마샬링: Lean 측 (`LeanMarshal` 타입클래스)
           + Rust 측 (`LeanMarshal` 트레이트).],
   [V],   [C 셰임 방출: export당 `leo4_call_<mangled>` 변환 단위.],
-  [VI],  [Rust 적재기 (`leo4-native`)와 `leo4::import!` proc-macro.],
+  [VI],  [Rust 적재기 (`leo4-mslean4`)와 `leo4::import!` proc-macro.],
   [VII], [WIT 변환 패스 및 `wasm-tools` 검증 (선택, 깔끔히 분리 가능).],
   [VIII],[상호 재귀 + `Cyc<i>`.],
   [IX],  [비동기 `io<T>`, WASIp3 자매 프로젝트.],
@@ -689,9 +689,9 @@ LEO4_EXPORT int32_t leo4_call_leo4__sample__Sample__add__u64_u64__h<hash>(
 셰임 `.so`, 핸드셰이크 파일, mangling 테이블이 있다. 이제 Rust 측이
 이들을 바인딩한다.
 
-== `leo4-native` --- 적재기
+== `leo4-mslean4` --- 적재기
 
-`crates/leo4-native/`는 `Lean::open`을 노출한다.
+`crates/leo4-mslean4/`는 `Lean::open`을 노출한다.
 
 ```rust
 pub struct Lean { /* libloading::Library + 메타 */ }
@@ -931,7 +931,7 @@ lean_dec(io_res);
 (WASIp3 API 바인딩을 wasip2의 Component Model 위 호환 셰임으로 제공)에
 의존.
 
-자매는 `leo4_native::Lean::open`과 유사한 `leo4_wasip3::Lean::open`을
+자매는 `leo4_mslean4::Lean::open`과 유사한 `leo4_wasip3::Lean::open`을
 구현하지만, 디스패치는 wasip3 host import(호스트가 구현하는 WIT 파일에
 정의)를 통한다. `futures::executor::block_on`이 모든 async import를
 구동하면서 사용자 대면 Rust API는 sync로 유지된다.

@@ -20,7 +20,7 @@
 leo4 currently has two transports for the IDL-defined
 canonical-ABI wire format:
 
-1. **leo4-native** (`SPEC/canonical-abi.md` §14): dynamic
+1. **leo4-mslean4** (`SPEC/canonical-abi.md` §14): dynamic
    linker (`dlopen` of a `leanc`-built `.so`). Bytes flow
    through C ABI buffers exposed by the shim. Lean side speaks
    `<lean/lean.h>`.
@@ -56,7 +56,7 @@ have a different shape:
   impl's `Env` / `Elab` / `Eval` API, not a `dlsym`'d C
   function.
 
-For such impls, leo4-native's `<lean/lean.h>` requirement is
+For such impls, leo4-mslean4's `<lean/lean.h>` requirement is
 **a layer of indirection that buys nothing** — it would force
 the impl to grow a `lean.h` compat shim purely to satisfy
 leo4. leo4-rust-native sidesteps that by talking to the impl's
@@ -218,7 +218,7 @@ performance gap that (A) can't cross. Today it's premature.
 
 ## 6. Comparison table — three paths
 
-| Aspect | leo4-native | leo4-wasm | leo4-rust-native |
+| Aspect | leo4-mslean4 | leo4-wasm | leo4-rust-native |
 |---|---|---|---|
 | Transport | `dlopen` + shim | wasm Component Model | direct Rust call |
 | C ABI dep | yes (`lean.h`) | no | **no** |
@@ -227,7 +227,7 @@ performance gap that (A) can't cross. Today it's premature.
 | Marshalling | canonical-ABI bytes | canonical-ABI bytes | **canonical-ABI bytes** |
 | Schema-hash check | runtime via handshake JSON | runtime via `verify-handshake` export | runtime via `LeanProc::schema_hash()` |
 | Re-entrant callbacks | via worker IPC frames (Phase 10-B1.x) | via WIT `host-imports` (deferred) | **trivial — Rust function call** |
-| Code in this repo | `crates/leo4-native`, `shim/leo4_rust_bridge*.c` | `crates/leo4-wasm` | **none** — adapter is out-of-tree |
+| Code in this repo | `crates/leo4-mslean4`, `shim/leo4_rust_bridge*.c` | `crates/leo4-wasm` | **none** — adapter is out-of-tree |
 | Adapter location | n/a (it IS leo4) | n/a (it IS leo4) | separate `leo4-<impl>` crate per impl |
 
 ## 7. First implementor candidate — OxiLean

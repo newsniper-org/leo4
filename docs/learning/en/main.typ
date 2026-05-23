@@ -127,7 +127,7 @@ A Rust crate that mirrors `lake/Leo4/Leo4/Marshal.lean` and
 the Lean encoder and the Rust encoder produce byte-identical
 output.
 
-== `leo4-native` (loader + dispatch)
+== `leo4-mslean4` (loader + dispatch)
 
 A Rust crate providing `Lean::open`, `Arena<'a>`, and
 `LeanRef<'a, T>`. The loader uses `libloading` to bring up the
@@ -296,7 +296,7 @@ each feature comes from helps when reading commit messages.
   [2], [Rust `leo4-idl` + cross-impl mangling conformance.],
   [3], [WIT lowering pass + `wasm-tools` validation.],
   [4], [Canonical-ABI conformance harness, `bignat` / `bigint`.],
-  [5], [C shim synthesis + `leo4-native` + `leo4-macros` +
+  [5], [C shim synthesis + `leo4-mslean4` + `leo4-macros` +
         `examples/01-hello`, `examples/02-roundtrip`.
         End-to-end pipeline.],
   [6], [Mutual recursion between nominal types

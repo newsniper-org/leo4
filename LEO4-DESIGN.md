@@ -65,7 +65,7 @@ written justification.
                 ┌────────┴────────┐
                 ▼                 ▼
        ┌────────────────┐ ┌─────────────────────┐
-       │ leo4-native    │ │ leo4-wasm           │
+       │ leo4-mslean4    │ │ leo4-wasm           │
        │  (C shim →     │ │  (wasmtime          │
        │   Lean runtime)│ │   Component Model)  │
        └────────┬───────┘ └─────────┬───────────┘
@@ -363,7 +363,7 @@ leo4-specific extensions:
 
 ## 9. Backends
 
-### 9.1 leo4-native
+### 9.1 leo4-mslean4
 
 - Loads a `.so` / `.dll` shim produced by Lake (Tier 1: Linux,
   Windows). macOS `.dylib` is **Tier 3 (best-effort)** as of

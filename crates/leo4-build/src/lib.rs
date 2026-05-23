@@ -13,7 +13,7 @@
 //! [`wire`] inspects `lake_build_dir` for the Lake-plugin emitted
 //! sidecar files (`<pkg>.leo4-{handshake,mangling}` and
 //! `<pkg>.leo4-shim.so`), emits `cargo:rustc-env=` lines that point
-//! the `leo4_macros` proc-macro and the `leo4_native` loader at the
+//! the `leo4_macros` proc-macro and the `leo4_mslean4` loader at the
 //! discovered paths, and registers `cargo:rerun-if-changed=` for
 //! each so an updated shim re-triggers the consumer crate's build.
 //!
