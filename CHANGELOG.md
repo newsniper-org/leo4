@@ -7,6 +7,54 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-6 follow-up commit 1/3: `Leo4Rust` Lake package + `leo4RustBridge` extern_lib (2026-05-23)
+
+First of three commits collapsing the reverse-direction
+manual `leanc -o` step. Per `spike/SPIKE-1-lake-extern-lib.md`'s
+4a pattern (path resolution only) and option R2 (logicutils
+optional, fallback to unconditional rebuild).
+
+- `lake/Leo4Rust/lakefile.lean` (new) — `package Leo4Rust`,
+  `require Leo4 from ".." / "Leo4"`, empty marker `lean_lib`
+  for default-target compliance.
+- `extern_lib leo4RustBridge pkg := …` — path resolution
+  chain for `libleo4_rust_bridge.a`:
+  1. env `LEO4_RUST_BRIDGE_AR` (explicit override)
+  2. `<leo4_repo>/target/release/libleo4_rust_bridge.a`
+  3. `<leo4_repo>/target/debug/libleo4_rust_bridge.a`
+  `<leo4_repo>` resolves as `pkg.dir / ".." / ".."` —
+  `lake/Leo4Rust/../..` lands at the leo4 repo root.
+  Body returns `(Pure.pure path)` (Lake's `Job` `Pure`
+  instance). Missing archive → `error s!"…"` via Lake's
+  `Util.Log.error` helper with a clear "run cargo build
+  first" pointer + full search list.
+- `lake/Leo4Rust/Leo4Rust.lean` (new) — empty marker module.
+  Importing it is unnecessary for the link integration to
+  fire (Lake's `lean_exe` walks `dep.externLibs`
+  unconditionally), but having a default `lean_lib` lets
+  `lake build` work without explicit targets.
+- `lake/Leo4Rust/lean-toolchain` — pinned to
+  `leanprover/lean4:v4.29.1` matching the rest of the repo.
+
+Verified:
+- `cd lake/Leo4Rust && lake build` clean (Built Leo4Rust
+  140ms).
+- `lake build leo4RustBridge.static` resolves correctly when
+  cargo-built archive is present.
+- `LEO4_RUST_BRIDGE_AR=/no/such/file lake build
+  leo4RustBridge.static` errors with the expected
+  "libleo4_rust_bridge.a not found. Searched: /no/such/file …
+  Run cargo build --release -p leo4-rust-bridge…" message.
+
+Next:
+- Commit 2/3 adds `leo4RustBridgeLean` extern_lib (leanc + ar
+  on `shim/leo4_rust_bridge_lean.c`, with `freshcheck`
+  optional gate via `which`).
+- Commit 3/3 wires `examples/05-rust-export/lean/lakefile.lean`
+  through `require Leo4Rust`, drops the manual `leanc -o`
+  step from the example's README + the `just
+  rust-export-05-build` recipe.
+
 ### Added — `leo4` CLI: `create` (new project) + `init` (existing crate) (2026-05-23)
 
 New workspace member `crates/leo4-cli/` shipping a `leo4`
