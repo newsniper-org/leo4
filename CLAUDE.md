@@ -2,6 +2,11 @@
 
 > Read this file at the start of every Claude Code session before touching any
 > source. Read `LEO4-DESIGN.md` next, then the relevant `SPEC/*.md`.
+>
+> **Companion doc**: `AGENTS.md` is the *cookbook* — concrete command
+> patterns, "what files usually change together?", common pitfalls,
+> subagent guidance. This file (`CLAUDE.md`) is the *working
+> agreement* — how to behave. Read both.
 
 ## Identity of This Project
 

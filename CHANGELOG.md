@@ -7,6 +7,52 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `AGENTS.md` cookbook for Claude Code sessions (2026-05-23)
+
+Companion to `CLAUDE.md`. CLAUDE.md is the working agreement
+(how to behave); AGENTS.md is the cookbook — concrete
+patterns for what to type when starting a task.
+
+Contents:
+
+- **Document routing**: a table mapping common starting
+  questions to the doc that answers them. Reduces "read
+  source to figure out what the doc should have said" loops.
+- **Forward vs reverse direction**: side-by-side table of
+  the two pipelines' mental models. The "where can `lean.h`
+  live?" question gets a hard rule answer.
+- **Commit cadence**: which files usually move together for
+  each commit shape (SPEC, macro, CLI, C shim, e2e example).
+  Reflects the actual Phase 9 history.
+- **Boundary-type checklist**: 8-step refinement of the
+  7-step one in CLAUDE.md. Adds reverse-direction
+  considerations and Mathlib bridge entry.
+- **OS-portability layer recipe**: stub-first, single
+  interface, audit-ledger entry — the 9-4 spawn/IPC layer
+  is the template.
+- **Phase entry-gate**: design commit before any code; cites
+  9-0 as the model.
+- **Cargo / Lake / leanc cheatsheet**.
+- **Common pitfalls (8 entries)**: schema_hash placement
+  in reverse mangling, `_GNU_SOURCE` needed under strict
+  C-std for POSIX symbols, `--gc-sections` and standalone
+  link, `cc::Build::std` single-arg limitation,
+  `IO α → future<α>` lift, `linkme` distributed-slice
+  static appearing unused, schema_hash recomputation
+  match, sticky `cargo:rerun-if-changed=`, variant
+  discriminator being u32 LE not u8.
+- **Subagent guidance**: when Explore / Plan /
+  general-purpose actually help vs add overhead.
+- **Recent decisions worth remembering (6 entries)**:
+  D16 reverse-direction adoption, gnullvm Tier 2,
+  long-running-worker isolation model, spawn/IPC ops
+  abstraction, D4 async lift, v0.1.0 cut hash. Each one
+  expensive enough to land that an agent rediscovering it
+  from scratch would burn hours.
+
+`CLAUDE.md` opening matter updated with a one-line pointer
+to the new cookbook.
+
 ### Added — Phase 9-7: `examples/05-rust-export/` end-to-end demo (2026-05-23)
 
 Eighth code landing on the Phase 9 ladder. The first example
