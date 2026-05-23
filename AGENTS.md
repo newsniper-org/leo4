@@ -613,6 +613,30 @@ would be expensive to relitigate:
   acceptable; IDL-vocabulary plug-ins are not, per this
   decision.
 
+- **2026-05-22 — OX1 + OX2 locked as v1.0 RC blockers**.
+  Two items must land before v1.0 RC, no exceptions:
+  - **OX1**: `leo4-rust-emit` (workspace) OR the lake plugin
+    (Lean side) auto-invokes `sibling/leo4-oxilean-build` when
+    a user package builds with `--impl rust-transpile`. The
+    user can't be expected to hand-drive `emit_crate` /
+    `write_to_dir`. Because leo4-oxilean-build is a standalone
+    Cargo workspace (sibling/, not main), the wiring crosses a
+    workspace boundary — likely a subprocess invocation of a
+    `leo4-oxilean-build` binary (lake-side requires this
+    anyway since Lean can't import Rust crates).
+  - **OX2**: extend `synthesize_canonical_wrapper`'s
+    marshallable-type matrix from primitives-only (u8..u128,
+    i8..i128, f32, f64, bool, char, String, unit) to include
+    the carrier types whose `LeanMarshal` impls already exist
+    in `crates/leo4-abi/` — `BigNat`, `BigInt`, `LeanRat`,
+    `LeanComplexF32x2`, `LeanComplexF64x2`, + the nightly
+    half-precision / complex variants behind a cargo feature.
+    User-defined records / inductives are a separate sub-
+    problem (RustTargetBackend v0.1.2 emits only
+    `RustItem::Fn`); decision deferred to first real-fixture
+    pass. Both pinned in ROADMAP.md "Deferred to the v1.0 RC
+    pre-release window".
+
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from
 병익 contradicts LEO4-DESIGN.md, raise the conflict

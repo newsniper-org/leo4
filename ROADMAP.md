@@ -678,6 +678,36 @@ all wait for the v1.0 RC window or later.
   waits for CI infra.
 - **G2** Publish to crates.io. API surface stabilises
   through Phase 10 first.
+- **OX1** `leo4-oxilean-build` invocation wiring (locked
+  2026-05-22). Either `leo4-rust-emit` or the lake plugin
+  must invoke `leo4-oxilean-build` automatically during a
+  user-package build when `--impl rust-transpile` (or the
+  equivalent marker) is selected. The wiring should:
+  1. Walk the user package's `.lean` sources for
+     `@[leo4_export]` decls (Hook-3 layer already in place).
+  2. Drive `transpile_source_if_exported` →
+     `synthesize_canonical_wrapper` →
+     `emit_crate` → `write_to_dir`.
+  3. Land the generated Cargo crate where the consumer's
+     `build.rs` (via `leo4_build::wire`) can `path`-dep it.
+  4. Cross the sibling/main-workspace boundary cleanly —
+     leo4-oxilean-build stays a standalone Cargo workspace,
+     so the wiring goes via subprocess or registry dep, not
+     a path-dep across workspaces.
+- **OX2** Marshallable matrix expansion (locked 2026-05-22).
+  `synthesize_canonical_wrapper`'s v0 matrix covers only
+  primitives (u8..u128, i8..i128, f32, f64, bool, char,
+  String, unit). v1.0 RC must add the carrier types whose
+  `LeanMarshal` impls already exist in `crates/leo4-abi/`:
+  `BigNat`, `BigInt`, `LeanRat`, `LeanComplexF32x2`,
+  `LeanComplexF64x2` (and the nightly-feature complex /
+  half-precision variants behind a cargo feature). Also
+  needs a story for user-defined records / inductives —
+  blocked on upstream `RustTargetBackend` v0.1.2 emitting
+  only `RustItem::Fn`; struct + impl emission either lands
+  upstream OR leo4-oxilean-build synthesises the shapes from
+  the elaborated `Decl::Inductive` / `Decl::Structure`
+  themselves. Decision deferred to first real-fixture pass.
 
 **Deferred to ≥ v1.x** (all of P10.4 minus C4 above):
 
