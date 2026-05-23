@@ -452,12 +452,28 @@ would be expensive to relitigate:
   side** (or in a leo4-OxiLean compat-layer crate), not on
   leo4 itself.
 
-  Most plausible OxiLean integration point: the C4.x.x wasm
-  pipeline. OxiLean's `oxilean-wasm` could expose the
-  `leo4:host/leo4-component@0.1.0` world from
-  `SPEC/wit/leo4-host.wit`; that bypasses §1.2's C-ABI
-  requirement entirely. Track as a Phase 11+ opportunity, not
-  a Phase 10 deliverable.
+  Most plausible OxiLean integration points (Phase 11+
+  candidates, not Phase 10):
+
+  1. **`SPEC/rust-native-lean.md` direct path** (preferred for
+     rust-native impls). Pinned 2026-05-21. Defines a small
+     `LeanProc` + `LeanProcInvoker` trait surface that an
+     out-of-tree adapter crate (`leo4-oxilean`) implements
+     against `oxilean-runtime`'s native Rust API. Same
+     canonical-ABI bytes (cross-impl conformance preserved),
+     direct Rust function call as transport — no C ABI / no
+     IPC / no wasm sandbox. Re-entrant callbacks (Phase 10-B1
+     pattern) become trivial because everything is in-process
+     Rust. Bypasses §1.2 / §1.3 / §1.4 of
+     `SPEC/lean-runtime-compat.md` entirely.
+  2. **C4.x.x wasm pipeline**. OxiLean's `oxilean-wasm` could
+     expose the `leo4:host/leo4-component@0.1.0` world from
+     `SPEC/wit/leo4-host.wit`. Bypasses §1.2 only; §1.3 still
+     needs some compile-path equivalent.
+  3. **`lean.h` compat shim in OxiLean**. Heaviest option;
+     OxiLean would expose a layer of C symbols matching
+     reference Lean's ABI. Out of scope for OxiLean per
+     today's design.
 
   **Deeper-dive findings (2026-05-21)**:
   `oxilean-elab/src/lean4_compat/` and

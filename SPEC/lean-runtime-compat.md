@@ -184,12 +184,23 @@ position is **runtime-spec-agnostic**: any implementation that
 satisfies §1.1–1.4 is supported transparently; impls that don't
 satisfy them need a glue layer.
 
-The leo4-wasm pipeline (C4 / C4.x / C4.x.x) is the most
-plausible OxiLean integration point eventually — OxiLean's
-own `oxilean-wasm` could theoretically be extended to expose
-the `leo4:host/leo4-component@0.1.0` world from
+The leo4-wasm pipeline (C4 / C4.x / C4.x.x) is one plausible
+OxiLean integration point — OxiLean's own `oxilean-wasm`
+could theoretically be extended to expose the
+`leo4:host/leo4-component@0.1.0` world from
 `SPEC/wit/leo4-host.wit`. That bypasses §1.2's C-ABI
 requirement entirely and uses CM-based interop instead.
+
+**An even better fit for OxiLean (and any other rust-native
+Lean impl)**: `SPEC/rust-native-lean.md` defines an
+in-process Rust-to-Rust integration path that bypasses §1.2,
+§1.3, AND §1.4 — the only contract is a single `LeanProc`
+trait an adapter crate (e.g. `leo4-oxilean`) implements
+against the impl's native Rust API. Same canonical-ABI bytes
+on the wire (cross-impl conformance preserved), but transport
+is a direct Rust function call. See `SPEC/rust-native-lean.md`
+§2 + §6 for the trait surface and the three-paths comparison
+table.
 
 ### Two-axis classification of leo4 surface satisfiability
 

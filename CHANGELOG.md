@@ -7,6 +7,61 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `SPEC/rust-native-lean.md` — third transport path for Rust-native Lean impls (2026-05-21)
+
+Documentation-only. Defines a third integration path (alongside
+leo4-native + leo4-wasm) for Rust-native Lean implementations
+that **bypasses the `<lean/lean.h>` C ABI entirely**.
+Motivation: 병익's observation that C ABI is a layer of
+indirection that buys nothing when the target Lean impl is
+itself Rust-native (e.g. OxiLean).
+
+Three-paths comparison table now part of the SPEC stack:
+
+| Aspect | leo4-native | leo4-wasm | leo4-rust-native |
+|---|---|---|---|
+| Transport | dlopen + shim | WASM CM | direct Rust call |
+| C ABI | yes | no | **no** |
+| Marshalling | canonical-ABI bytes | canonical-ABI bytes | canonical-ABI bytes |
+| Re-entrant callbacks | worker IPC (B1.x) | WIT host-imports | **trivial — function call** |
+
+Contract: a Rust-native impl exposes one trait
+(`LeanProc { schema_hash, abi_version, call }`) and
+optionally one host-callback trait (`LeanProcInvoker { invoke }`
+for reverse direction). An out-of-tree adapter crate
+(`leo4-<impl>`, e.g. `leo4-oxilean`) implements both against
+the impl's native Rust API. leo4 itself doesn't change — the
+SPEC defines what an adapter must satisfy.
+
+Key design choices (in `SPEC/rust-native-lean.md`):
+
+  • §5 — chose canonical-ABI bytes (Option A) over typed Rust
+    values (Option B). Preserves cross-impl conformance + the
+    schema_hash invariant; in-process marshalling overhead is
+    negligible (~tens of ns) and dominated by dispatch cost
+    anyway.
+  • §3 — reverse direction `LeanProcInvoker` trait makes
+    re-entrant callbacks (the Phase 10-B1 pattern that drives
+    the adsmt use case) genuinely trivial — they're just Rust
+    function calls in-process. No IPC frame protocol design.
+  • §2.3 — what the surface explicitly does NOT require:
+    `<lean/lean.h>` symbols, `leanc` toolchain, Lake DSL,
+    `@[extern]` lowering, `dlopen` capability. Three of these
+    four are §1.2 / §1.3 / §1.4 of
+    `SPEC/lean-runtime-compat.md`; the rust-native path
+    bypasses all three.
+
+For OxiLean specifically, §7 documents the integration:
+`leo4-oxilean::OxiLeanProc` wraps `oxilean-runtime`'s
+`Env`/`Elab` state, implements `LeanProc` by delegating into
+OxiLean's native call interface, and the source-syntax
+compat (which OxiLean already has at 99.7% Mathlib4 parse
+rate) handles attribute/derive recognition.
+
+`SPEC/lean-runtime-compat.md` and AGENTS.md "Recent
+decisions" both gain cross-references pointing at the new
+SPEC.
+
 ### Added — `SPEC/lean-runtime-compat.md` — Lean impl compatibility surface (2026-05-21)
 
 Documentation-only landing in response to "should leo4
