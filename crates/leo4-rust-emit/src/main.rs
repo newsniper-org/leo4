@@ -496,11 +496,27 @@ fn render_lean_wrapper(
     s.push_str("/-- Raw dispatcher entry. The Lean-side glue shim\n");
     s.push_str("    (`shim/leo4_rust_bridge_lean.c`, Phase 9-6) routes\n");
     s.push_str("    `mangled` + `args` through `leo4_rust_call` and packs\n");
-    s.push_str("    the response (status, ret bytes). -/\n");
+    s.push_str("    the response into a single ByteArray:\n");
+    s.push_str("      * bytes[0..4] — status (LE u32). 0 = success.\n");
+    s.push_str("      * bytes[4..]  — canonical-ABI return payload on success;\n");
+    s.push_str("                      empty on error.\n");
+    s.push_str("    The single-ByteArray representation avoids Lean's Prod\n");
+    s.push_str("    inline-scalar codegen — UInt32 in `(UInt32 × ByteArray)`\n");
+    s.push_str("    isn't laid out the way a naive C ctor builder expects. -/\n");
     s.push_str("@[extern \"leo4_rust_call_lean\"]\n");
     s.push_str("private opaque leo4RustCallRaw\n");
     s.push_str("    (mangled : @& String) (args : @& ByteArray)\n");
-    s.push_str("    : BaseIO (UInt32 × ByteArray)\n\n");
+    s.push_str("    : IO ByteArray\n\n");
+
+    s.push_str("/-- Decode the 4-byte LE u32 status prefix of the dispatcher\n");
+    s.push_str("    response. -/\n");
+    s.push_str("private def decodeStatus (buf : ByteArray) : UInt32 :=\n");
+    s.push_str("  if buf.size < 4 then 0xffffffff  -- malformed; treat as error\n");
+    s.push_str("  else\n");
+    s.push_str("    (buf.get! 0).toUInt32 |||\n");
+    s.push_str("    ((buf.get! 1).toUInt32 <<< 8) |||\n");
+    s.push_str("    ((buf.get! 2).toUInt32 <<< 16) |||\n");
+    s.push_str("    ((buf.get! 3).toUInt32 <<< 24)\n\n");
 
     let mut sorted: Vec<&EntryView> = entries.iter().collect();
     sorted.sort_by(|a, b| a.logical_name.cmp(&b.logical_name));
@@ -581,8 +597,9 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
         e.mangled.clone()
     };
     s.push_str(&format!(
-        "  let (status, ret) ← leo4RustCallRaw \"{dispatched_mangled}\" args\n",
+        "  let resp ← leo4RustCallRaw \"{dispatched_mangled}\" args\n",
     ));
+    s.push_str("  let status := decodeStatus resp\n");
     s.push_str("  if status ≠ 0 then\n");
     s.push_str(&format!(
         "    throw (IO.userError s!\"leo4 rust call `{}` failed with status {{status}}\")\n",
@@ -592,8 +609,9 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
         s.push_str("  return ()\n");
     } else {
         let lean_ret = lean_type_of_mangle(&e.ret_type).unwrap();
+        // Decode starting at offset 4 (after the status prefix).
         s.push_str(&format!(
-            "  match (Leo4.LeanMarshal.canonicalDecode (T := {lean_ret}) ret 0) with\n"
+            "  match (Leo4.LeanMarshal.canonicalDecode (T := {lean_ret}) resp 4) with\n"
         ));
         s.push_str("  | .ok (v, _) => return v\n");
         s.push_str(&format!(
@@ -941,6 +959,10 @@ mod tests {
         assert!(s.contains("namespace My.Rust"));
         assert!(s.contains("def schemaHash : String := \"abcdefghijklm\""));
         assert!(s.contains("@[extern \"leo4_rust_call_lean\"]"));
+        // New signature: IO ByteArray (status prefix decoded by
+        // the typed wrapper).
+        assert!(s.contains(": IO ByteArray"));
+        assert!(s.contains("private def decodeStatus"));
         assert!(s.contains("def ping") && s.contains("IO (Unit)"));
         assert!(s.contains("end My.Rust"));
     }

@@ -14,20 +14,32 @@
  * `crates/leo4-native/`).
  *
  * Build: leanc -c shim/leo4_rust_bridge_lean.c -o leo4_rust_bridge_lean.o
- *        (link alongside `libleo4_rust_bridge.a` per Phase 9-6).
+ *        (Phase 9-6 follow-up's Leo4Rust Lake package handles this).
  *
  * Lean declaration this file resolves:
  *
  *     @[extern "leo4_rust_call_lean"]
  *     private opaque leo4RustCallRaw
  *         (mangled : @& String) (args : @& ByteArray)
- *         : BaseIO (UInt32 × ByteArray)
+ *         : BaseIO ByteArray
  *
- * Lean's compiler lowers this into a C function that takes
- *   (lean_object* mangled, lean_object* args, lean_object* world)
- * and returns a `lean_io_result` wrapping the `(UInt32 × ByteArray)`
- * tuple. The third argument is the IO RealWorld token — borrowed,
- * passed through unchanged.
+ * Returned ByteArray layout (no Lean Prod, no ABI guessing):
+ *
+ *   bytes[0..4]  — status (LE u32). 0 = success; non-zero matches
+ *                  the dispatcher's error codes
+ *                  (SPEC/canonical-abi.md §13 + SPEC/reverse-direction.md §10).
+ *   bytes[4..]   — when status == 0, the call's canonical-ABI
+ *                  encoded return payload. When status != 0,
+ *                  empty.
+ *
+ * Earlier drafts used `BaseIO (UInt32 × ByteArray)`, but Lean's
+ * Prod codegen for `UInt32 × ByteArray` inlines the UInt32 as a
+ * scalar field rather than the boxed lean_object* layout the
+ * naive `lean_alloc_ctor(0, 2, 0)` / `lean_box_uint32` pair
+ * produces — the ABI mismatch surfaced as garbage `status`
+ * values in the Lean wrapper. The single-ByteArray return is
+ * unambiguous: caller reads the leading 4 LE bytes and slices
+ * the tail.
  */
 
 #include <stddef.h>
@@ -46,38 +58,31 @@ extern int32_t leo4_rust_call(
 #define LEO4_OK                       0
 #define LEO4_ERR_BUFFER_TOO_SMALL     0x00000007
 
-/* Default response buffer (4 KiB). Doubles on
- * BUFFER_TOO_SMALL and retries; the dispatcher passes the
- * required size out via `*ret_len`, so a single retry suffices. */
+/* Default response buffer (4 KiB minus the 4-byte status
+ * prefix). Doubles on BUFFER_TOO_SMALL and retries once; the
+ * dispatcher writes the required *return-payload* size into
+ * `*ret_len`, so a single retry with that size + 4 always
+ * suffices. */
 #define LEO4_RUST_INITIAL_RET_CAP     4096u
 
-/* Build the `(UInt32 × ByteArray)` tuple Lean expects on the
- * happy path.
- *
- * In Lean 4 a product type `(α × β)` lowers to a single ctor with
- * two fields — `Prod.mk α β`, ctor index 0, 2 object pointers, 0
- * scalar bytes. UInt32 is boxed (sub-word values land in
- * lean_object* via `lean_box_uint32`).
- */
-static lean_object* leo4_rust_make_result_tuple(uint32_t status,
-                                                lean_object* ret_array) {
-    lean_object* tuple = lean_alloc_ctor(0, 2, 0);
-    lean_ctor_set(tuple, 0, lean_box_uint32(status));
-    lean_ctor_set(tuple, 1, ret_array);
-    return tuple;
+/* Write a little-endian u32 into `out[0..4]`. */
+static inline void leo4_lean_u32_le(uint8_t* out, uint32_t v) {
+    out[0] = (uint8_t)(v & 0xffu);
+    out[1] = (uint8_t)((v >> 8) & 0xffu);
+    out[2] = (uint8_t)((v >> 16) & 0xffu);
+    out[3] = (uint8_t)((v >> 24) & 0xffu);
 }
 
-/* Lean extern entry. Always returns `lean_io_result_mk_ok(tuple)` —
+/* Lean extern entry. Always returns `lean_io_result_mk_ok(ByteArray)` —
  * dispatcher / user-function failures are surfaced through the
- * `status` field of the tuple, not through Lean's IO error path.
- * This mirrors the wrapper's design (the typed Lean wrapper
- * emitted by `--emit-lean` checks `status` and raises
- * `IO.userError` itself).
+ * 4-byte LE u32 status prefix of the returned ByteArray, not
+ * through Lean's IO error path. The typed Lean wrapper emitted
+ * by `--emit-lean` parses the prefix and raises `IO.userError`
+ * itself on non-zero status.
  *
  * Argument annotation rules (`@&`): both `mangled` and `args` are
- * borrowed; we must NOT call `lean_dec` on them. We DO own the
- * `ret_array` we allocate and the boxed status — they pass into
- * the tuple, which the caller drops.
+ * borrowed; we must NOT call `lean_dec` on them. The ByteArray
+ * we allocate passes into the IO result, which the caller drops.
  */
 LEAN_EXPORT lean_object* leo4_rust_call_lean(
     b_lean_obj_arg mangled,    /* @& String */
@@ -95,47 +100,45 @@ LEAN_EXPORT lean_object* leo4_rust_call_lean(
     uint8_t const* a_ptr = lean_sarray_cptr((lean_object*)args);
     size_t         a_len = lean_sarray_size(args);
 
-    /* Allocate the response buffer. We use `lean_alloc_sarray(1, n, n)`:
-     *   elem_size = 1 (byte), size = used count, capacity = same.
-     * We pre-set `size` to the initial cap so `lean_sarray_cptr` is
-     * usable; after the dispatcher returns we shrink via
-     * `lean_sarray_set_size` to the actual `ret_len`. */
+    /* Allocate the response ByteArray with room for the 4-byte
+     * status prefix plus the payload. Capacity here covers BOTH;
+     * the dispatcher writes only into the payload region (after
+     * the prefix). */
     size_t cap = LEO4_RUST_INITIAL_RET_CAP;
     lean_object* ret_array = lean_alloc_sarray(1, cap, cap);
-    uint8_t*     r_ptr     = lean_sarray_cptr(ret_array);
-    size_t       r_len     = 0;
+    uint8_t*     r_base    = lean_sarray_cptr(ret_array);
+    size_t       payload_len = 0;
 
-    int32_t status = leo4_rust_call(m_cstr, m_len, a_ptr, a_len,
-                                    r_ptr, cap, &r_len);
+    int32_t status = leo4_rust_call(
+        m_cstr, m_len, a_ptr, a_len,
+        r_base + 4,                /* payload starts after the 4-byte prefix */
+        cap - 4,                   /* payload capacity */
+        &payload_len);
 
-    /* BUFFER_TOO_SMALL retry: dispatcher wrote required size into
-     * r_len. Re-allocate the response buffer to exactly that size
-     * and retry once. Further retries fail with the same code (the
-     * worker's wrapper should never bounce twice). */
     if (status == LEO4_ERR_BUFFER_TOO_SMALL) {
-        cap = r_len;
-        /* Release the too-small buffer. `lean_dec` is the
-         * generic drop; for a freshly-allocated sarray with rc=1
-         * it frees immediately. */
+        /* `payload_len` carries the required payload size. Re-alloc
+         * to (size + 4) so the prefix fits as well, retry once. */
+        size_t needed = payload_len + 4;
+        if (needed <= cap) needed = cap * 2;  /* defensive */
         lean_dec(ret_array);
+        cap = needed;
         ret_array = lean_alloc_sarray(1, cap, cap);
-        r_ptr     = lean_sarray_cptr(ret_array);
-        r_len     = 0;
-        status    = leo4_rust_call(m_cstr, m_len, a_ptr, a_len,
-                                   r_ptr, cap, &r_len);
+        r_base    = lean_sarray_cptr(ret_array);
+        payload_len = 0;
+        status = leo4_rust_call(
+            m_cstr, m_len, a_ptr, a_len,
+            r_base + 4, cap - 4, &payload_len);
     }
 
-    /* Shrink the sarray's `m_size` to the actual byte count. The
-     * underlying allocation stays at `cap`; this only updates the
-     * length the Lean ByteArray reports. */
-    if (r_len <= cap) {
-        lean_sarray_set_size(ret_array, r_len);
-    }
-    /* On the (impossible) `r_len > cap` outcome we leave the
-     * sarray reporting the over-allocated capacity rather than
-     * panic; the dispatcher's contract says this cannot happen. */
+    /* Stamp the status prefix. */
+    leo4_lean_u32_le(r_base, (uint32_t)status);
 
-    return lean_io_result_mk_ok(
-        leo4_rust_make_result_tuple((uint32_t)status, ret_array)
-    );
+    /* On success the ByteArray's logical size is 4 + payload_len.
+     * On error it stays 4 (status prefix only, no payload). */
+    size_t total = 4 + (status == LEO4_OK ? payload_len : 0);
+    if (total <= cap) {
+        lean_sarray_set_size(ret_array, total);
+    }
+
+    return lean_io_result_mk_ok(ret_array);
 }

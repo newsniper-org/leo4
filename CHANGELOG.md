@@ -7,6 +7,117 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Fixed — Phase 9 runtime: dispatcher handshake-consume + glue ABI + first true e2e run (2026-05-23)
+
+The Phase 9-6 follow-up landed a 3-commit declarative-link
+chain that ended with the executable building successfully
+but failing at runtime on the first dispatcher call. Three
+bugs surfaced; this commit fixes all three. **`examples/05-rust-export/`
+now runs end-to-end with correct values for every export.**
+
+Bug A — dispatcher missed the worker's handshake frame.
+The worker (Phase 9-3) sends a 25-byte handshake immediately
+after init (SPEC §5.3: magic + hash_len + abi_version +
+schema_hash). The dispatcher (Phase 9-4a/b) never consumed
+those bytes, so they piled up in the IPC buffer and the
+subsequent response read decoded them as a response header
+— garbage `status` values were the symptom.
+
+Fix: new helper `leo4_consume_handshake(w)` in
+`shim/leo4_rust_bridge.c` that reads exactly 25 bytes
+(12-byte header + 13-byte hash) immediately after each
+`leo4_worker_ops->spawn` success. Verifies magic +
+hash_len, and against `LEO4_RUST_SCHEMA_HASH` env when set
+(otherwise verification is deferred to the typed Lean
+wrapper's compile-time pin). Hooked into BOTH spawn paths:
+`leo4_get_or_spawn_persistent` and `leo4_dispatch_isolated`.
+Forward decl added because the helper lives below
+`send/recv` plumbing.
+
+Bug B — `(UInt32 × ByteArray)` Prod ABI mismatch.
+The original glue shim built the return tuple via
+`lean_alloc_ctor(0, 2, 0)` + `lean_box_uint32`, assuming
+both fields were boxed object pointers. But Lean 4's
+codegen for `UInt32 × ByteArray` packs the `UInt32` as an
+inline scalar field in the ctor — not a boxed lean_object*.
+The mismatched layout produced unpredictable `status`
+values to the Lean wrapper even after Bug A was fixed
+(observed: 4 231 544 912, 1 446 527 056, …).
+
+Fix: change the glue shim's return contract from
+`BaseIO (UInt32 × ByteArray)` to a single ByteArray whose
+first 4 bytes hold the status as LE u32 and whose remaining
+bytes carry the canonical-ABI payload. No Prod codegen
+involved; layout is unambiguous.
+
+`shim/leo4_rust_bridge_lean.c` rewritten accordingly:
+allocates `lean_alloc_sarray(1, cap, cap)` of capacity
+`LEO4_RUST_INITIAL_RET_CAP` (4 KiB), hands `r_base + 4` +
+`cap - 4` to the dispatcher as the payload buffer, then
+stamps the status at `r_base[0..4]` via a small LE u32
+helper, and shrinks the sarray's logical size to
+`4 + payload_len` (or `4` on error). `BUFFER_TOO_SMALL`
+retry re-allocates with `payload_len + 4`.
+
+`crates/leo4-rust-emit/src/main.rs` emits a matching Lean
+wrapper:
+- Raw extern signature: `IO ByteArray` (not
+  `BaseIO ByteArray` — see Bug C).
+- Private `decodeStatus (buf : ByteArray) : UInt32`
+  reading bytes 0..4 as LE u32. Returns `0xffffffff` for
+  malformed (< 4-byte) responses.
+- Typed wrapper body now reads `resp` (full ByteArray),
+  decodes status, throws `IO.userError` on non-zero, then
+  `Leo4.LeanMarshal.canonicalDecode (T := …) resp 4` to
+  decode the payload starting at offset 4.
+
+Bug C — `BaseIO ByteArray` had wrong runtime ABI from
+within an `IO` block.
+Initial attempts at the new ByteArray-prefix scheme used
+`BaseIO ByteArray` as the extern signature. Lean's
+`MonadLift BaseIO IO` instance lifts purely at the type
+level, but the actual lowered C ABI of `BaseIO α` vs
+`IO α` apparently differs enough that calling the extern
+from an `IO` block via `← x` produced a malformed
+ByteArray (observed: `resp.size = 3 457 722 490 880`,
+clearly corrupt memory).
+
+Fix: declare the extern as `IO ByteArray`. Lean's compiler
+then lowers the call site through the IO monad directly,
+no lifting needed. The `lean_io_result_mk_ok` in the C
+glue is correct for either monad since their result
+layouts match — what mattered was the *caller-side*
+type Lean used to read back the result.
+
+Cleanup: temporary `IO.eprintln` debug print in the
+wrapper body that diagnosed Bug C is removed. Dispatcher's
+stderr `fprintf` trace also removed. Unit-test assertion
+updated for the `: IO ByteArray` signature change. 13/13
+emit-CLI tests pass; workspace test count stays at 141/0.
+
+Verified end-to-end with `just rust-export-05-build` +
+manual run:
+
+```
+leo4 reverse-direction demo — schema_hash = ozln3adaktdow
+
+is_prime:
+  is_prime(0)=false  is_prime(1)=false  is_prime(2)=true
+  is_prime(7)=true   is_prime(97)=true  is_prime(7919)=true
+  is_prime(7920)=false
+next_prime:
+  next_prime(1)=2  next_prime(13)=17  next_prime(1000)=1009
+count_primes_below:
+  count_primes_below(10)=4  (100)=25  (1000)=168
+factor_smallest:
+  (0)=none  (1)=none  (2)=some 2  (15)=some 3
+  (49)=some 7  (97)=some 97  (999983)=some 999983
+```
+
+All four Rust functions called from Lean produce the
+correct values. Phase 9 reverse-direction pipeline runs
+true end-to-end for the first time.
+
 ### Added — Phase 9-6 follow-up commit 3/3: examples/05 + emit CLI fixes (2026-05-23)
 
 Final of three commits in the Lake `extern_lib`

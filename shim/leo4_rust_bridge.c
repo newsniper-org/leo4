@@ -738,6 +738,9 @@ static const char* leo4_cdylib_path(void) {
     return "";  /* 9-5 will replace this with the baked-in default */
 }
 
+/* Forward declarations — handshake / frame helpers live below. */
+static int leo4_consume_handshake(leo4_worker_t* w);
+
 /* Returns the persistent worker, lazily spawning on first call.
  * On spawn failure, leaves the slot empty and propagates the
  * error code (the dispatcher entry returns it to the caller).
@@ -769,6 +772,18 @@ static int leo4_get_or_spawn_persistent(leo4_worker_t** out_worker) {
     leo4_worker_t* w = NULL;
     int rc = leo4_worker_ops->spawn(cdylib, &w, err_buf, sizeof err_buf);
     if (rc != LEO4_OK) {
+        atomic_store_explicit(&leo4_persistent_slot.spawn_in_progress, 0,
+                              memory_order_release);
+        *out_worker = NULL;
+        return rc;
+    }
+    /* Consume the worker's handshake frame before any request
+     * goes out (SPEC §5.3). On mismatch or IPC failure, tear the
+     * worker down so the next call retries from scratch. */
+    rc = leo4_consume_handshake(w);
+    if (rc != LEO4_OK) {
+        leo4_worker_ops->kill(w);
+        leo4_worker_ops->reap(w, NULL);
         atomic_store_explicit(&leo4_persistent_slot.spawn_in_progress, 0,
                               memory_order_release);
         *out_worker = NULL;
@@ -813,6 +828,60 @@ static uint32_t leo4_le_u32(const uint8_t* in) {
          | ((uint32_t)in[1] << 8)
          | ((uint32_t)in[2] << 16)
          | ((uint32_t)in[3] << 24);
+}
+
+/* Consume the worker's handshake frame (SPEC §5.3):
+ *
+ *   +-------------------+
+ *   | u32 magic = 0x4C45                  |
+ *   | u32 hash_len = 13                   |
+ *   | u32 abi_version                     |
+ *   | 13 bytes schema_hash (base32lc)     |
+ *   +-------------------+
+ *
+ * Must be called immediately after a successful `spawn`, before
+ * any request frame goes out. Without consuming the handshake,
+ * the worker's 25 bytes pile up in the IPC buffer and the
+ * dispatcher's subsequent response read decodes them as a
+ * response frame (the symptom is a garbage `status` value
+ * around 0x4C450000 — the handshake magic in the status slot).
+ *
+ * Schema-hash verification: when env LEO4_RUST_SCHEMA_HASH is
+ * set, the worker's hash must match it byte-for-byte;
+ * otherwise we surface LEO4_ERR_HANDSHAKE_MISMATCH (0x05).
+ * When the env is unset (typical for the manual workflow),
+ * verification is skipped — the typed Lean wrapper carries
+ * the expected hash at compile time and surfaces mismatches
+ * itself (9-5 wrapper output).
+ */
+static int leo4_consume_handshake(leo4_worker_t* w) {
+    uint8_t hdr[12];
+    int rc = leo4_read_exact(w, hdr, sizeof hdr);
+    if (rc != LEO4_OK) return rc;
+    uint32_t magic    = leo4_le_u32(hdr);
+    uint32_t hash_len = leo4_le_u32(hdr + 4);
+    /* abi_version at hdr + 8 — read but not enforced today; the
+     * worker stamps LEO4_ABI_VERSION = 1 here. Future bumps will
+     * surface here. */
+    (void)leo4_le_u32(hdr + 8);
+    if (magic != LEO4_FRAME_MAGIC) {
+        return LEO4_ERR_RUST_IPC_FAILED;
+    }
+    if (hash_len != LEO4_SCHEMA_HASH_LEN) {
+        return LEO4_ERR_HANDSHAKE_MISMATCH;
+    }
+    uint8_t hash_buf[LEO4_SCHEMA_HASH_LEN];
+    rc = leo4_read_exact(w, hash_buf, sizeof hash_buf);
+    if (rc != LEO4_OK) return rc;
+
+    const char* expected = getenv("LEO4_RUST_SCHEMA_HASH");
+    if (expected && expected[0]) {
+        if (strlen(expected) != LEO4_SCHEMA_HASH_LEN ||
+            memcmp(expected, hash_buf, LEO4_SCHEMA_HASH_LEN) != 0) {
+            return LEO4_ERR_HANDSHAKE_MISMATCH;
+        }
+    }
+    return LEO4_OK;
 }
 
 static int leo4_send_request(leo4_worker_t* w,
@@ -935,6 +1004,18 @@ static int32_t leo4_dispatch_isolated(
     leo4_worker_t* w = NULL;
     int rc = leo4_worker_ops->spawn(cdylib, &w, err_buf, sizeof err_buf);
     if (rc != LEO4_OK) return rc;
+
+    /* Consume the worker's handshake before any request goes out
+     * (SPEC §5.3). Without this, the worker's 25-byte handshake
+     * stays in the IPC buffer and the dispatcher's later
+     * `recv_response` reads it as a response — yielding a garbage
+     * status word. */
+    rc = leo4_consume_handshake(w);
+    if (rc != LEO4_OK) {
+        leo4_worker_ops->kill(w);
+        leo4_worker_ops->reap(w, NULL);
+        return rc;
+    }
 
     /* Send the call request. */
     rc = leo4_send_request(w, mangled, mangled_len, args_ptr, args_len);
