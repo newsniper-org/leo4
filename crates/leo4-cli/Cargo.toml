@@ -1,0 +1,19 @@
+[package]
+name        = "leo4-cli"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "leo4 — top-level CLI. Scaffolds new projects (`leo4 init`) and aliases convenient day-to-day commands. Distinct from `leo4c` (the IDL parser / mangler CLI)."
+
+[[bin]]
+name = "leo4"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+
+[lints]
+workspace = true

@@ -14,6 +14,7 @@ members = [
     "crates/leo4-rust-emit",
     "crates/leo4-rust-worker",
     "crates/leo4-rust-bridge",
+    "crates/leo4-cli",
     "examples/01-hello",
     "examples/02-roundtrip",
     "examples/04-mutual-ast",

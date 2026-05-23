@@ -7,6 +7,53 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4` CLI: `create` (new project) + `init` (existing crate) (2026-05-23)
+
+New workspace member `crates/leo4-cli/` shipping a `leo4`
+binary with two scaffolding subcommands. Distinct semantics:
+
+- **`leo4 create <direction> <dir>`** — new project. Creates
+  the directory (or expects it empty), writes a complete
+  buildable skeleton: `Cargo.toml`, `src/`, `lean/`,
+  `README.md`. `cargo new`-style ergonomics.
+- **`leo4 init <direction>`** — in-place integration into an
+  *existing* Cargo crate (cwd by default, or `--dir`). Adds:
+  - a `# ─── leo4 integration ───` block appended to
+    `Cargo.toml` (idempotent — re-running skips when the
+    marker line is already present);
+  - `build.rs` (forward direction only) if absent;
+  - `lean/{lakefile.lean,Sample.lean or Main.lean,lean-toolchain}`
+    if absent.
+  Existing `src/` is never touched.
+
+Both subcommands accept `forward` (`@[leo4_export]` + Rust
+`leo4::import!`) or `reverse` (`#[leo4::export]` + generated
+Lean wrapper) directions. `--leo4-root <path>` overrides the
+default `../leo4` sibling path for the generated Cargo /
+Lake `require` entries.
+
+Templates produce:
+- Forward: `Cargo.toml` (leo4 + leo4-build), `build.rs`
+  wiring the Lake shim, `src/main.rs` with a `leo4::import!`
+  block calling `hello` / `add`, `lean/Sample.lean` with
+  matching `@[leo4_export]`s.
+- Reverse: `Cargo.toml` (`[lib] crate-type=["cdylib"]`,
+  leo4 with `rust-exports` feature), `src/lib.rs` with
+  `#[leo4::export] pub fn double / greet`, `lean/Main.lean`
+  importing the generated `<Iface>.Rust` wrapper.
+
+CLI sanity:
+- 3 unit tests (camel_case, Cargo.toml name extraction,
+  idempotent Cargo.toml extension).
+- End-to-end smoke: `leo4 create forward /tmp/x` produces 7
+  files in the expected layout; `leo4 init reverse --dir
+  <pre-existing>` appends the integration block + writes
+  lean/ without touching existing `src/main.rs`; a second
+  `init` reports `skip … already exists` for every entry.
+
+Workspace test count 138 → 141; all green. `cargo install
+--path crates/leo4-cli` makes `leo4` available on PATH.
+
 ### Added — Phase 9-4c: Windows backend (`CreateProcess` + named pipe) (2026-05-23)
 
 Fills the second real branch of `leo4_worker_ops_t`. Same
