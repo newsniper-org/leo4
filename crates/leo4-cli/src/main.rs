@@ -72,10 +72,20 @@ enum Cmd {
         #[arg(long)]
         leo4_root: Option<PathBuf>,
         /// Lean implementation to target. **Required** — no
-        /// default. `mslean4` = reference Lean 4 via `<lean/lean.h>`
-        /// C ABI shim. `rust-native` (alias: `rust`) = Rust-native
-        /// Lean impl via direct Rust call (currently deferred —
-        /// see `SPEC/rust-native-lean.md`). Exactly one value.
+        /// default. Accepted values:
+        ///
+        /// - `mslean4` — reference Lean 4 via `<lean/lean.h>`
+        ///   C ABI shim. The only path that fully ships today.
+        /// - `rust-native` (alias: `rust`) — Rust-native Lean
+        ///   impl via direct in-process Rust call. Currently
+        ///   deferred — `SPEC/rust-native-lean.md` §8.
+        /// - `rust-transpile` — OxiLean's
+        ///   `oxilean-codegen::rust_target_backend` lowers Lean
+        ///   source to a plain Rust crate at build time.
+        ///   Currently scaffold-only —
+        ///   `SPEC/rust-native-lean.md` §9.
+        ///
+        /// Exactly one value.
         #[arg(long, value_parser = parse_impl_kind)]
         r#impl: ImplKind,
     },
@@ -151,9 +161,16 @@ enum ImplKind {
     /// `<lean/lean.h>` C ABI shim.
     Mslean4,
     /// `leo4-rust-native` adapter path (out-of-tree) — Rust-native
-    /// Lean impl via direct Rust call. Currently deferred
-    /// (`SPEC/rust-native-lean.md` §8).
+    /// Lean impl via direct in-process Rust call.
+    /// Currently deferred (`SPEC/rust-native-lean.md` §8).
     RustNative,
+    /// `leo4-oxilean-build` transpile path — OxiLean's
+    /// `oxilean-codegen::rust_target_backend` lowers Lean
+    /// source to a plain Rust crate at build time; the user
+    /// then calls it as ordinary Rust. Bypasses the
+    /// evaluator-hook deferral that blocks `RustNative`.
+    /// Currently scaffold-only (`SPEC/rust-native-lean.md` §9).
+    RustTranspile,
 }
 
 impl ImplKind {
@@ -161,6 +178,7 @@ impl ImplKind {
         match self {
             ImplKind::Mslean4 => "mslean4",
             ImplKind::RustNative => "rust-native",
+            ImplKind::RustTranspile => "rust-transpile",
         }
     }
 }
@@ -169,8 +187,10 @@ fn parse_impl_kind(s: &str) -> Result<ImplKind, String> {
     match s {
         "mslean4" => Ok(ImplKind::Mslean4),
         "rust-native" | "rust" => Ok(ImplKind::RustNative),
+        "rust-transpile" => Ok(ImplKind::RustTranspile),
         other => Err(format!(
-            "unknown --impl value `{other}`. Accepted: `mslean4`, `rust-native` (or `rust` as alias)."
+            "unknown --impl value `{other}`. Accepted: `mslean4`, \
+             `rust-native` (alias `rust`), `rust-transpile`."
         )),
     }
 }
@@ -207,6 +227,19 @@ fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
              See `SPEC/rust-native-lean.md` §8 for the activation plan, \
              or use `--impl mslean4` for the reference Lean 4 path that \
              ships today.".into()
+        ),
+        ImplKind::RustTranspile => Err(
+            "--impl rust-transpile is currently scaffold-only. The \
+             transpile path (Lean source → Rust crate via OxiLean's \
+             `oxilean-codegen::rust_target_backend`) is pinned at \
+             `SPEC/rust-native-lean.md` §9 and the build-side adapter \
+             crate exists at `sibling/leo4-oxilean-build/`, but no \
+             user-package scaffold layout is wired into `leo4 create` \
+             / `leo4 init` yet.\n\n\
+             See `SPEC/rust-native-lean.md` §9.6 for the open \
+             questions an adapter author still answers per-fixture, \
+             or use `--impl mslean4` for the reference Lean 4 path \
+             that ships today.".into()
         ),
     }
 }
@@ -1031,6 +1064,10 @@ mod tests {
     fn parse_impl_kind_accepts_canonical_names() {
         assert_eq!(parse_impl_kind("mslean4").unwrap(), ImplKind::Mslean4);
         assert_eq!(parse_impl_kind("rust-native").unwrap(), ImplKind::RustNative);
+        assert_eq!(
+            parse_impl_kind("rust-transpile").unwrap(),
+            ImplKind::RustTranspile
+        );
     }
 
     #[test]
@@ -1043,6 +1080,7 @@ mod tests {
         let err = parse_impl_kind("oxilean").unwrap_err();
         assert!(err.contains("mslean4"), "{err}");
         assert!(err.contains("rust-native"), "{err}");
+        assert!(err.contains("rust-transpile"), "{err}");
     }
 
     #[test]
@@ -1055,6 +1093,32 @@ mod tests {
         let err = check_impl_supported(&ImplKind::RustNative).unwrap_err();
         assert!(err.contains("rust-native"), "{err}");
         assert!(err.contains("rust-native-lean.md"), "{err}");
+    }
+
+    #[test]
+    fn check_impl_supported_rejects_rust_transpile_with_pointer_to_spec_section_9() {
+        let err = check_impl_supported(&ImplKind::RustTranspile).unwrap_err();
+        assert!(err.contains("rust-transpile"), "{err}");
+        assert!(err.contains("§9"), "{err}");
+        assert!(err.contains("leo4-oxilean-build"), "{err}");
+    }
+
+    #[test]
+    fn impl_kind_marker_strings_unique_and_consistent() {
+        let kinds = [
+            ImplKind::Mslean4,
+            ImplKind::RustNative,
+            ImplKind::RustTranspile,
+        ];
+        let markers: Vec<_> = kinds.iter().map(ImplKind::marker_str).collect();
+        assert_eq!(markers, ["mslean4", "rust-native", "rust-transpile"]);
+        for m in &markers {
+            assert_eq!(
+                parse_impl_kind(m).unwrap().marker_str(),
+                *m,
+                "round-trip failed for {m}"
+            );
+        }
     }
 
     #[test]
