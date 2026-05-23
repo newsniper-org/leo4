@@ -7,6 +7,97 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 user records — `synthesize_enum_type` for inductive types (2026-05-22)
+
+OX2 user-records final lib piece. Lean inductive types (Lean
+`inductive Color | Red | Green` or
+`inductive Either | left : Nat → Either | right : String → Either`)
+synthesise into Rust enums + inline `LeanMarshal` impls.
+
+Wire shape matches the leo4 derive macro's
+`expand_derive_variant` / `expand_derive_enum` expansion
+exactly (see `crates/leo4-macros-backend/src/lib.rs`):
+
+```
+wire = 4-byte LE discriminator (u32)
+     + per-variant payload (declaration-order fields,
+       each `LeanMarshal::canonical_encode`d sequentially —
+       no padding)
+```
+
+Per `SPEC/canonical-abi.md` §9 (B5 discriminator
+canonicalisation). An enum synthesised this way is therefore
+byte-compatible with a hand-written `#[derive(LeanMarshal)]`
+of the same variant shape.
+
+New public API:
+
+- `EnumVariant { name: String, fields: Vec<RustType> }` —
+  one ctor of a Lean inductive. `fields: []` is a unit
+  variant; otherwise tuple-style payload.
+- `synthesize_enum_type(name, variants) -> Result<String, LeanError>`
+  / `synthesize_enum_type_with_users(name, variants,
+  user_types)` — emits the enum decl + LeanMarshal impl.
+
+Coverage:
+
+- All-unit enums (Lean `inductive Color | Red | Green | Blue`)
+  → `enum Color { Red, Green, Blue }`.
+- Mixed unit + payload variants (`Maybe` with `none`, `some(u64)`).
+- Carrier-type payloads (`Either { ok(BigNat), err(String) }`).
+- User-type payloads via `*_with_users`
+  (`Shape { dot(Point), line(Point, Point) }`).
+- Keyword variant names → `escape_rust_ident` (`Choice { r#match, r#type(u32) }`).
+- Empty enum → loud rejection (`ENCODE_ERROR`, "no variants").
+- Unmarshallable payload type → atomic rejection (no partial
+  emit).
+
+Sample output (`Either { left: BigNat → Either, right: String → Either }`,
+abbreviated):
+
+```rust
+pub enum Either {
+    left(::leo4_abi::BigNat),
+    right(::std::string::String),
+}
+
+impl ::leo4_abi::LeanMarshal for Either {
+    fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
+        match self {
+            Self::left(__f0) => {
+                buf.extend_from_slice(&0u32.to_le_bytes());
+                <::leo4_abi::BigNat as ::leo4_abi::LeanMarshal>::canonical_encode(__f0, buf);
+            }
+            Self::right(__f0) => {
+                buf.extend_from_slice(&1u32.to_le_bytes());
+                …
+            }
+        }
+    }
+    fn canonical_decode(buf: &[u8], off: usize) -> Result<(Self, usize), LeanError> {
+        // 4-byte LE tag → variant dispatch
+        …
+    }
+}
+```
+
+Tests 72 → 80 (+8): all-unit enum, payload tuple variant,
+mixed shapes, carrier payload, user-type payload, atomic
+rejection of bad payload, zero-variant rejection, keyword
+escape coverage.
+
+`examples/dump_enum.rs` prints a fixture `Either { left:
+BigNat, right: String }` enum for visual inspection.
+
+clippy --all-targets -D warnings clean (added a `# Panics`
+note on `_with_users` for the `writeln!` infallibility
+artefact).
+
+**OX2 user records sub-blocker now fully resolved at the
+library level**. Remaining `Decl::Inductive` integration in
+`transpile_source_to_unit` (analogous to the existing
+`Decl::Structure` branch) is one small follow-up commit.
+
 ### Added — `leo4-oxilean-build`: OX2 user records — Rust-keyword identifier escaping (2026-05-22)
 
 OX2 user-records fourth increment. Lean field / param /

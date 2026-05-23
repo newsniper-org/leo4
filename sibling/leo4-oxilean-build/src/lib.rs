@@ -1604,6 +1604,256 @@ pub fn synthesize_struct_type_with_users(
     Ok(s)
 }
 
+// ─── OX2 user-record synthesis: inductive (multi-ctor enums) ─────────────
+//
+// Lean inductive → Rust enum + inline `LeanMarshal` impl.
+// Encode / decode shape mirrors the leo4 derive macro's
+// `expand_derive_enum` (all-unit case) /
+// `expand_derive_variant` (payload-carrying case) expansion
+// in `crates/leo4-macros-backend/src/lib.rs`:
+//
+//   wire = 4-byte LE discriminator
+//        + per-variant payload (declaration-order, no
+//          padding — caller is responsible for choosing
+//          variant types that round-trip)
+//
+// SPEC/canonical-abi.md §9 — discriminator is `u32` LE.
+
+/// One ctor of a Lean inductive type, lowered to its Rust
+/// enum-variant representation. `fields: []` is a unit
+/// variant; otherwise a tuple-style variant
+/// `Variant(T1, T2, ...)`.
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    /// Variant name (the Lean ctor's name; emitted verbatim
+    /// after `escape_rust_ident`).
+    pub name: String,
+    /// Payload type sequence, in declaration order.
+    pub fields: Vec<RustType>,
+}
+
+/// Synthesise a Rust enum + matching `LeanMarshal` impl for a
+/// Lean inductive type. Encoded shape matches the leo4 derive
+/// macro's `expand_derive_variant` /
+/// `expand_derive_enum` (all-unit case) expansion exactly, so
+/// an enum synthesised this way is byte-compatible with a
+/// hand-written `#[derive(LeanMarshal)]` of the same shape.
+///
+/// # Errors
+/// `LeanError(ENCODE_ERROR)` if any variant's payload type
+/// fails `render_marshallable_type_with_users`.
+pub fn synthesize_enum_type(
+    name: &str,
+    variants: &[EnumVariant],
+) -> Result<String, LeanError> {
+    synthesize_enum_type_with_users(name, variants, &HashSet::new())
+}
+
+/// Variant of `synthesize_enum_type` that accepts a set of
+/// user-defined type names (typically from
+/// `Leo4ExportRegistry::user_types`) for cross-type references
+/// in variant payloads.
+///
+/// # Errors
+/// Same conditions as `synthesize_enum_type`.
+///
+/// # Panics
+/// Only via `writeln!` on an in-memory `String` (write
+/// can't actually fail for `String`); this is a syntactic
+/// artefact of the `std::fmt::Write` trait.
+#[allow(clippy::too_many_lines)] // documented branches: encode + decode
+pub fn synthesize_enum_type_with_users(
+    name: &str,
+    variants: &[EnumVariant],
+    user_types: &HashSet<String>,
+) -> Result<String, LeanError> {
+    use std::fmt::Write as _;
+
+    // Pre-validate every variant's payload AND pre-render each
+    // type so an unmarshallable payload aborts before any emit.
+    struct PreparedVariant {
+        esc_name: String,
+        payload: Vec<String>,
+    }
+
+    if variants.is_empty() {
+        return Err(LeanError::new(
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            format!(
+                "leo4-oxilean-build: enum `{name}` has no variants — \
+                 cannot synthesise an inhabited Rust type"
+            ),
+        ));
+    }
+
+    let mut prepared: Vec<PreparedVariant> = Vec::with_capacity(variants.len());
+    for v in variants {
+        let mut payload: Vec<String> = Vec::with_capacity(v.fields.len());
+        for fty in &v.fields {
+            payload.push(render_marshallable_type_with_users(fty, user_types)?);
+        }
+        prepared.push(PreparedVariant {
+            esc_name: escape_rust_ident(&v.name),
+            payload,
+        });
+    }
+
+    let mut s = String::new();
+
+    // Enum decl.
+    writeln!(s, "#[derive(Debug, Clone)]").unwrap();
+    // Lean ctor names may collide with the type's name in
+    // some patterns — non_camel_case_types allow for safety.
+    writeln!(s, "#[allow(non_camel_case_types)]").unwrap();
+    writeln!(s, "pub enum {name} {{").unwrap();
+    for v in &prepared {
+        if v.payload.is_empty() {
+            writeln!(s, "    {vn},", vn = v.esc_name).unwrap();
+        } else {
+            writeln!(
+                s,
+                "    {vn}({fields}),",
+                vn = v.esc_name,
+                fields = v.payload.join(", ")
+            )
+            .unwrap();
+        }
+    }
+    writeln!(s, "}}").unwrap();
+    writeln!(s).unwrap();
+
+    // LeanMarshal impl.
+    writeln!(s, "impl ::leo4_abi::LeanMarshal for {name} {{").unwrap();
+
+    // Encode: match self → emit 4-byte LE disc + payload.
+    writeln!(
+        s,
+        "    fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {{"
+    )
+    .unwrap();
+    s.push_str("        match self {\n");
+    for (i, v) in prepared.iter().enumerate() {
+        let disc = u32::try_from(i).map_err(|_| {
+            LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                format!(
+                    "leo4-oxilean-build: enum `{name}` has too many variants \
+                     (>= 2^32) to discriminate as u32 LE"
+                ),
+            )
+        })?;
+        if v.payload.is_empty() {
+            writeln!(
+                s,
+                "            Self::{vn} => {{",
+                vn = v.esc_name
+            )
+            .unwrap();
+            writeln!(
+                s,
+                "                buf.extend_from_slice(&{disc}u32.to_le_bytes());"
+            )
+            .unwrap();
+            s.push_str("            }\n");
+        } else {
+            let temps: Vec<String> = (0..v.payload.len())
+                .map(|j| format!("__f{j}"))
+                .collect();
+            writeln!(
+                s,
+                "            Self::{vn}({binds}) => {{",
+                vn = v.esc_name,
+                binds = temps.join(", ")
+            )
+            .unwrap();
+            writeln!(
+                s,
+                "                buf.extend_from_slice(&{disc}u32.to_le_bytes());"
+            )
+            .unwrap();
+            for (temp, ty) in temps.iter().zip(v.payload.iter()) {
+                writeln!(
+                    s,
+                    "                <{ty} as ::leo4_abi::LeanMarshal>::canonical_encode({temp}, buf);"
+                )
+                .unwrap();
+            }
+            s.push_str("            }\n");
+        }
+    }
+    s.push_str("        }\n");
+    writeln!(s, "    }}").unwrap();
+
+    // Decode: read 4-byte disc, dispatch to a variant arm.
+    writeln!(s, "    fn canonical_decode(buf: &[u8], off: usize)").unwrap();
+    writeln!(
+        s,
+        "        -> ::core::result::Result<(Self, usize), ::leo4_abi::LeanError>"
+    )
+    .unwrap();
+    writeln!(s, "    {{").unwrap();
+    s.push_str("        if buf.len() < off + 4 {\n");
+    s.push_str("            return ::core::result::Result::Err(::leo4_abi::LeanError::new(\n");
+    s.push_str("                ::leo4_abi::error::error_codes::DECODE_ERROR,\n");
+    writeln!(
+        s,
+        "                \"leo4-oxilean-build: enum `{name}`: not enough bytes for u32 tag\","
+    )
+    .unwrap();
+    s.push_str("            ));\n        }\n");
+    s.push_str("        let mut bytes = [0u8; 4];\n");
+    s.push_str("        bytes.copy_from_slice(&buf[off..off + 4]);\n");
+    s.push_str("        let __tag = u32::from_le_bytes(bytes);\n");
+    s.push_str("        match __tag {\n");
+    for (i, v) in prepared.iter().enumerate() {
+        // Disc fits in u32 (we checked during encode emit).
+        let disc = u32::try_from(i).unwrap();
+        if v.payload.is_empty() {
+            writeln!(
+                s,
+                "            {disc}u32 => ::core::result::Result::Ok((Self::{vn}, off + 4)),",
+                vn = v.esc_name
+            )
+            .unwrap();
+        } else {
+            let temps: Vec<String> = (0..v.payload.len())
+                .map(|j| format!("__f{j}"))
+                .collect();
+            writeln!(s, "            {disc}u32 => {{").unwrap();
+            s.push_str("                let mut __off = off + 4;\n");
+            for (temp, ty) in temps.iter().zip(v.payload.iter()) {
+                writeln!(
+                    s,
+                    "                let ({temp}, __next) = <{ty} as ::leo4_abi::LeanMarshal>::canonical_decode(buf, __off)?;"
+                )
+                .unwrap();
+                s.push_str("                __off = __next;\n");
+            }
+            writeln!(
+                s,
+                "                ::core::result::Result::Ok((Self::{vn}({binds}), __off))",
+                vn = v.esc_name,
+                binds = temps.join(", ")
+            )
+            .unwrap();
+            s.push_str("            }\n");
+        }
+    }
+    s.push_str("            _ => ::core::result::Result::Err(::leo4_abi::LeanError::new(\n");
+    s.push_str("                ::leo4_abi::error::error_codes::DECODE_ERROR,\n");
+    writeln!(
+        s,
+        "                ::std::format!(\"leo4-oxilean-build: enum `{name}`: invalid tag {{__tag}}\"),"
+    )
+    .unwrap();
+    s.push_str("            )),\n");
+    s.push_str("        }\n");
+    writeln!(s, "    }}").unwrap();
+
+    writeln!(s, "}}").unwrap();
+    Ok(s)
+}
+
 // ─── §6 Cargo crate emit ─────────────────────────────────────────────────
 //
 // SPEC/rust-native-lean.md §3 + §9.3 endpoint: a Cargo crate
@@ -3062,6 +3312,157 @@ mod tests {
         let db = out.find("(b, __next)").expect("b decode");
         let dc = out.find("(c, __next)").expect("c decode");
         assert!(da < db && db < dc, "decode order broke");
+    }
+
+    // ─── OX2 inductive (enum) synthesis tests ─────────────────────────
+
+    fn ctor(name: &str, fields: Vec<RustType>) -> EnumVariant {
+        EnumVariant {
+            name: name.to_string(),
+            fields,
+        }
+    }
+
+    #[test]
+    fn enum_all_unit_emits_pure_unit_variants() {
+        let out = synthesize_enum_type(
+            "Color",
+            &[
+                ctor("Red", vec![]),
+                ctor("Green", vec![]),
+                ctor("Blue", vec![]),
+            ],
+        )
+        .expect("Color must synth");
+
+        assert!(out.contains("pub enum Color {"));
+        assert!(out.contains("    Red,"));
+        assert!(out.contains("    Green,"));
+        assert!(out.contains("    Blue,"));
+        // Encode arms: 4-byte LE disc emit for each variant.
+        assert!(out.contains("Self::Red => {"));
+        assert!(out.contains("0u32.to_le_bytes()"));
+        assert!(out.contains("1u32.to_le_bytes()"));
+        assert!(out.contains("2u32.to_le_bytes()"));
+        // Decode dispatch.
+        assert!(out.contains("0u32 => ::core::result::Result::Ok((Self::Red"));
+        assert!(out.contains("invalid tag"));
+    }
+
+    #[test]
+    fn enum_with_payload_emits_tuple_variant_and_decode() {
+        let out = synthesize_enum_type(
+            "Either",
+            &[
+                ctor("left", vec![RustType::U32]),
+                ctor("right", vec![RustType::RustString]),
+            ],
+        )
+        .expect("Either must synth");
+
+        // Tuple-style variants.
+        assert!(out.contains("    left(u32),"));
+        assert!(out.contains("    right(::std::string::String),"));
+
+        // Encode: disc + payload encode per variant.
+        assert!(out.contains("Self::left(__f0) => {"));
+        assert!(out.contains("0u32.to_le_bytes()"));
+        assert!(out.contains("<u32 as ::leo4_abi::LeanMarshal>::canonical_encode(__f0"));
+        assert!(out.contains("1u32.to_le_bytes()"));
+
+        // Decode: 4-byte tag + payload decode per variant.
+        assert!(out.contains("0u32 => {"));
+        assert!(out.contains("let (__f0, __next) = <u32 as ::leo4_abi::LeanMarshal>::canonical_decode"));
+        assert!(out.contains("Self::left(__f0)"));
+        assert!(out.contains("1u32 => {"));
+        assert!(out.contains(
+            "let (__f0, __next) = <::std::string::String as ::leo4_abi::LeanMarshal>::canonical_decode"
+        ));
+        assert!(out.contains("Self::right(__f0)"));
+    }
+
+    #[test]
+    fn enum_mixed_unit_and_payload() {
+        let out = synthesize_enum_type(
+            "Maybe",
+            &[ctor("none", vec![]), ctor("some", vec![RustType::U64])],
+        )
+        .expect("Maybe must synth");
+        assert!(out.contains("    none,"));
+        assert!(out.contains("    some(u64),"));
+        assert!(out.contains("Self::none =>"));
+        assert!(out.contains("Self::some(__f0) =>"));
+    }
+
+    #[test]
+    fn enum_with_carrier_payload() {
+        let out = synthesize_enum_type(
+            "Either",
+            &[
+                ctor("ok", vec![RustType::Custom("BigNat".to_string())]),
+                ctor("err", vec![RustType::RustString]),
+            ],
+        )
+        .expect("BigNat payload must synth");
+        assert!(out.contains("ok(::leo4_abi::BigNat)"));
+        assert!(out.contains("<::leo4_abi::BigNat as ::leo4_abi::LeanMarshal>"));
+    }
+
+    #[test]
+    fn enum_with_user_type_payload() {
+        let users: HashSet<String> = ["Point".to_string()].into_iter().collect();
+        let out = synthesize_enum_type_with_users(
+            "Shape",
+            &[
+                ctor("dot", vec![RustType::Custom("Point".to_string())]),
+                ctor(
+                    "line",
+                    vec![
+                        RustType::Custom("Point".to_string()),
+                        RustType::Custom("Point".to_string()),
+                    ],
+                ),
+            ],
+            &users,
+        )
+        .expect("user-type payload must synth");
+        assert!(out.contains("dot(Point)"));
+        assert!(out.contains("line(Point, Point)"));
+    }
+
+    #[test]
+    fn enum_rejects_unmarshallable_payload_atomically() {
+        let err = synthesize_enum_type(
+            "Bad",
+            &[
+                ctor("good", vec![RustType::U64]),
+                ctor("bad", vec![RustType::Custom("Mystery".to_string())]),
+            ],
+        )
+        .expect_err("Mystery payload must reject");
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+        assert!(err.message.contains("Mystery"));
+    }
+
+    #[test]
+    fn enum_rejects_zero_variants() {
+        let err = synthesize_enum_type("Void", &[])
+            .expect_err("0-variant enum must reject");
+        assert!(err.message.contains("no variants"));
+    }
+
+    #[test]
+    fn enum_escapes_keyword_variant_names() {
+        let out = synthesize_enum_type(
+            "Choice",
+            &[ctor("match", vec![]), ctor("type", vec![RustType::U32])],
+        )
+        .expect("keyword variants must synth");
+        assert!(out.contains("    r#match,"));
+        assert!(out.contains("    r#type(u32),"));
+        assert!(out.contains("Self::r#match =>"));
+        assert!(out.contains("Self::r#type(__f0) =>"));
+        assert!(out.contains("Self::r#match,"));
     }
 
     // ─── §6 Cargo crate emit tests ────────────────────────────────────
