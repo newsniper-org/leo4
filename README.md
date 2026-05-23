@@ -5,14 +5,26 @@ toolchain version.
 
 ## Status
 
-**Phases 0–8 complete (2026-05-21). v0.1.0.** The full pipeline runs
-end-to-end on Tier 1 (x86_64 Linux): Lake plugin, Rust workspace,
-shim synthesis, C ↔ Lean dispatch, mutual recursion, async `io<T>`
+**Phases 0–8 released as v0.1.0 (2026-05-21). Phase 9
+(reverse direction: Rust → Lean) landed across 9-0 through
+9-7 plus 9-4c, 9.X isolated, 9.X recycle, and the `leo4`
+CLI (2026-05-23).** The forward pipeline runs end-to-end on
+Tier 1 (x86_64 Linux): Lake plugin, Rust workspace, shim
+synthesis, C ↔ Lean dispatch, mutual recursion, async `io<T>`
 lift, and a Mathlib-compatible carrier-type subset with opt-in
 bridges. `tests/mangling/` confirms cross-impl byte-identical
 mangling across **70 mangled instantiations** (29 logical entries)
 with schema_hash `qi5gb74dbjyxo` between the Lean plugin and the
 Rust `schema-idl` crate.
+
+The reverse pipeline (Phase 9) lets Rust expose
+`#[leo4::export]`-tagged functions that Lean calls through a
+long-running worker process. `examples/05-rust-export/` is the
+end-to-end demo; `just rust-export-05-build` collapses the
+4-step workflow into one recipe. The deeper Lake-DSL
+integration that would let `lean_exe`'s link line pick up
+the bridge archive declaratively is the open follow-up; until
+then a one-line manual `leanc -o` finishes the executable.
 
 What works today:
 
@@ -84,35 +96,83 @@ What works today:
   "implement-from-scratch" guide book, each in English / Korean /
   Japanese / German (`docs/learning/<lang>/main.typ`,
   `docs/implement-from-scratch/<lang>/main.typ`).
+- **Reverse direction (Phase 9, 2026-05-23)** — Rust cdylibs
+  expose `#[leo4::export]`-tagged functions that Lean calls
+  through a long-running worker process. The pipeline:
+  - `#[leo4::export]` proc-macro emits per-fn wrapper symbols
+    + `linkme` metadata (9-1).
+  - `leo4-rust-emit` walks the cdylib's `EXPORTS` slice and
+    writes `<pkg>.leo4-rust-exports.idl` /
+    `<pkg>.leo4-rust-handshake` /
+    `<pkg>.leo4-rust-imports.lean` (9-2, 9-5).
+  - `leo4-rust-worker` is the per-cdylib worker harness (9-3).
+  - `libleo4_rust_bridge.a` is the dispatcher static archive
+    with a POSIX backend (9-4a/4b) and a Windows backend
+    (9-4c; gnullvm Tier 2). Spawn / IPC abstracted behind
+    `leo4_worker_ops_t` so future backends (zygote, wasm)
+    plug in without churn.
+  - `shim/leo4_rust_bridge_lean.c` is the Lean-side glue
+    shim, the only leo4 C TU that includes `<lean/lean.h>`
+    (9-6).
+  - `examples/05-rust-export/` is the end-to-end demo
+    (mini-solver Rust functions called from Lean).
+  - `#[leo4::export(isolated)]` opts a function into
+    per-call fresh worker mode; `LEO4_RUST_WORKER_RECYCLE_CALLS`
+    bounds the persistent worker's lifetime (9.X).
+- **`leo4` CLI** (`crates/leo4-cli/`, 2026-05-23) — `leo4
+  create <direction> <dir>` scaffolds a new project;
+  `leo4 init <direction>` integrates leo4 into an existing
+  Cargo crate (idempotent Cargo.toml append + lean/ scaffold).
 
 Open items:
 
 - Some `LeanError` codes (`0x02` / `0x03` / `0x04` / `0x06` / `0x08`)
   are reserved but not yet exercised by a test fixture.
+- Deeper Lake-DSL integration for the reverse direction so
+  `lean_exe`'s link line picks up `libleo4_rust_bridge.a` +
+  the glue-shim `.o` declaratively. The Lake 5.x
+  `extern_lib` DSL is Job-based and needs a focused spike
+  before the integration is safe to land in a single commit.
+- Windows runtime verification for the 9-4c backend — code
+  compiles under the gnullvm Tier 2 target choice; CI
+  matrix coverage follows.
 - schema-idl items G (`ConstraintExpr<Atom>` typed AST) and the
   `wasm64` sibling stay deferred until a concrete consumer surfaces.
 
 ## Documents to read, in order
 
 1. [`LEO4-DESIGN.md`](LEO4-DESIGN.md) — every design decision and its
-   rationale (D1–D15, type-system layer, admit-set algorithm,
+   rationale (D1–D16, type-system layer, admit-set algorithm,
    forbidden constructs).
 2. [`CLAUDE.md`](CLAUDE.md) — working agreement for Claude Code
    sessions in this repo.
-3. [`ROADMAP.md`](ROADMAP.md) — phased work plan, exit criteria per
+3. [`AGENTS.md`](AGENTS.md) — cookbook for Claude Code sessions
+   (entry routing table, commit cadence patterns, common
+   pitfalls, recent decisions).
+4. [`ROADMAP.md`](ROADMAP.md) — phased work plan, exit criteria per
    phase, the deferred IDL-output-grouping decision.
-4. [`spike/SPIKE-0-FINDINGS.md`](spike/SPIKE-0-FINDINGS.md) — why the
+5. [`OS-PORTABILITY.md`](OS-PORTABILITY.md) — policy + audit
+   ledger for OS-specific code. New `cfg(target_os=…)` /
+   `#ifdef` branches go through this.
+6. [`spike/SPIKE-0-FINDINGS.md`](spike/SPIKE-0-FINDINGS.md) — why the
    plugin re-imports `.olean` rather than hooking
    `Lake.Module.recBuildLean`.
-5. `SPEC/*.md` — normative specifications:
+7. `SPEC/*.md` — normative specifications:
    - [`SPEC/idl-grammar.ebnf`](SPEC/idl-grammar.ebnf) — IDL grammar
      (WIT-superset, `kind`, `Self`/`Self<…>`, `value_param`,
-     `nominal_decl` short-form).
-   - [`SPEC/canonical-abi.md`](SPEC/canonical-abi.md) — wire format.
+     `nominal_decl` short-form, `external_decl`).
+   - [`SPEC/canonical-abi.md`](SPEC/canonical-abi.md) — wire format,
+     error-code table (incl. forward + reverse passthrough
+     ranges).
    - [`SPEC/mangling.md`](SPEC/mangling.md) — name mangling, schema
      hash (FNV-1a-64 → base32lc), kind discipline.
    - [`SPEC/handshake.md`](SPEC/handshake.md) — JSON file formats,
      atomic-emission contract, `.leo4-schema` canonical-form rules.
+   - [`SPEC/phase-6-mutual.md`](SPEC/phase-6-mutual.md) — mutual
+     recursion + `Cyc<i>`.
+   - [`SPEC/reverse-direction.md`](SPEC/reverse-direction.md) —
+     Phase 9: dispatcher API, worker lifecycle, IPC wire format,
+     isolation matrix, build orchestration.
 
 ## Why leo4 and not leo3
 
@@ -138,20 +198,31 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │   ├── canonical-abi.md
 │   ├── mangling.md
 │   ├── handshake.md
-│   └── phase-6-mutual.md
+│   ├── phase-6-mutual.md
+│   └── reverse-direction.md # Phase 9 dispatcher + worker + wire format
+├── AGENTS.md               # Claude Code agent cookbook
+├── OS-PORTABILITY.md       # cross-OS abstraction policy + audit
 ├── crates/                 # Cargo workspace
 │   ├── schema-idl/         # parser + IDL types + mangling + canonical render
 │   ├── leo4-idl/           # WIT lowering pass on top of schema-idl
 │   ├── leo4c/              # CLI: parse / canonical / mangle / lower
 │   ├── leo4-abi/           # LeanMarshal + LeanError + scalars / composites /
 │   │                       # bignat / bigint / LeanRat / LeanU128/I128 /
-│   │                       # LeanComplexF{32,64}x2 (+ optional nightly floats)
+│   │                       # LeanComplexF{32,64}x2 (+ optional nightly floats);
+│   │                       # rust_exports module under `rust-exports` feature
 │   ├── leo4-native/        # native loader (libloading) + Arena + LeanRef
-│   ├── leo4-macros/        # user-facing proc-macros (leo4::import!, derive)
+│   ├── leo4-macros/        # user-facing proc-macros (leo4::import!,
+│   │                       # leo4::export, derive LeanMarshal)
 │   ├── leo4-macros-backend # macro expander (syn + quote)
-│   ├── leo4-build/         # build.rs helper (LEO4_SHIM_SO, ...)
+│   ├── leo4-build/         # build.rs helper (LEO4_SHIM_SO, wire_rust_exports)
 │   ├── leo4/               # top-level user façade
-│   └── leo4-wasm/          # (scaffold) wasm loader — see sibling/leo4-wasip3
+│   ├── leo4-wasm/          # (scaffold) wasm loader — see sibling/leo4-wasip3
+│   ├── leo4-rust-bridge/   # Phase 9 dispatcher static archive
+│   │                       # (libleo4_rust_bridge.a; cc-built from
+│   │                       # shim/leo4_rust_bridge.c)
+│   ├── leo4-rust-worker/   # Phase 9 worker harness binary
+│   ├── leo4-rust-emit/     # Phase 9 emit CLI (IDL + handshake + Lean wrapper)
+│   └── leo4-cli/           # `leo4` scaffold CLI (create / init)
 ├── lake/                   # Lake workspace (Lean side)
 │   ├── Leo4/               # runtime library
 │   │   └── Leo4/MathlibBridge/
@@ -168,11 +239,14 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │   ├── Dockerfile.lean-test
 │   ├── entrypoint.sh
 │   └── matrix.sh
-├── shim/                   # static C shim header shared with generated TUs
+├── shim/                   # C shims
+│   ├── leo4_rust_bridge.c       # dispatcher (Phase 9-4a/4b/4c)
+│   └── leo4_rust_bridge_lean.c  # lean.h glue (Phase 9-6)
 ├── examples/               # end-to-end demos
 │   ├── 01-hello/           # scalars + nominal + Rat + async + ...
 │   ├── 02-roundtrip/       # list<T> + bignat + multi-instantiation
-│   └── 04-mutual-ast/      # Expr / Stmt mutual cluster
+│   ├── 04-mutual-ast/      # Expr / Stmt mutual cluster
+│   └── 05-rust-export/     # Phase 9 reverse-direction mini-solver
 ├── tests/                  # integration + conformance tests
 │   ├── sample-lean/        # smoke fixture covering every emitted shape
 │   ├── mangling/           # cross-impl mangling harness (Phase 2)
@@ -211,14 +285,31 @@ just wit-test           # WIT golden + wasm-tools/wit-bindgen (Phase 3)
 just conformance-test   # Lean encoder vs Rust encoder bytes (Phase 4)
 just test               # full ladder = lake + cargo + mangling + wit + conformance
 
-# End-to-end demos:
+# Forward-direction end-to-end demos:
 just smoke-plugin                          # produce / refresh shim .so
 cargo run -p leo4-example-01-hello         # scalars, nominal types, Rat, async, handshake check
 cargo run -p leo4-example-02-roundtrip     # list<T> + bignat round-trip
 cargo run -p leo4-example-04-mutual-ast    # mutual Expr / Stmt cluster
 
+# Reverse-direction (Phase 9) end-to-end demo:
+just rust-export-05-build                  # cargo + emit + glue + lake build for examples/05
+                                           # (manual leanc -o link line in
+                                           # examples/05-rust-export/README.md)
+
+# Reverse-direction helpers (parameterised):
+just rust-bridge-build                                    # build all 3 cargo artefacts
+just rust-emit CDYLIB OUT_DIR MODULE                      # emit IDL + handshake + Lean wrapper
+just glue-shim-build OUT_OBJ                              # leanc -c the Lean glue shim
+
 # Sibling tests (off the default ladder):
 just mathlib-bridge-test                   # type-checks Mathlib bridges (1-2h cold)
+
+# Project scaffolding (leo4 CLI):
+cargo install --path crates/leo4-cli       # install `leo4` binary on PATH
+leo4 create forward my-app                 # new project (Lean exports + Rust caller)
+leo4 create reverse my-solver              # new project (Rust cdylib + Lean caller)
+leo4 init forward                          # add leo4 to existing Cargo crate (cwd)
+leo4 init reverse --dir path/to/crate      # same, with explicit dir
 
 # Multi-version Lean matrix (containerised):
 just ci-image           # build the container image once

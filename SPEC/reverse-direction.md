@@ -177,39 +177,81 @@ interning tables, etc., depend on it.
 ### 4.2 Isolated mode — per-call fresh worker (opt-in)
 
 A function marked `#[leo4::export(isolated)]` runs in a fresh
-worker every call:
+worker every call. The Lean wrapper distinguishes isolated
+exports at the *mangled-name* layer:
 
-1. Dispatcher spawns a transient worker exactly like §4.1 steps
-   1–4, but separately from the persistent one.
-2. Worker handles exactly one request, sends the response,
-   then `_exit`s.
-3. Dispatcher waits for the worker to exit, then returns the
-   response to the Lean caller.
+- Default exports pass the raw mangled name to
+  `leo4_rust_call` (e.g. `"leo4_rust__add__u64_u64"`).
+- Isolated exports pass the same body prefixed with `"iso:"`
+  (e.g. `"iso:leo4_rust__add__u64_u64"`).
 
-Cost: one worker spawn per call (`posix_spawn` ~5–10 ms on
-Linux, comparable on Windows). Use only for untrusted code or
-functions whose state contamination would corrupt later
-unrelated calls.
+The dispatcher inspects the first few bytes of every mangled
+argument with `memcmp`. When `"iso:"` is present, it strips
+the prefix and routes through `leo4_dispatch_isolated`:
+
+1. `leo4_worker_ops->spawn` mints a transient worker
+   process. The cdylib path comes from the same resolution
+   chain as the persistent path (§9); the persistent worker
+   slot is untouched.
+2. Worker performs its normal init handshake (the dispatcher
+   ignores the handshake's `schema_hash` for isolated calls
+   in v9.X — schema mismatches surface on the *persistent*
+   path which all callers exercise first; tightening this
+   is a 9.X follow-on).
+3. Send the request frame (§5.1).
+4. Receive the response frame (§5.2).
+5. Send a magic=0 shutdown frame to the worker.
+6. `leo4_worker_ops->reap` blocks on the worker's exit and
+   `kill`s + `close`s the IPC end.
+
+Cost per call: one `posix_spawn` / `CreateProcess` (~5–10 ms
+on Linux, comparable on Windows) plus the worker's own init
+overhead (cdylib `dlopen`, schema_hash recomputation). Use
+only for exports whose state contamination would corrupt
+later unrelated calls; otherwise the persistent path is the
+right default.
 
 The persistent worker and isolated-mode workers do not share
-memory. They each load their own copy of the cdylib.
+memory or IPC channels. They each load their own copy of the
+cdylib.
 
-### 4.3 Optional recycle policy
+**Wire / API surface preserved**: the prefix trick adds zero
+new dispatcher entry points, no new wire frame fields, no new
+opaque type. Backwards-compatible with any 9-5 wrapper
+consumer that doesn't tag isolated exports.
+
+### 4.3 Recycle policy
 
 The persistent worker may be configured to terminate and
-respawn after N calls or T seconds. Disabled by default.
+respawn after N calls. Disabled by default.
 
 Configuration:
 
-- Build-time attribute on the consuming Lean module: pending
-  (Phase 9.X candidate).
-- Runtime environment: `LEO4_RUST_WORKER_RECYCLE_CALLS=<N>`,
-  `LEO4_RUST_WORKER_RECYCLE_SECONDS=<T>`. Unset = OFF.
+- Runtime environment **`LEO4_RUST_WORKER_RECYCLE_CALLS=N`**
+  (positive integer). Unset / `0` / non-numeric = recycling
+  disabled.
+- `LEO4_RUST_WORKER_RECYCLE_SECONDS=<T>` (time-based) is a
+  9.X follow-on; call-based is what ships today.
 
-On recycle the dispatcher behaves like a clean worker death
-followed by re-spawn — the *next* call after the recycle
-returns `LEO4_ERR_RUST_WORKER_RESTARTED` on success so the
-caller can refresh persistent state.
+Implementation (`shim/leo4_rust_bridge.c`):
+
+- `leo4_worker_slot_t` carries an `_Atomic uint64_t
+  call_count` field. The dispatcher increments it after each
+  successful response.
+- `leo4_recycle_init_once` parses the env on first call and
+  caches the limit in a file-scoped `_Atomic uint64_t`.
+- Before each persistent dispatch, the dispatcher checks
+  `call_count >= limit`. If so, it atomically swaps the
+  worker pointer out, kills + reaps via the ops table, and
+  resets the counter. The standard lazy-spawn path then
+  spawns the fresh worker.
+
+Caller-visible behaviour today: recycle is transparent. The
+next request after a recycle silently uses the fresh worker
+— `LEO4_ERR_RUST_WORKER_RESTARTED` is reserved for an event
+the caller would want to observe (e.g. persistent state loss
+detection) but is not currently surfaced. A 9.X follow-up may
+elect to surface it via a side-channel — see §10.
 
 ### 4.4 Spawn / IPC abstraction layer
 
@@ -262,6 +304,11 @@ platforms: every operation returns `LEO4_ERR_RUST_SPAWN_FAILED`.
 This lets `libleo4_rust_bridge.a` link on every platform from
 day 1; the bridge is always present, even where reverse-direction
 is not yet ported.
+
+**Status (2026-05-23):** POSIX (`__unix__ || __APPLE__`) and
+Windows (`_WIN32`) backends both shipped; the stub backend
+stays as the unconditional fallback for unsupported tiers.
+Windows runtime verification waits on the Tier 2 CI matrix.
 
 The "single C translation unit" promise (§11) is preserved —
 all three backends are sections of the same file gated by
@@ -601,10 +648,13 @@ build is `cc <single-file>` on every supported platform.
 | `<pkg>.leo4-rust-exports.idl` / `<pkg>.leo4-rust-handshake` emit | ✅ |
 | Lake plugin Rust-IDL ingestion + Lean wrapper emit | ✅ |
 | `examples/05-rust-export/` end-to-end demo | ✅ |
-| `tests/conformance/` reverse-direction byte parity | ✅ |
-| Windows path (`CreateProcess` + named pipe) | Design in-scope; implementation per Tier 2 schedule |
-| `#[leo4::export(isolated)]` opt-in mode | Design in-scope; implementation may slip to 9.X |
-| Recycle policy (env-driven) | Design in-scope; implementation may slip to 9.X |
+| `tests/conformance/` reverse-direction byte parity | partial — pipeline emit verified in 9-7; per-primitive harness 9.X |
+| Windows backend (`CreateProcess` + named pipe) | ✅ code; Tier 2 runtime CI follows |
+| `#[leo4::export(isolated)]` opt-in mode | ✅ |
+| Recycle policy — call-based (`LEO4_RUST_WORKER_RECYCLE_CALLS`) | ✅ |
+| Recycle policy — time-based (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) | Out (9.X candidate) |
+| Declarative Lake `extern_lib` integration | Out (9.X — needs Lake 5.x API spike) |
+| `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing on recycle | Reserved code, not currently emitted (9.X candidate) |
 | Callback / function-arrow ABI | Out (9.X candidate) |
 | Stronger isolation (zygote-fork, wasm sandbox) | Out (9.X candidate) |
 | `async fn` reverse exports | Out (no concrete consumer yet) |

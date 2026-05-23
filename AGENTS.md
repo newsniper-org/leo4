@@ -304,6 +304,35 @@ would be expensive to relitigate:
   wasm export. No `async fn` in public API.
 - **2026-05-21 — v0.1.0 cut, schema_hash `qi5gb74dbjyxo`**:
   Phases 0–8 done.
+- **2026-05-23 — Phase 9 code landed across 9-0..9-7 +
+  9-4c + 9.X**: dispatcher (`libleo4_rust_bridge.a`),
+  worker harness (`leo4-rust-worker`), emit CLI
+  (`leo4-rust-emit --emit-lean`), Lean-side glue shim
+  (`shim/leo4_rust_bridge_lean.c`), POSIX + Windows
+  backends, `#[leo4::export(isolated)]` via `iso:` prefix
+  trick, `LEO4_RUST_WORKER_RECYCLE_CALLS=N` recycle policy,
+  `examples/05-rust-export/` e2e demo.
+- **2026-05-23 — `iso:` prefix as the isolated-mode wire
+  signal**: the Lean wrapper prepends `"iso:"` to the
+  mangled name passed to `leo4_rust_call`; dispatcher
+  strips it and routes through a per-call fresh worker. No
+  wire format change, no new dispatcher API entry,
+  backwards-compatible with default callers. The `iso:`
+  string is reserved in the mangled-name space.
+- **2026-05-23 — Lake `extern_lib` integration deferred**:
+  Lake 5.x's `extern_lib` DSL is Job-based and our trial
+  attempt was too brittle for a single safe commit. The
+  current state of the art is `Leo4.Build.RustBridge`
+  helpers + `just rust-export-05-build` + a manual `leanc
+  -o` final link line. A focused Lake-API spike is the
+  prerequisite for the declarative integration.
+- **2026-05-23 — `leo4` CLI semantics**: `leo4 create` is
+  for NEW directories (cargo-new ergonomics); `leo4 init`
+  is for IN-PLACE integration into an existing Cargo crate
+  (idempotent Cargo.toml append + lean/ scaffold; never
+  touches existing `src/`). Don't mix the two — `create`
+  refuses a non-empty target, `init` requires a Cargo.toml
+  to be present.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

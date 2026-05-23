@@ -1,12 +1,13 @@
 # schema-idl shortcomings
 
 > Outstanding limitations across the IDL stack, last audited
-> 2026-05-21 after the v0.1.0 release cut. Phases 0–8 are done; this
-> ledger keeps the residual schema-idl / plugin / runtime items
-> distinct from the released surface. Each item is labelled by
-> ownership (`schema-idl` / `leo4-plugin` / `leo4-runtime`); the
-> cascade table in §"Dependency graph" makes the inter-item order
-> explicit.
+> 2026-05-23 after the Phase 9 (reverse-direction) code landings.
+> Phases 0–9 are done modulo the declarative Lake-DSL integration
+> (`extern_lib` spike pending); this ledger keeps the residual
+> schema-idl / plugin / runtime items distinct from the released
+> surface. Each item is labelled by ownership (`schema-idl` /
+> `leo4-plugin` / `leo4-runtime`); the cascade table in §"Dependency
+> graph" makes the inter-item order explicit.
 >
 > Companion docs:
 > - `for-general-interface-descriptions.md` — reuse guide + decision log

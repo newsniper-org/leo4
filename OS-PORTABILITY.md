@@ -89,7 +89,7 @@ this table.
 
 | Layer | Concern | Interface | Implementations | Status |
 |---|---|---|---|---|
-| **Spawn / IPC** | worker process lifecycle + IPC for reverse direction | `leo4_worker_ops_t` (`SPEC/reverse-direction.md` §4.4) | stub (9-4a), POSIX (9-4b, `posix_spawn` + `socketpair`), Windows (9-4c, `CreateProcess` + named pipe) | designed; implementation pending |
+| **Spawn / IPC** | worker process lifecycle + IPC for reverse direction | `leo4_worker_ops_t` (`SPEC/reverse-direction.md` §4.4) | stub (9-4a), POSIX (9-4b, `posix_spawn` + `socketpair`), Windows (9-4c, `CreateProcessA` + `CreateNamedPipeA`) | **POSIX + Windows code landed 2026-05-23**; Windows runtime verification follows the Tier 2 CI matrix |
 | **Dynamic library loading (Rust)** | open shim `.so` and resolve symbols | `libloading::Library` / `Symbol` | one (cross-platform) | adequate |
 | **Dynamic library loading (Lean)** | wrapper-module init at runtime | Lean's `@[extern]` + leanc link step | one (host-platform leanc decides) | adequate |
 | **Dynamic library naming** | choose `.so` / `.dylib` / `.dll` for a given package | TBD | Lean side hard-codes `.so` (`lake/Leo4/Leo4/Build.lean:227`) | **needs layer** |
@@ -111,7 +111,7 @@ or new branches are discovered.
 | `lake/Leo4/Leo4/Build.lean:259` | `-shared` on `leanc` | shared-library link command | overlap with the above; can share the layer | medium |
 | `lake/Leo4Plugin/Leo4Plugin/Main.lean:1792` | `__attribute__((visibility("default")))` in shim source | C compiler visibility | **covered** — gnullvm Tier 2 target choice keeps clang `__attribute__` available on every tier | resolved |
 | `lake/Leo4Plugin/Leo4Plugin/Main.lean` (shim emit, generally) | `-fPIC`, gcc/clang command line | C compiler flags | **covered** — same reason; gcc-style flags work on every tier via leanc / clang / gnullvm-clang | resolved |
-| `shim/leo4_rust_bridge.c` (Phase 9-4) | `posix_spawn` / `CreateProcess`, `socketpair` / named pipe, `dlopen` / `LoadLibrary` | Spawn / IPC + dynamic loading | already designed as `leo4_worker_ops_t` (§2 of this doc) | **already in design** |
+| `shim/leo4_rust_bridge.c` (Phase 9-4) | `posix_spawn` / `CreateProcessA`, `socketpair` / `CreateNamedPipeA`, dispatcher-side reaping | Spawn / IPC + worker lifecycle | `leo4_worker_ops_t` — POSIX + Windows backends both implemented | resolved |
 | `crates/leo4-build/src/lib.rs:24` (comment) | acknowledges `.so` / `.dylib` / `.dll` exist but only wires `.so` | Dynamic library naming | use the same layer as `lake/Leo4/Leo4/Build.lean:227` | low |
 
 ## 4. Conventions for new layers
