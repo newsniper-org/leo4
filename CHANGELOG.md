@@ -7,6 +7,58 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-A4 + A5: time-based recycle + WORKER_RESTARTED side-channel (2026-05-21)
+
+Two reverse-direction dispatcher knobs that were reserved in
+`SPEC/reverse-direction.md` §4.3 / §10 but unwired now ship:
+
+**A4 — `LEO4_RUST_WORKER_RECYCLE_SECONDS=T`**
+
+The persistent worker may be configured to recycle after `T`
+seconds of uptime. Independent from (and combinable with)
+the existing call-based `LEO4_RUST_WORKER_RECYCLE_CALLS` —
+whichever limit fires first triggers a recycle.
+
+Implementation in `shim/leo4_rust_bridge.c`:
+* New `spawn_time_s` field on `leo4_worker_slot_t`, stamped
+  via a portable `leo4_monotonic_seconds()` helper
+  (`CLOCK_MONOTONIC` on POSIX, `GetTickCount64()` on
+  Windows-gnullvm).
+* `leo4_recycle_init_once` now parses both env vars and
+  caches them in file-scoped atomics.
+* Dispatch entry checks `(now_s - spawn_time_s) >=
+  seconds_limit` alongside `call_count >= calls_limit`.
+
+Clock-skew / `settimeofday` adjustments cannot fire the
+recycle prematurely (CLOCK_MONOTONIC is monotone
+non-decreasing across NTP slews).
+
+**A5 — `LEO4_ERR_RUST_WORKER_RESTARTED` side-channel**
+
+The dispatcher now exposes a polling helper:
+```c
+LEO4_RUST_EXPORT int leo4_rust_bridge_take_restart_flag(void);
+```
+Atomic exchange-and-clear that returns `1` exactly once per
+recycle event observed by the dispatcher (call-based OR
+time-based), then `0` until the next recycle. Lean wrappers
+that want to surface `LEO4_ERR_RUST_WORKER_RESTARTED`
+(0x00020002 — reserved since Phase 9 but unemitted) bind it
+via a custom `@[extern]` shim and check after each call. The
+dispatcher itself stays transparent — non-polling callers see
+no behaviour change.
+
+`SPEC/reverse-direction.md` §4.3 expanded with the wire +
+clock contract; §12 "v0 In-Scope vs Deferred" table flips
+both rows from "candidate" to ✅.
+
+Verification:
+* `cargo build --release -p leo4-rust-bridge` — clean.
+* `cargo test --workspace` — 156 unchanged.
+* The Phase 9-3 worker harness and Phase 9-7 examples/05
+  e2e flow continue to run unchanged (the new fields are
+  zero-initialised and only consulted when env-configured).
+
 ### Added — Phase 10-B5: variant payload widening (all-scalars multi-field, 2026-05-21)
 
 Widens the plugin's variant case-payload coverage one step

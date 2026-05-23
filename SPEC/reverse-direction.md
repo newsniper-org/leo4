@@ -285,28 +285,51 @@ Configuration:
 - Runtime environment **`LEO4_RUST_WORKER_RECYCLE_CALLS=N`**
   (positive integer). Unset / `0` / non-numeric = recycling
   disabled.
-- `LEO4_RUST_WORKER_RECYCLE_SECONDS=<T>` (time-based) is a
-  9.X follow-on; call-based is what ships today.
+- **`LEO4_RUST_WORKER_RECYCLE_SECONDS=T`** (positive integer
+  seconds, Phase 10-A4 2026-05-21). Unset / `0` / non-numeric =
+  time-based recycling disabled. The two limits are independent
+  and combinable — whichever fires first triggers the recycle.
 
 Implementation (`shim/leo4_rust_bridge.c`):
 
 - `leo4_worker_slot_t` carries an `_Atomic uint64_t
   call_count` field. The dispatcher increments it after each
   successful response.
-- `leo4_recycle_init_once` parses the env on first call and
-  caches the limit in a file-scoped `_Atomic uint64_t`.
+- It also carries `_Atomic uint64_t spawn_time_s`, stamped at
+  `leo4_monotonic_seconds()` once the spawn + handshake-consume
+  completes successfully.
+- `leo4_recycle_init_once` parses both envs on first call and
+  caches them in file-scoped `_Atomic uint64_t`s
+  (`leo4_recycle_calls_limit`, `leo4_recycle_seconds_limit`).
 - Before each persistent dispatch, the dispatcher checks
-  `call_count >= limit`. If so, it atomically swaps the
-  worker pointer out, kills + reaps via the ops table, and
-  resets the counter. The standard lazy-spawn path then
-  spawns the fresh worker.
+  `call_count >= calls_limit` and `(now_s - spawn_time_s) >=
+  seconds_limit`. If either fires, it atomically swaps the
+  worker pointer out, kills + reaps via the ops table, resets
+  both bookkeeping fields, and sets the
+  `leo4_persistent_was_restarted` side-channel flag (Phase
+  10-A5). The standard lazy-spawn path then spawns the fresh
+  worker.
+- Time source is `clock_gettime(CLOCK_MONOTONIC)` on POSIX,
+  `GetTickCount64() / 1000` on Windows-gnullvm. Clock-skew /
+  wall-clock adjustments cannot prematurely fire the recycle
+  because `CLOCK_MONOTONIC` is monotone non-decreasing across
+  NTP slews / `settimeofday` calls.
 
-Caller-visible behaviour today: recycle is transparent. The
-next request after a recycle silently uses the fresh worker
-— `LEO4_ERR_RUST_WORKER_RESTARTED` is reserved for an event
-the caller would want to observe (e.g. persistent state loss
-detection) but is not currently surfaced. A 9.X follow-up may
-elect to surface it via a side-channel — see §10.
+Caller-visible behaviour: recycle is **transparent on the
+dispatch path** (the next call simply uses the fresh worker
+and returns its result). Callers that want to know a recycle
+happened poll via:
+
+```c
+LEO4_RUST_EXPORT int leo4_rust_bridge_take_restart_flag(void);
+```
+
+This atomic exchange-and-clear returns `1` exactly once per
+recycle event observed by the dispatcher (call-based OR
+time-based), then `0` until the next recycle. Lean wrappers
+that want to surface `LEO4_ERR_RUST_WORKER_RESTARTED`
+(0x00020002) to their caller bind it via a custom `@[extern]`
+shim and check after each call (Phase 10-A5).
 
 ### 4.4 Spawn / IPC abstraction layer
 
@@ -784,9 +807,9 @@ build is `cc <single-file>` on every supported platform.
 | Windows backend (`CreateProcess` + named pipe) | ✅ code; Tier 2 runtime CI follows |
 | `#[leo4::export(isolated)]` opt-in mode | ✅ |
 | Recycle policy — call-based (`LEO4_RUST_WORKER_RECYCLE_CALLS`) | ✅ |
-| Recycle policy — time-based (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) | Out (9.X candidate) |
+| Recycle policy — time-based (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) | ✅ (Phase 10-A4) |
 | Declarative Lake `extern_lib` integration | Out (9.X — needs Lake 5.x API spike) |
-| `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing on recycle | Reserved code, not currently emitted (9.X candidate) |
+| `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing on recycle | ✅ (Phase 10-A5 side-channel via `leo4_rust_bridge_take_restart_flag`) |
 | Callback / function-arrow ABI | Out (9.X candidate) |
 | Stronger isolation (zygote-fork, wasm sandbox) | Out (9.X candidate) |
 | `async fn` reverse exports | Out (no concrete consumer yet) |

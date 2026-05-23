@@ -59,6 +59,7 @@
 #  include <spawn.h>
 #  include <sys/socket.h>
 #  include <sys/wait.h>
+#  include <time.h>
 #  include <unistd.h>
 extern char** environ;
 #endif
@@ -67,6 +68,23 @@ extern char** environ;
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 #endif
+
+/* Monotonic seconds counter, platform-portable. Used by the
+ * time-based recycle path (Phase 10-A4). 0 is reserved as
+ * "uninitialised slot" — see `leo4_persistent_slot.spawn_time_s`. */
+static uint64_t leo4_monotonic_seconds(void) {
+#if defined(__unix__) || defined(__APPLE__)
+    struct timespec ts = {0};
+    /* CLOCK_MONOTONIC never goes backwards across clock adjustments. */
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (uint64_t)ts.tv_sec + 1u; /* +1 so 0 stays "uninitialised" */
+#elif defined(_WIN32)
+    /* GetTickCount64 returns ms since boot. */
+    return (uint64_t)(GetTickCount64() / 1000u) + 1u;
+#else
+    return 0;
+#endif
+}
 
 /* ─── Wire constants (SPEC §5) ────────────────────────────────────── */
 
@@ -653,6 +671,11 @@ typedef struct {
      * spawned. Compared against `leo4_recycle_calls_limit` after
      * each successful request/response round-trip. */
     _Atomic uint64_t   call_count;
+
+    /* Phase 10-A4: monotonic-seconds timestamp the current worker
+     * was spawned at. 0 = no worker / uninitialised. Compared
+     * against `leo4_recycle_seconds_limit` on each dispatch entry. */
+    _Atomic uint64_t   spawn_time_s;
 } leo4_worker_slot_t;
 
 static leo4_worker_slot_t leo4_persistent_slot = {0};
@@ -671,6 +694,18 @@ static leo4_worker_slot_t leo4_persistent_slot = {0};
  */
 static _Atomic int      leo4_recycle_initialized = 0;
 static _Atomic uint64_t leo4_recycle_calls_limit = 0;
+
+/* Phase 10-A4: time-based recycle limit (seconds). 0 = disabled.
+ * Read once from env LEO4_RUST_WORKER_RECYCLE_SECONDS by
+ * `leo4_recycle_init_once`. Independent of (and combinable with)
+ * the call-based limit above — whichever fires first wins. */
+static _Atomic uint64_t leo4_recycle_seconds_limit = 0;
+
+/* Phase 10-A5: WORKER_RESTARTED side-channel flag. Set whenever
+ * `leo4_recycle_persistent_slot` runs as part of a dispatch path
+ * (i.e. caller will observe a fresh worker). Consumers query +
+ * clear via `leo4_rust_bridge_take_restart_flag`. */
+static _Atomic int      leo4_persistent_was_restarted = 0;
 
 /* Self-contained u64 parser. Avoids `strtoull` because some
  * libc/clang combinations (glibc 2.38+ under newer clang) emit a
@@ -699,17 +734,28 @@ static void leo4_recycle_init_once(void) {
         return;
     }
     const char* env = getenv("LEO4_RUST_WORKER_RECYCLE_CALLS");
-    if (!env || !env[0]) {
+    if (env && env[0]) {
+        uint64_t parsed = leo4_parse_u64_decimal(env);
+        atomic_store_explicit(&leo4_recycle_calls_limit, parsed, memory_order_release);
+    } else {
         atomic_store_explicit(&leo4_recycle_calls_limit, 0, memory_order_release);
-        return;
     }
-    uint64_t parsed = leo4_parse_u64_decimal(env);
-    atomic_store_explicit(&leo4_recycle_calls_limit, parsed, memory_order_release);
+    /* Phase 10-A4: same shape for the seconds limit. */
+    const char* env_s = getenv("LEO4_RUST_WORKER_RECYCLE_SECONDS");
+    if (env_s && env_s[0]) {
+        uint64_t parsed_s = leo4_parse_u64_decimal(env_s);
+        atomic_store_explicit(&leo4_recycle_seconds_limit, parsed_s, memory_order_release);
+    } else {
+        atomic_store_explicit(&leo4_recycle_seconds_limit, 0, memory_order_release);
+    }
 }
 
 /* Reap + clear the persistent slot. Caller holds the
  * single-Lean-thread invariant; no atomics for the worker
- * pointer swap. */
+ * pointer swap. Sets the WORKER_RESTARTED side-channel flag
+ * (Phase 10-A5) so callers querying via
+ * `leo4_rust_bridge_take_restart_flag` see exactly one true
+ * return per recycle event. */
 static void leo4_recycle_persistent_slot(void) {
     uintptr_t cur = atomic_exchange_explicit(
         &leo4_persistent_slot.worker, 0, memory_order_acq_rel);
@@ -717,8 +763,14 @@ static void leo4_recycle_persistent_slot(void) {
         leo4_worker_t* w = (leo4_worker_t*)cur;
         leo4_worker_ops->kill(w);
         leo4_worker_ops->reap(w, NULL);
+        /* Only signal the flag when we actually had a live worker
+         * to tear down — otherwise this is no-op bookkeeping. */
+        atomic_store_explicit(&leo4_persistent_was_restarted, 1,
+                              memory_order_release);
     }
     atomic_store_explicit(&leo4_persistent_slot.call_count, 0,
+                          memory_order_release);
+    atomic_store_explicit(&leo4_persistent_slot.spawn_time_s, 0,
                           memory_order_release);
 }
 
@@ -790,6 +842,10 @@ static int leo4_get_or_spawn_persistent(leo4_worker_t** out_worker) {
         return rc;
     }
     atomic_store_explicit(&leo4_persistent_slot.worker, (uintptr_t)w,
+                          memory_order_release);
+    /* Phase 10-A4: stamp the spawn time for time-based recycle. */
+    atomic_store_explicit(&leo4_persistent_slot.spawn_time_s,
+                          leo4_monotonic_seconds(),
                           memory_order_release);
     atomic_store_explicit(&leo4_persistent_slot.spawn_in_progress, 0,
                           memory_order_release);
@@ -1074,15 +1130,37 @@ int32_t leo4_rust_call(
     /* Persistent-worker path (default). */
     leo4_recycle_init_once();
 
-    /* Recycle the persistent worker if call_count has reached the
-     * limit. Reap before the lazy spawn happens inside
+    /* Recycle the persistent worker if either limit has been
+     * reached. Reap before the lazy spawn happens inside
      * `leo4_get_or_spawn_persistent`. */
-    uint64_t limit = atomic_load_explicit(&leo4_recycle_calls_limit,
-                                          memory_order_acquire);
-    if (limit != 0) {
-        uint64_t cnt = atomic_load_explicit(&leo4_persistent_slot.call_count,
-                                            memory_order_acquire);
-        if (cnt >= limit) {
+    {
+        int needs_recycle = 0;
+        uint64_t calls_limit = atomic_load_explicit(&leo4_recycle_calls_limit,
+                                                    memory_order_acquire);
+        if (calls_limit != 0) {
+            uint64_t cnt = atomic_load_explicit(&leo4_persistent_slot.call_count,
+                                                memory_order_acquire);
+            if (cnt >= calls_limit) needs_recycle = 1;
+        }
+        /* Phase 10-A4: time-based recycle. */
+        uint64_t sec_limit = atomic_load_explicit(&leo4_recycle_seconds_limit,
+                                                  memory_order_acquire);
+        if (!needs_recycle && sec_limit != 0) {
+            uint64_t spawn_s = atomic_load_explicit(&leo4_persistent_slot.spawn_time_s,
+                                                    memory_order_acquire);
+            if (spawn_s != 0) {
+                uint64_t now_s = leo4_monotonic_seconds();
+                /* spawn_s and now_s both carry the +1 sentinel offset
+                 * applied in leo4_monotonic_seconds; the delta cancels
+                 * it cleanly. Skip if monotonic clock failed (returned
+                 * 0 for either reading). */
+                if (now_s != 0 && now_s >= spawn_s
+                    && (now_s - spawn_s) >= sec_limit) {
+                    needs_recycle = 1;
+                }
+            }
+        }
+        if (needs_recycle) {
             leo4_recycle_persistent_slot();
         }
     }
@@ -1120,4 +1198,23 @@ int32_t leo4_rust_call(
 LEO4_RUST_EXPORT
 const leo4_worker_ops_t* leo4_rust_bridge_current_ops(void) {
     return leo4_worker_ops;
+}
+
+/* Phase 10-A5: side-channel for "the persistent worker has been
+ * recycled since you last asked". Reads-and-clears the flag.
+ * Returns 1 exactly once per recycle event observed by the
+ * dispatcher (call-based or time-based), 0 otherwise.
+ *
+ * Designed to be polled by the Lean wrapper after each call so it
+ * can surface LEO4_ERR_RUST_WORKER_RESTARTED (0x00020002) to the
+ * user when the worker state was lost. Polling overhead is one
+ * atomic exchange; negligible.
+ *
+ * Not exposed to Lean by default — consumers that care about
+ * detecting state loss bind it via a custom `@[extern]` shim.
+ */
+LEO4_RUST_EXPORT
+int leo4_rust_bridge_take_restart_flag(void) {
+    return atomic_exchange_explicit(&leo4_persistent_was_restarted, 0,
+                                    memory_order_acq_rel);
 }
