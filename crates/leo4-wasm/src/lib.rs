@@ -1,4 +1,4 @@
-//! leo4-wasm — wasm host runtime (Phase 10-C4 scaffolding, 2026-05-21).
+//! leo4-wasm — wasm host runtime (Phase 10-C4 + C4.x landings, 2026-05-21).
 //!
 //! Mirrors the public API surface of `crates/leo4-native` so consumers
 //! targeting wasm-or-native can `use leo4_wasm::{Lean, LeanError}` /
@@ -6,37 +6,69 @@
 //! the user's call site). The wire-format encode/decode layer is
 //! shared via `leo4-abi`; only dispatch differs.
 //!
-//! ## Scope today
+//! ## Scope today (C4 + C4.x)
 //!
 //! - `Lean::open(handshake_path)` parses the handshake JSON, verifies
 //!   `abi_version`, captures the schema_hash + target_module fields.
-//! - `Lean::schema_hash()` exposes the parsed hash for downstream
-//!   `check_schema_hash` calls.
-//! - `Lean::call(mangled, args)` is currently a stub returning
-//!   `LEO4_ERR_RUST_DLSYM_FAILED` (no wasmtime / component-model
-//!   dispatch yet — see C4.x).
+//! - `Lean::schema_hash()` / `target_module()` / `abi_version()`
+//!   getters.
+//! - `Lean::call(mangled, args)` returns `LEO4_ERR_RUST_DLSYM_FAILED`
+//!   stub.
+//! - **`runtime::WasmRuntime` + `WasmComponent` + `WasmInstance`
+//!   traits** (C4.x): backend-neutral abstraction over the wasm
+//!   Component Model. Two feature-gated backends:
+//!   `backend-wasmtime` (default) and `backend-wasmi` (opt-in).
+//! - **`SPEC/wit/leo4-host.wit`** (C4.x): the Component Model
+//!   interface that both backends wrap. Pinned at version
+//!   `leo4:host@0.1.0`.
 //!
-//! ## What's deferred to C4.x
+//! ## Backend feature mutex (safety guard)
 //!
-//! - Adding `wasmtime` as a dep and instantiating a Component-Model
-//!   loader.
-//! - Designing and pinning `SPEC/wit/leo4-host.wit` — the interface
-//!   describing the canonical-ABI bridge between a Lean-as-wasm
-//!   component and the host.
-//! - `wit-bindgen` invocation in `build.rs` to materialise the
-//!   typed bindings.
-//! - Replacing this module's `Lean::call` stub with the real
-//!   per-callsite dispatch.
+//! Exactly one backend feature MUST be enabled. The two
+//! `compile_error!`s below reject `--no-default-features` without
+//! an explicit alternative AND reject simultaneously enabling
+//! both backends (which would make the `backend::Default` alias
+//! ambiguous and bloat binaries with two CM runtimes). Rationale:
+//! `crates/leo4-wasm` is "one wasm runtime per build" by design
+//! — testing multiple backends in one process is an advanced
+//! workflow that belongs in downstream code, not the leo4-wasm
+//! crate itself.
 //!
-//! The scaffolding shape lets downstream code that's structurally
-//! wasm-vs-native cfg-gated compile cleanly today; the actual
-//! component loader lands when the WIT design lands.
+//! ## What's deferred to C4.x.x
+//!
+//! - `wit-bindgen` invocation in `build.rs` for typed bindings.
+//! - Replacing each backend's stub impls with real loader +
+//!   dispatch via the pinned WIT.
+//! - Optional: real cdylib build of a Lean module (out of the
+//!   existing `leanc` invocation chain) into a wasm component.
 
 #![allow(clippy::missing_errors_doc)]
+
+// ─── Backend feature mutex (build-time safety guard) ──────────────
+//
+// Exactly one of `backend-wasmtime` / `backend-wasmi` must be
+// active. See module docs above for rationale.
+
+#[cfg(not(any(feature = "backend-wasmtime", feature = "backend-wasmi")))]
+compile_error!(
+    "leo4-wasm requires exactly one wasm backend feature, but none is enabled.\n\
+     If you disabled default features, re-add `default-features = true`,\n\
+     or opt in explicitly: `features = [\"backend-wasmtime\"]` or `[\"backend-wasmi\"]`."
+);
+
+#[cfg(all(feature = "backend-wasmtime", feature = "backend-wasmi"))]
+compile_error!(
+    "leo4-wasm requires exactly ONE wasm backend feature, but both\n\
+     `backend-wasmtime` and `backend-wasmi` are active.\n\
+     Set `default-features = false` and pick one explicitly."
+);
 
 use std::path::Path;
 
 pub use leo4_abi::{error::error_codes, LeanError, LeanMarshal};
+
+pub mod runtime;
+pub mod backend;
 
 /// Wasm-host counterpart of `leo4_native::Lean`. Owns the handshake
 /// metadata + (eventually) a wasmtime `Engine` + `Store`.
@@ -216,6 +248,17 @@ mod tests {
     fn open_errors_on_missing_file() {
         let err = Lean::open("/no/such/file/at/all.json").unwrap_err();
         assert_eq!(err.code, error_codes::DECODE_ERROR);
+    }
+
+    #[test]
+    fn backend_default_open_returns_dlsym_failed_stub() {
+        use crate::runtime::WasmRuntime as _;
+        let rt = crate::backend::Default::new();
+        let err = match rt.open_component(&[]) {
+            Ok(_) => panic!("stub backend must not return Ok"),
+            Err(e) => e,
+        };
+        assert_eq!(err.code, 0x0002_0005);
     }
 
     #[test]

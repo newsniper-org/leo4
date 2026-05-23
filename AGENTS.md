@@ -402,6 +402,57 @@ would be expensive to relitigate:
   internal are a signal the work belongs in a different
   crate (e.g. `leo4-build` or a leo4-version-aware
   subcrate), not in `leo4-cli`.
+- **2026-05-21 — leo4-wasm: wasmtime default + wasmi opt-in,
+  wasmer rejected**. `crates/leo4-wasm`'s `WasmRuntime` trait
+  has two feature-gated backends: `backend-wasmtime` (default)
+  and `backend-wasmi` (opt-in). Wasmer was investigated and
+  rejected as a backend candidate: its only "Component Model"
+  surface is `wai-bindgen-wasmer`, which targets the older
+  WAI fork (not WIT), and its README explicitly marks the crate
+  as transitional / rewrite-pending. `wasm_component_layer`
+  (the multi-runtime CM abstraction) also doesn't list wasmer
+  among its supported backends — only wasmtime / wasmi /
+  JS-host. If wasmer ever ships real WIT-based Component Model
+  in the main `wasmer` crate, adding a third backend is a
+  trivial trait impl; until then, including it would mean
+  shipping a non-functional feature flag.
+- **2026-05-21 — leo4-wasm enforces "exactly-one backend" at
+  compile time**. Two `compile_error!` guards in
+  `crates/leo4-wasm/src/lib.rs` reject builds that activate
+  zero or two backends. Verified against the three scenarios
+  (no-default-features → reject; default-features + explicit
+  `backend-wasmi` → reject; `--no-default-features --features
+  backend-wasmi` → success). Rationale: `crates/leo4-wasm` is
+  "one wasm runtime per build" by design — `backend::Default`
+  alias resolution would be ambiguous with both backends
+  active, and shipping two CM runtimes side-by-side in one
+  binary is a bloat the user almost certainly doesn't want.
+  If a downstream consumer ever needs multiple backends in
+  one process (multi-tenancy, etc.), they can use both
+  backend modules' types directly bypassing `Default`, in a
+  downstream crate.
+- **2026-05-21 — `SPEC/wit/leo4-host.wit` pinned at v0.1.0**.
+  The Component Model interface that wasm-targeting leo4
+  backends wrap. Key design choices: (a) **opaque `list<u8>`
+  canonical-ABI payloads** rather than typed WIT records —
+  cross-impl wire identity (native + wasm produce byte-
+  identical bytes for the same leo4 type) is the invariant
+  worth preserving, and re-encoding through CM's own ABI
+  would break it; (b) **one generic `call(mangled, args)`
+  export** rather than one typed WIT export per
+  `@[leo4_export]` — keeps the WIT stable across schema_hash
+  rotations and matches the native pipeline's
+  `dlsym(leo4_call_<mangled>)` dispatch model; (c) **schema-
+  hash verification on the component side** (via the
+  `verify-handshake` export), with the host providing the
+  expected value — convention is "side that owns the data
+  exports the verifier"; (d) **schema_hash and WIT version
+  are independent** — user IDL changes rotate schema_hash but
+  not WIT version; leo4 runtime ABI changes rotate WIT
+  version but not schema_hash. The `handshake-frame.abi-
+  version` field is the WIT-version negotiation channel,
+  schema_hash is the IDL-shape one. Full rationale in
+  `SPEC/wit/README.md`.
 - **2026-05-21 — leo4 has no compile-time plug-in system,
   and that is intentional**. `schema-idl::IDLType` and
   `Leo4Plugin.AdmitSet.IDLType` are closed enums/inductives;

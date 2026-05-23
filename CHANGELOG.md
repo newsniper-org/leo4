@@ -7,6 +7,93 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-C4.x: `WasmRuntime` trait + dual-backend feature gate + leo4-host.wit pin (2026-05-21)
+
+Builds on the C4 scaffolding (`Lean::open` parses handshake)
+with the abstraction layer the wasm pipeline needs to stay
+runtime-agnostic.
+
+**`runtime::WasmRuntime` + `WasmComponent` + `WasmInstance`
+traits** (`crates/leo4-wasm/src/runtime.rs`). Object-safe; the
+backends hide their concrete types behind `Box<dyn …>`. All
+three traits are `Send + Sync`. The trait surface is
+deliberately small (3 methods total) — extensions land when
+specific use cases push them.
+
+**Two feature-gated backend modules** under
+`crates/leo4-wasm/src/backend/`:
+
+- `wasmtime.rs` — `WasmtimeRuntime`. Gated on
+  `backend-wasmtime` (the default feature).
+- `wasmi.rs` — `WasmiRuntime`. Gated on
+  `backend-wasmi` (opt-in via
+  `--no-default-features --features backend-wasmi`).
+
+Both backends ship as stubs whose `WasmRuntime` impls return
+`LEO4_ERR_RUST_DLSYM_FAILED` (0x0002_0005) with a clear
+"not yet implemented" message. Real loader + dispatch wires
+up in C4.x.x via `wit-bindgen` against the pinned WIT.
+
+**Compile-time mutex enforcement** (`compile_error!` guards in
+`lib.rs`): builds that enable zero OR two backend features get
+rejected with a clear error message. Verified across all
+three scenarios (none / default-only / both / wasmi-only).
+Rationale captured in AGENTS.md "Recent decisions":
+`leo4-wasm` is "one wasm runtime per build" by design;
+downstream consumers needing multi-runtime stay outside this
+crate.
+
+**Wasmer rejected as a backend candidate** after the
+2026-05-21 investigation: its only Component-Model-adjacent
+crate (`wai-bindgen-wasmer`) targets the older WAI fork (not
+WIT), is marked transitional / rewrite-pending in its
+README, and is not listed among `wasm_component_layer`'s
+supported runtimes. If wasmer ships real WIT-based CM in the
+main `wasmer` crate later, adding it is a trivial third
+backend module.
+
+**`SPEC/wit/leo4-host.wit` pinned at v0.1.0**
+(`package leo4:host@0.1.0`). The Component Model interface
+both backends wrap. Companion `SPEC/wit/README.md` documents
+the four key design decisions:
+
+1. **Opaque `list<u8>` canonical-ABI payloads** rather than
+   typed WIT records — preserves cross-impl wire identity
+   (native + wasm produce byte-identical bytes per leo4
+   type). Re-encoding through CM's own ABI would break that
+   invariant.
+2. **One generic `call(mangled, args)` export** rather than
+   per-`@[leo4_export]` typed exports — keeps the WIT stable
+   across schema_hash rotations and matches the native
+   `dlsym(leo4_call_<mangled>)` dispatch model.
+3. **`verify-handshake` is an export, not an import** —
+   convention: side that owns the data (schema_hash) exports
+   the verifier.
+4. **schema_hash and WIT version are independent**. User IDL
+   changes rotate schema_hash; leo4 runtime ABI changes
+   rotate WIT version. The `handshake-frame.abi-version`
+   field is the WIT-version negotiation channel.
+
+Tests (`cargo test -p leo4-wasm`): 5 — adds
+`backend_default_open_returns_dlsym_failed_stub` to the four
+from C4. Mutex guards verified outside the test harness via
+`cargo build` with various `--features` combinations.
+
+Workspace test count: 160 → 161.
+
+**C4.x.x follow-ups** (still deferred):
+
+- Pulling in `wasmtime` (with `component-model` feature) +
+  `wasmi` + `wasm_component_layer` + `wasmi_runtime_layer`
+  as gated deps once the impls land.
+- `wit-bindgen` invocation in `build.rs` against
+  `SPEC/wit/leo4-host.wit` to materialise typed bindings.
+- Replacing the stub `WasmtimeRuntime` / `WasmiRuntime`
+  bodies with real CM dispatch.
+- Optional: a `leanc --target=wasm32-wasip2` wrapper that
+  produces a Lean component the wasmtime backend can load
+  (a separate substantial path).
+
 ### Added — Phase 10-Docs (E1+E2+E3): Phase 9 chapters + reverse-byte-parity skeleton + SPEC quickstart (2026-05-21)
 
 A combined docs sweep covering three follow-ups that

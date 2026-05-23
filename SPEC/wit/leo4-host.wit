@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//
+// leo4-host.wit — Component Model interface for wasm-targeting
+// leo4 backends. Pinned 2026-05-21 as part of Phase 10-C4.x.
+//
+// See SPEC/wit/README.md for design rationale + cross-references.
+// Bumps to this file rotate the wit-version below AND the
+// schema_hash of any component generated against it.
+
+package leo4:host@0.1.0;
+
+// ─── Shared types ─────────────────────────────────────────────────
+
+/// Common types referenced by both `host-imports` and `exports`.
+interface types {
+  /// Wire-format error. Mirrors SPEC/canonical-abi.md §13's
+  /// `LeanError` exactly — `code` is the same `u32` reservation
+  /// table, `message` carries the human-readable detail. The
+  /// `backtrace` field documented in §13's "wire-format Lean error"
+  /// is intentionally omitted here: Component Model `result<…, T>`
+  /// already provides exception-style propagation; a separate
+  /// backtrace string would duplicate WASIp2's `wasi:logging`
+  /// channel.
+  record lean-error {
+    code: u32,
+    message: string,
+  }
+
+  /// Canonical-ABI-encoded byte buffer. The leo4 canonical ABI
+  /// (`SPEC/canonical-abi.md`) is **not** the Component Model's
+  /// own ABI — leo4 wraps its bytes inside CM `list<u8>` and
+  /// dispatches by `mangled` name at the receiving side. This
+  /// keeps the wire format byte-identical across native + wasm
+  /// backends, at the cost of one extra `list<u8>` boxing per
+  /// call. See `wit/README.md` §"Why opaque byte buffers".
+  type canonical-bytes = list<u8>;
+}
+
+// ─── Host imports ─────────────────────────────────────────────────
+
+/// What the **host** (the leo4-wasm-driven Rust process) provides
+/// to a Lean-as-wasm component. The component imports these; the
+/// host implements them.
+interface host-imports {
+  use types.{lean-error};
+
+  /// Optional structured log channel. Levels follow
+  /// `wasi:logging`'s convention (0 = trace, 1 = debug, 2 = info,
+  /// 3 = warn, 4 = error). Host MAY discard.
+  log: func(level: u32, msg: string);
+
+  /// Schema-hash verification handshake. The host calls this on
+  /// the component's `verify-handshake` export immediately after
+  /// instantiation; if the host's expected hash and the
+  /// component's compiled-in hash diverge, the component returns
+  /// `lean-error { code: 5, … }` (`LEO4_ERR_HANDSHAKE_MISMATCH`)
+  /// and the host MUST refuse to dispatch any other call.
+  ///
+  /// `abi-version` is sent alongside the hash so future
+  /// non-schema-rotating wire changes (e.g. new error codes in
+  /// the 0x0003_xxxx reserved range) can be negotiated
+  /// independently from schema_hash rotation.
+  record handshake-frame {
+    expected-hash: string,
+    abi-version: u32,
+  }
+}
+
+// ─── Component exports ────────────────────────────────────────────
+
+/// What a leo4-targeting wasm component MUST export. The component
+/// is built from a Lean (forward direction) or Rust (reverse
+/// direction, future) source whose IDL the leo4 plugin / emit CLI
+/// recorded into a `.leo4-handshake` JSON.
+interface exports {
+  use types.{canonical-bytes, lean-error};
+  use host-imports.{handshake-frame};
+
+  /// 13-char base32lc schema_hash (`SPEC/handshake.md`). Compiled
+  /// into the component at build time; the host verifies it
+  /// against its own expected hash via `verify-handshake` below.
+  schema-hash: func() -> string;
+
+  /// `LEO4_ABI_VERSION` (= 1 today; rotates only on
+  /// non-schema-rotating wire changes).
+  abi-version: func() -> u32;
+
+  /// Acknowledge the host's expected schema_hash + abi-version.
+  /// MUST be the **first** export the host invokes after
+  /// instantiation. Returns `Err(lean-error { code: 5 })` on
+  /// mismatch; the host MUST then refuse to dispatch via `call`.
+  verify-handshake: func(frame: handshake-frame) -> result<_, lean-error>;
+
+  /// Generic dispatch entry point. `mangled` is the leo4 mangled
+  /// name **body** (no `leo4__pkg__iface__fn__…__h<hash>`
+  /// prefix — the schema_hash is already verified via
+  /// `verify-handshake`, and the `pkg / iface / fn / args` parts
+  /// vary per call site; the body alone is the lookup key).
+  ///
+  /// `args` is canonical-ABI-encoded per the component's IDL;
+  /// the return is canonical-ABI-encoded result bytes or a
+  /// `lean-error` whose code follows
+  /// `SPEC/canonical-abi.md` §13.
+  ///
+  /// Rationale for one generic `call` vs. one typed export per
+  /// `@[leo4_export]`: the latter would force the WIT file (and
+  /// thus every consumer's wit-bindgen regeneration) to rotate
+  /// on every schema_hash rotation. With one generic `call`,
+  /// the WIT stays stable and only the inner canonical-ABI
+  /// payload format moves with the schema. See `wit/README.md`
+  /// §"Why generic dispatch".
+  call: func(mangled: string, args: canonical-bytes)
+      -> result<canonical-bytes, lean-error>;
+}
+
+// ─── World ────────────────────────────────────────────────────────
+
+/// A leo4 wasm component. Forward direction: a Lean module
+/// compiled to wasm via a future `leo4-rust-emit`-equivalent that
+/// drives `leanc --target=wasm32-wasip2` (Lean-to-wasm path is
+/// the C4.x.x follow-up). Reverse direction: a Rust cdylib
+/// compiled to wasm via `cargo build --target=wasm32-wasip2`
+/// (Phase 10-A2 wasm-sandbox backend, deferred ≥ v1.x).
+world leo4-component {
+  import host-imports;
+  export exports;
+}
