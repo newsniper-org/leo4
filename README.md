@@ -6,9 +6,11 @@ toolchain version.
 ## Status
 
 **Phases 0–8 released as v0.1.0 (2026-05-21). Phase 9
-(reverse direction: Rust → Lean) landed across 9-0 through
-9-7 plus 9-4c, 9.X isolated, 9.X recycle, and the `leo4`
-CLI (2026-05-23).** The forward pipeline runs end-to-end on
+(reverse direction: Rust → Lean) **fully end-to-end as of
+2026-05-23** — declarative Lake `extern_lib` integration,
+dispatcher↔worker handshake, runtime ABI, and
+`examples/05-rust-export/` running with correct values for
+every export.** The forward pipeline runs end-to-end on
 Tier 1 (x86_64 Linux): Lake plugin, Rust workspace, shim
 synthesis, C ↔ Lean dispatch, mutual recursion, async `io<T>`
 lift, and a Mathlib-compatible carrier-type subset with opt-in
@@ -20,11 +22,12 @@ Rust `schema-idl` crate.
 The reverse pipeline (Phase 9) lets Rust expose
 `#[leo4::export]`-tagged functions that Lean calls through a
 long-running worker process. `examples/05-rust-export/` is the
-end-to-end demo; `just rust-export-05-build` collapses the
-4-step workflow into one recipe. The deeper Lake-DSL
-integration that would let `lean_exe`'s link line pick up
-the bridge archive declaratively is the open follow-up; until
-then a one-line manual `leanc -o` finishes the executable.
+end-to-end demo; **`cargo build && leo4-rust-emit --emit-lean
+&& lake build`** is the entire user-visible workflow —
+`just rust-export-05-build` chains it for examples/05. Lake
+picks up `libleo4_rust_bridge.a` + the leanc-compiled glue
+shim automatically via two `extern_lib`s in the `Leo4Rust`
+Lake package (`lake/Leo4Rust/lakefile.lean`).
 
 What works today:
 
@@ -128,14 +131,15 @@ Open items:
 
 - Some `LeanError` codes (`0x02` / `0x03` / `0x04` / `0x06` / `0x08`)
   are reserved but not yet exercised by a test fixture.
-- Deeper Lake-DSL integration for the reverse direction so
-  `lean_exe`'s link line picks up `libleo4_rust_bridge.a` +
-  the glue-shim `.o` declaratively. The Lake 5.x
-  `extern_lib` DSL is Job-based and needs a focused spike
-  before the integration is safe to land in a single commit.
 - Windows runtime verification for the 9-4c backend — code
   compiles under the gnullvm Tier 2 target choice; CI
   matrix coverage follows.
+- `LEO4_ERR_RUST_WORKER_RESTARTED` (0x00020002) is reserved
+  but not surfaced — recycle is currently transparent.
+- `LEO4_RUST_WORKER_RECYCLE_SECONDS` (time-based recycle)
+  deferred; call-based ships.
+- Callback / function-arrow ABI deferred (no concrete
+  consumer yet).
 - schema-idl items G (`ConstraintExpr<Atom>` typed AST) and the
   `wasm64` sibling stay deferred until a concrete consumer surfaces.
 
@@ -227,7 +231,11 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │   ├── Leo4/               # runtime library
 │   │   └── Leo4/MathlibBridge/
 │   │                       # opt-in 1-to-1 conversions Lean carriers ↔ Mathlib
-│   └── Leo4Plugin/         # Lake plugin exe (leo4plugin)
+│   ├── Leo4Plugin/         # Lake plugin exe (leo4plugin)
+│   └── Leo4Rust/           # Phase 9 declarative-link package — two
+│                           # extern_libs auto-link libleo4_rust_bridge.a
+│                           # + the leanc-compiled glue shim into any
+│                           # `lean_exe` that `require Leo4Rust`s it
 ├── sibling/                # non-workspace Cargo / Lake projects
 │   ├── leo4-wasip3/        # stable Rust + wasm32-wasip2 + wasip3 v0.6
 │   └── mathlib-bridge-test/# Lake package verifying Mathlib bridges

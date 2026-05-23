@@ -134,6 +134,47 @@ The dispatcher must be **re-entrant from a single Lean thread**
 Cross-thread calls are out-of-scope; a future multi-Lean
 runtime would extend this contract.
 
+### 3.1 Lean-side glue shim contract
+
+The single C entry above sees byte-pointers. The Lean side
+sees a `ByteArray`-returning extern declared with this exact
+signature:
+
+```lean
+@[extern "leo4_rust_call_lean"]
+private opaque leo4RustCallRaw
+    (mangled : @& String) (args : @& ByteArray)
+    : IO ByteArray
+```
+
+**The monad MUST be `IO ByteArray`, not `BaseIO ByteArray`.**
+Lean 4's `MonadLift BaseIO IO` instance lifts at the type
+level but the lowered C ABI of `BaseIO α` vs `IO α` reads
+back the result differently from an `IO` block; declaring the
+extern with `IO` directly avoids the runtime mismatch.
+
+The returned ByteArray's layout is **status prefix +
+payload**:
+
+- `bytes[0..4]` — `status : UInt32` in little-endian. `0`
+  on success; non-zero matches the dispatcher's error
+  codes (`SPEC/canonical-abi.md` §13 +
+  `SPEC/reverse-direction.md` §10).
+- `bytes[4..]` — when `status == 0`, the call's
+  canonical-ABI encoded return payload. When `status != 0`,
+  empty.
+
+Rationale: the original design returned `IO (UInt32 ×
+ByteArray)`, but Lean 4 codegen packs `UInt32` as an inline
+scalar field in `Prod`'s ctor (not a boxed `lean_object*`),
+which the C-side `lean_alloc_ctor(0, 2, 0)` builder cannot
+reproduce. The flat ByteArray with a status prefix sidesteps
+the Prod ABI entirely. The generated typed wrapper
+(`leo4-rust-emit --emit-lean`) carries a `decodeStatus`
+helper that reads the first 4 bytes as LE u32 and a body
+that calls `Leo4.LeanMarshal.canonicalDecode (T := …) resp 4`
+to decode the payload starting at offset 4.
+
 ## 4. Worker Process Lifecycle
 
 ### 4.1 Default mode — long-running worker
@@ -144,13 +185,27 @@ to `leo4_rust_call` triggers:
 1. cdylib path resolution (§9).
 2. `posix_spawn` (POSIX) or `CreateProcess` (Windows) of the
    worker binary with the resolved cdylib path as an argument.
-3. Worker loads cdylib, reads `LEO4_RUST_SCHEMA_HASH` from it,
-   sends a handshake frame containing that hash + its own
-   compile-time `LEO4_RUST_ABI_VERSION`.
-4. Dispatcher verifies the hash matches `<pkg>.leo4-rust-handshake`'s
-   `schema_hash`. On mismatch returns
-   `LEO4_ERR_HANDSHAKE_MISMATCH` (0x05) and tears the worker
-   down.
+3. Worker loads cdylib, recomputes the schema_hash via the
+   same FNV-1a-64 + base32lc pipeline `leo4-rust-emit` used
+   when writing the handshake JSON (pkg / iface inputs taken
+   from `LEO4_RUST_HANDSHAKE_PKG` / `_IFACE` env vars), then
+   sends a 25-byte handshake frame (§5.3) containing the
+   computed hash + `LEO4_ABI_VERSION` = 1.
+4. **Dispatcher MUST consume the handshake frame immediately
+   after spawn — before any request frame goes out.** Reading
+   the 12-byte header (magic + hash_len + abi_version) then
+   the 13-byte hash. Verification against
+   `LEO4_RUST_SCHEMA_HASH` env (when set) raises
+   `LEO4_ERR_HANDSHAKE_MISMATCH` (0x05). When the env is
+   unset, verification is deferred to the typed Lean
+   wrapper's compile-time `schemaHash` pin (the wrapper
+   raises `IO.userError` itself on observed mismatch).
+   Skipping the handshake consume causes the worker's 25
+   bytes to pile up in the IPC buffer and the dispatcher's
+   subsequent response read decodes them as a response
+   header — observed historically as garbage `status`
+   values (see CHANGELOG entry for the Phase 9 runtime
+   fix, 2026-05-23).
 
 Subsequent calls reuse the same worker. The worker runs each
 request **serially** on its main thread:

@@ -565,18 +565,25 @@ search).
   wrapper per export + a single `@[extern
   "leo4_rust_call_lean"]` raw entry + a compile-time
   `schemaHash` pin.
-- **9-6** ✅ (partial) — `shim/leo4_rust_bridge_lean.c` is the
+- **9-6** ✅ — `shim/leo4_rust_bridge_lean.c` is the
   Lean-side glue shim (lean.h ↔ byte buffer). Sole leo4 C TU
-  that includes `<lean/lean.h>`. `Leo4.Build.RustBridge`
-  helpers + `justfile` `rust-export-05-build` recipe wrap the
-  4-step manual workflow. **Open**: declarative Lake-DSL
-  integration so `lean_exe`'s link line picks up the bridge
-  archive without a manual `leanc -o` step — a Lake 5.x
-  `extern_lib` spike pending.
+  that includes `<lean/lean.h>`. Declarative Lake `extern_lib`
+  integration landed via the new `lake/Leo4Rust/` package
+  (commits 1/3, 2/3, 3/3 + runtime fix, 2026-05-23): two
+  `extern_lib`s (`leo4RustBridge` resolves the cargo-built
+  `.a`, `leo4RustBridgeLean` compiles + ar-wraps the glue
+  shim, with `freshcheck` as an optional incremental gate)
+  let `lean_exe`'s link line pick up both archives
+  automatically. Glue shim's extern signature is
+  `(@& String) (@& ByteArray) → IO ByteArray` with the first
+  4 bytes carrying a LE u32 status (avoids the Lean
+  `UInt32 × ByteArray` Prod inline-scalar ABI mismatch the
+  initial design hit).
 - **9-7** ✅ — `examples/05-rust-export/` mini-solver demo:
   4 `#[leo4::export]`s (`is_prime`, `next_prime`,
-  `count_primes_below`, `factor_smallest`) exercised from
-  Lean.
+  `count_primes_below`, `factor_smallest`) called from Lean
+  with correct values for every export (true e2e
+  verified 2026-05-23).
 
 **9.X follow-ups landed alongside (2026-05-23)**:
 
@@ -601,9 +608,16 @@ search).
   (`SPEC/mangling.md` §3 TBD slot) + re-entrant dispatcher.
 - Stronger isolation backends (zygote-fork, wasm sandbox).
   Dispatcher's single-entry API preserves the swap option.
-- Declarative Lake-DSL integration (see 9-6 open note above).
 - Windows runtime verification — Tier 2 CI matrix when it
   lands. Code is compiled-clean against the gnullvm target.
+- `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing on recycle —
+  reserved as 0x00020002 in `SPEC/canonical-abi.md` §13 but
+  currently the dispatcher recycles transparently. Needs a
+  side-channel (env var or returned-buffer flag) when a
+  consumer wants to detect state loss.
+- Time-based recycle (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) —
+  call-based ships; time-based would need a clock probe per
+  request.
 
 **Dependencies**: Phase 4 (canonical ABI for marshal),
 Phase 5 (forward pipeline as the reference). Does **not**

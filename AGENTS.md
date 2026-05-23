@@ -257,6 +257,22 @@ Lean toolchain pinned in `lean-toolchain`. Rust MSRV in
   encoders emit 4 bytes — SPEC `canonical-abi.md` §9. Phase
   6 commit `48` was a coordinated change; mixing
   pre- and post-fix bytes makes the wire silently corrupt.
+- **Lean `@[extern]` declared as `BaseIO α` reads back
+  differently from `IO α` when called from an `IO` block.**
+  Type-level lift works; the C-side `lean_object*` returned
+  by `lean_io_result_mk_ok` matches the layout either way,
+  but the *caller's* expected layout differs. Use `IO α`
+  for Lean externs invoked from `IO` blocks.
+- **`UInt32 × ByteArray` is not `lean_alloc_ctor(0, 2, 0)`
+  with both fields boxed.** Lean 4 inlines `UInt32` as a
+  scalar field in the ctor. When you need both a status and
+  a ByteArray across an `@[extern]`, the safe move is a
+  single ByteArray whose first 4 bytes hold the status as
+  LE u32 — no Prod codegen involved.
+- **Worker handshake frame (25 bytes) must be consumed by
+  the dispatcher right after spawn.** Skipping it causes
+  garbage status values on the first response read. See
+  `leo4_consume_handshake` in `shim/leo4_rust_bridge.c`.
 
 ## 8. Subagent guidance
 
@@ -319,13 +335,16 @@ would be expensive to relitigate:
   wire format change, no new dispatcher API entry,
   backwards-compatible with default callers. The `iso:`
   string is reserved in the mangled-name space.
-- **2026-05-23 — Lake `extern_lib` integration deferred**:
-  Lake 5.x's `extern_lib` DSL is Job-based and our trial
-  attempt was too brittle for a single safe commit. The
-  current state of the art is `Leo4.Build.RustBridge`
-  helpers + `just rust-export-05-build` + a manual `leanc
-  -o` final link line. A focused Lake-API spike is the
-  prerequisite for the declarative integration.
+- **2026-05-23 — Lake `extern_lib` integration landed**
+  (overrides the earlier "deferred" note). `lake/Leo4Rust/`
+  package's two `extern_lib`s auto-link the dispatcher
+  archive + glue shim into any `lean_exe` that
+  `require Leo4Rust`s it. Spike findings:
+  `spike/SPIKE-1-lake-extern-lib.md`. Patterns 4a (path
+  resolution) + 4b (leanc + ar with optional `freshcheck`
+  gate) are what ships. Pattern 4c (`buildFileUnlessUpToDate'`)
+  was unnecessary in the end — logicutils' content-hash
+  guard handles the inner cache layer adequately.
 - **2026-05-23 — `leo4` CLI semantics**: `leo4 create` is
   for NEW directories (cargo-new ergonomics); `leo4 init`
   is for IN-PLACE integration into an existing Cargo crate
@@ -333,6 +352,26 @@ would be expensive to relitigate:
   touches existing `src/`). Don't mix the two — `create`
   refuses a non-empty target, `init` requires a Cargo.toml
   to be present.
+- **2026-05-23 — glue shim extern uses `IO ByteArray` +
+  status prefix, not `BaseIO (UInt32 × ByteArray)`**: Lean
+  4's `BaseIO`/`IO` lift is purely type-level; the actual
+  lowered C ABI when called from an `IO` block via `← x`
+  reads back ByteArray data differently when the extern was
+  declared as `BaseIO α`. Use `IO α` directly. Also the
+  `UInt32 × ByteArray` Prod codegen inlines the `UInt32` as
+  a scalar field — `lean_alloc_ctor(0, 2, 0)` +
+  `lean_box_uint32` does NOT produce the layout Lean expects.
+  Both bugs were caught when examples/05 first ran
+  end-to-end. Avoid both by returning a single ByteArray
+  whose first 4 bytes carry the status as LE u32.
+- **2026-05-23 — Dispatcher MUST consume the worker's 25-byte
+  handshake before any request**. Worker (Phase 9-3) sends
+  it on init; skipping the consume causes the bytes to pile
+  up in the IPC buffer and the dispatcher's subsequent
+  response read decodes them as a response header.
+  Implemented as `leo4_consume_handshake(w)` called inside
+  both `leo4_get_or_spawn_persistent` and
+  `leo4_dispatch_isolated` right after `spawn` succeeds.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from
