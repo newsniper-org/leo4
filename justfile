@@ -139,12 +139,14 @@ rust-emit CDYLIB OUT_DIR MODULE:
 glue-shim-build OUT_OBJ:
     leanc -c -std=c2x shim/leo4_rust_bridge_lean.c -o {{OUT_OBJ}}
 
-# End-to-end pipeline wrapper for examples/05-rust-export. Does what
-# the README's 4-step manual workflow does, in one command.
+# End-to-end pipeline wrapper for examples/05-rust-export. With
+# Phase 9-6 follow-up's Leo4Rust Lake package in place, `lake build`
+# itself handles glue-shim compilation + final link via the
+# extern_libs, so the 4-step manual workflow collapses to 3.
 rust-export-05-build: rust-bridge-build
-    @echo "[1/4] Building example cdylib..."
+    @echo "[1/3] Building example cdylib..."
     cargo build --release -p leo4-example-05-rust-export
-    @echo "[2/4] Emitting handshake / IDL / Lean wrapper..."
+    @echo "[2/3] Emitting handshake / IDL / Lean wrapper..."
     rm -rf examples/05-rust-export/lean/Leo4ExampleMiniSolverRust
     mkdir -p examples/05-rust-export/lean/.leo4-emit
     mkdir -p examples/05-rust-export/lean/Leo4ExampleMiniSolverRust
@@ -154,11 +156,14 @@ rust-export-05-build: rust-bridge-build
       Leo4ExampleMiniSolverRust.Rust
     mv examples/05-rust-export/lean/.leo4-emit/leo4_example_05_rust_export.leo4-rust-imports.lean \
        examples/05-rust-export/lean/Leo4ExampleMiniSolverRust/Rust.lean
-    @echo "[3/4] Compiling leo4_rust_bridge_lean.c..."
-    just glue-shim-build examples/05-rust-export/lean/.leo4-emit/leo4_rust_bridge_lean.o
-    @echo "[4/4] Lake build (link step still manual; see README §run)."
-    cd examples/05-rust-export/lean && lake build || true
-    @echo "Done. See examples/05-rust-export/README.md for the leanc -o link line + LEO4_RUST_* env vars to run."
+    @echo "[3/3] Lake build (auto-links bridge + glue-shim via Leo4Rust extern_libs)..."
+    cd examples/05-rust-export/lean && lake build
+    @echo "Done. Run via:"
+    @echo "  LEO4_RUST_CDYLIB=\$$(realpath target/release/libleo4_example_05_rust_export.so) \\"
+    @echo "  LEO4_RUST_WORKER_BIN=\$$(realpath target/release/leo4-rust-worker) \\"
+    @echo "  LEO4_RUST_HANDSHAKE_PKG=leo4_example_05_rust_export \\"
+    @echo "  LEO4_RUST_HANDSHAKE_IFACE=Leo4ExampleMiniSolverRust \\"
+    @echo "    examples/05-rust-export/lean/.lake/build/bin/leo4Example05"
 
 # Drop emitted reverse-direction artefacts for examples/05.
 rust-export-05-clean:

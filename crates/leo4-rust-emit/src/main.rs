@@ -551,7 +551,9 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
     for (id, ty) in param_idents.iter().zip(param_lean_tys.iter()) {
         s.push_str(&format!(" ({id} : {ty})"));
     }
-    s.push_str(&format!(" : IO {ret_ty_str} := do\n"));
+    // Wrap the return type in parens so Lean parses
+    // `IO (Option UInt64)` rather than `IO Option UInt64`.
+    s.push_str(&format!(" : IO ({ret_ty_str}) := do\n"));
 
     if !all_mapped {
         s.push_str(&format!(
@@ -583,7 +585,7 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
     ));
     s.push_str("  if status ≠ 0 then\n");
     s.push_str(&format!(
-        "    throw (IO.userError s!\"leo4 rust call `{}` failed with status 0x{{Nat.toDigits 16 status.toNat |>.asString}}\")\n",
+        "    throw (IO.userError s!\"leo4 rust call `{}` failed with status {{status}}\")\n",
         e.logical_name
     ));
     if e.ret_type.is_empty() {
@@ -595,7 +597,7 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
         ));
         s.push_str("  | .ok (v, _) => return v\n");
         s.push_str(&format!(
-            "  | .error e => throw (IO.userError s!\"leo4 rust call `{}`: decode failed: {{e.detail}}\")\n",
+            "  | .error e => throw (IO.userError s!\"leo4 rust call `{}`: decode failed: {{e.message}}\")\n",
             e.logical_name
         ));
     }
@@ -901,7 +903,7 @@ mod tests {
             abi_version: 1,
         };
         let s = render_one_export(&e).unwrap();
-        assert!(s.contains("def add (a0 : UInt64) (a1 : UInt64) : IO UInt64"));
+        assert!(s.contains("def add (a0 : UInt64) (a1 : UInt64) : IO (UInt64)"));
         assert!(s.contains("leo4_rust__add__u64_u64"));
         assert!(s.contains("canonicalEncode a0"));
         assert!(s.contains("canonicalEncode a1"));
@@ -939,7 +941,7 @@ mod tests {
         assert!(s.contains("namespace My.Rust"));
         assert!(s.contains("def schemaHash : String := \"abcdefghijklm\""));
         assert!(s.contains("@[extern \"leo4_rust_call_lean\"]"));
-        assert!(s.contains("def ping") && s.contains("IO Unit"));
+        assert!(s.contains("def ping") && s.contains("IO (Unit)"));
         assert!(s.contains("end My.Rust"));
     }
 }

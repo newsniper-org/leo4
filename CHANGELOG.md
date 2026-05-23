@@ -7,6 +7,102 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-6 follow-up commit 3/3: examples/05 + emit CLI fixes (2026-05-23)
+
+Final of three commits in the Lake `extern_lib`
+integration. Wires `examples/05-rust-export/lean/lakefile.lean`
+through `require Leo4Rust`, simplifies the `just
+rust-export-05-build` recipe from 4 steps to 3, and fixes
+emit-CLI Lean codegen bugs the integration test caught.
+
+User-facing change:
+
+```sh
+# Before (4-step manual workflow per SPEC/reverse-direction.md §7):
+cargo build
+leo4-rust-emit --emit-lean
+leanc -c shim/leo4_rust_bridge_lean.c
+lake build
+leanc -o … (manual link line)
+
+# After:
+cargo build
+leo4-rust-emit --emit-lean
+lake build   # Lake auto-links both .a's via Leo4Rust's extern_libs
+```
+
+The manual `leanc -o` final-link step is gone. The
+glue-shim compile is gone (Lake's `leo4RustBridgeLean`
+extern_lib handles it). `lake build` produces the
+executable directly.
+
+Files:
+
+- `examples/05-rust-export/lean/lakefile.lean`: add
+  `require Leo4Rust from "../../../lake/Leo4Rust"`; add a
+  `lean_lib Leo4ExampleMiniSolverRust` with
+  `.submodules` glob so Lake picks up the emit CLI's
+  generated wrapper module from
+  `Leo4ExampleMiniSolverRust/Rust.lean`. Comment block in
+  the lakefile points users at the Leo4Rust extern_libs.
+- `justfile`: `rust-export-05-build` recipe goes from 4
+  steps to 3 (steps 3 + 4 merge into a single `lake build`
+  that auto-links). The README's "run with env matrix"
+  reminder gets printed at the end of the recipe.
+- `examples/05-rust-export/README.md`: "Build + run"
+  section rewritten — fast path leads, manual workflow is
+  now strictly debugging reference. Adds a logicutils
+  install hint (Arch pacman / cargo install / omit and
+  accept per-build leanc invocation).
+
+Emit-CLI fixes (`crates/leo4-rust-emit/src/main.rs`)
+surfaced when Lake actually compiled the generated
+wrapper for the first time:
+
+1. **`IO (T)` paren wrap**: render emits `IO ({ret_ty_str})`
+   rather than `IO {ret_ty_str}`. Without parens,
+   `IO Option UInt64` parses as Lean application
+   `IO Option UInt64` (three-arg) — type error.
+2. **`Nat.toDigits ... |>.asString` deprecated**: replaced
+   with the simpler `s!"... {status} ..."` interpolation
+   (`UInt32` has a `ToString` instance; the manual hex
+   conversion was unnecessary anyway).
+3. **`Leo4.LeanError.detail` doesn't exist**: the struct's
+   field is `message` (per
+   `lake/Leo4/Leo4/Marshal.lean:21`). Replaced
+   `{e.detail}` with `{e.message}`.
+
+Three corresponding unit-test assertions updated (workspace
+test count stays at 141/0).
+
+Verified locally — `just rust-export-05-build` runs all
+three steps clean:
+- Cargo builds cdylib + bridge + worker + emit.
+- `leo4-rust-emit --emit-lean` writes IDL/handshake/wrapper.
+- `lake build` produces the executable at
+  `examples/05-rust-export/lean/.lake/build/bin/leo4Example05`
+  (152 MB statically-linked binary). Lake's link line picks
+  up both extern_lib `.a`s from `Leo4Rust`.
+
+**Runtime open issue**: the produced executable launches the
+dispatcher but the first request currently fails with
+`status 993542224` (uninitialised-buffer read in the
+dispatcher's error path) and the worker reports
+`Connection reset by peer` on its IPC pipe — a pre-existing
+9-3 / 9-4 protocol-init bug surfaced for the first time by
+this commit's actual e2e run. Lake-integration scope of
+this commit is met; the dispatcher↔worker handshake fix is
+a follow-up.
+
+Dispatcher source fix:
+- `shim/leo4_rust_bridge.c` swaps `strtoull` for an inlined
+  decimal parser (`leo4_parse_u64_decimal`). Some
+  clang+glibc combinations emit a versioned
+  `__isoc23_strtoull` reference that leanc's bundled
+  sysroot can't resolve at link time; the inlined parser
+  avoids the libc symbol entirely. Recycle-policy parsing
+  behaviour unchanged.
+
 ### Added — Phase 9-6 follow-up commit 2/3: `leo4RustBridgeLean` extern_lib (leanc + ar + logicutils gate) (2026-05-23)
 
 Second of three commits. Adds the Lean-side glue shim

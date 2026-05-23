@@ -672,6 +672,25 @@ static leo4_worker_slot_t leo4_persistent_slot = {0};
 static _Atomic int      leo4_recycle_initialized = 0;
 static _Atomic uint64_t leo4_recycle_calls_limit = 0;
 
+/* Self-contained u64 parser. Avoids `strtoull` because some
+ * libc/clang combinations (glibc 2.38+ under newer clang) emit a
+ * versioned `__isoc23_strtoull` reference that the older
+ * leanc-bundled sysroot can't resolve at link time. The parser
+ * accepts ASCII decimal digits only; returns 0 on empty / invalid
+ * input (the caller treats 0 as "recycling disabled"). */
+static uint64_t leo4_parse_u64_decimal(const char* s) {
+    if (!s) return 0;
+    uint64_t r = 0;
+    int saw_digit = 0;
+    while (*s >= '0' && *s <= '9') {
+        r = r * 10u + (uint64_t)(*s - '0');
+        saw_digit = 1;
+        ++s;
+    }
+    if (!saw_digit || *s != '\0') return 0;
+    return r;
+}
+
 static void leo4_recycle_init_once(void) {
     int expected = 0;
     if (!atomic_compare_exchange_strong_explicit(
@@ -684,16 +703,8 @@ static void leo4_recycle_init_once(void) {
         atomic_store_explicit(&leo4_recycle_calls_limit, 0, memory_order_release);
         return;
     }
-    /* Parse a u64. Reject negatives / non-numeric silently — fall
-     * back to "no recycling" rather than break the run. */
-    char* end = NULL;
-    unsigned long long parsed = strtoull(env, &end, 10);
-    if (end == env || (end && *end != '\0') || parsed == 0) {
-        atomic_store_explicit(&leo4_recycle_calls_limit, 0, memory_order_release);
-    } else {
-        atomic_store_explicit(&leo4_recycle_calls_limit,
-                              (uint64_t)parsed, memory_order_release);
-    }
+    uint64_t parsed = leo4_parse_u64_decimal(env);
+    atomic_store_explicit(&leo4_recycle_calls_limit, parsed, memory_order_release);
 }
 
 /* Reap + clear the persistent slot. Caller holds the

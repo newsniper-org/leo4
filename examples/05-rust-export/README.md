@@ -21,66 +21,74 @@ These together cover the v9-5 Lean-wrapper mapping table
 
 ## Build + run
 
-The fast path is `just rust-export-05-build`, which collapses
-the 4 manual steps into one command:
+After the Phase 9-6 follow-up landed the `Leo4Rust` Lake
+package (with two `extern_lib`s for the dispatcher archive +
+the leanc-compiled glue shim), the whole pipeline collapses
+to **3 steps** that `just rust-export-05-build` chains:
 
 ```sh
 just rust-export-05-build
 ```
 
-Behind the scenes that recipe (`justfile` near the bottom):
+Behind the scenes:
 
-1. Builds the Cargo artefacts —
-   `leo4-example-05-rust-export` cdylib,
-   `libleo4_rust_bridge.a` static archive,
-   `leo4-rust-worker` binary.
-2. Runs `leo4-rust-emit --emit-lean` against the cdylib,
+1. **Cargo**: builds
+   `leo4-example-05-rust-export` cdylib +
+   `libleo4_rust_bridge.a` (via `cargo build -p
+   leo4-rust-bridge`) + `leo4-rust-worker` binary.
+2. **Emit**: `leo4-rust-emit --emit-lean` against the cdylib,
    producing `<pkg>.leo4-rust-{exports.idl,handshake,imports.lean}`
-   inside `examples/05-rust-export/lean/.leo4-emit/` and moving
-   the `.lean` wrapper to
-   `lean/Leo4ExampleMiniSolverRust/Rust.lean` so Lake picks it up
-   under the `Leo4ExampleMiniSolverRust.Rust` module name.
-3. Compiles `shim/leo4_rust_bridge_lean.c` with `leanc -c -std=c2x`.
-4. `cd examples/05-rust-export/lean && lake build`.
+   inside `.leo4-emit/` and moving the `.lean` wrapper to
+   `Leo4ExampleMiniSolverRust/Rust.lean`.
+3. **Lake**: `lake build`. `require Leo4Rust from
+   "../../../lake/Leo4Rust"` in this directory's
+   `lakefile.lean` pulls in two `extern_lib`s that Lake's
+   `lean_exe` link step picks up automatically:
+   - `leo4RustBridge` resolves the cargo-built
+     `libleo4_rust_bridge.a`.
+   - `leo4RustBridgeLean` compiles
+     `shim/leo4_rust_bridge_lean.c` with `leanc -c -std=c2x`
+     and wraps it via `ar rcs`. Reruns leanc/ar only when
+     the C source changes (via `freshcheck` if logicutils
+     is installed; falls back to unconditional rebuild
+     otherwise).
 
-The `leanc -o` final link of the executable is still manual
-(Lake's `lean_exe` doesn't yet take dynamic `weakLinkArgs`
-from leo4's helpers — that's the next Lake-side integration
-step). The manual recipe is documented in the next section
-("Manual workflow") for reference; in practice you only need
-it if `just rust-export-05-build` doesn't fit.
+No manual `leanc -o` link line. The executable lands at
+`examples/05-rust-export/lean/.lake/build/bin/leo4Example05`.
 
-After `just rust-export-05-build` succeeds, link + run:
+### Run
 
 ```sh
-CDYLIB=$(realpath target/release/libleo4_example_05_rust_export.so)
-BRIDGE=$(realpath target/release/libleo4_rust_bridge.a)
-WORKER=$(realpath target/release/leo4-rust-worker)
-GLUE=$(realpath examples/05-rust-export/lean/.leo4-emit/leo4_rust_bridge_lean.o)
-
-cd examples/05-rust-export/lean
-leanc \
-  .lake/build/lib/Main.olean.o \
-  .lake/build/lib/Leo4ExampleMiniSolverRust/Rust.olean.o \
-  ../../../lake/Leo4/.lake/build/lib/Leo4.olean.o \
-  "$GLUE" "$BRIDGE" \
-  -o leo4Example05
-
-LEO4_RUST_CDYLIB="$CDYLIB" \
-LEO4_RUST_WORKER_BIN="$WORKER" \
+LEO4_RUST_CDYLIB=$(realpath target/release/libleo4_example_05_rust_export.so) \
+LEO4_RUST_WORKER_BIN=$(realpath target/release/leo4-rust-worker) \
 LEO4_RUST_HANDSHAKE_PKG=leo4_example_05_rust_export \
 LEO4_RUST_HANDSHAKE_IFACE=Leo4ExampleMiniSolverRust \
-  ./leo4Example05
+  ./examples/05-rust-export/lean/.lake/build/bin/leo4Example05
 ```
 
 To start clean: `just rust-export-05-clean`.
 
-## Manual workflow (reference)
+### Optional: logicutils for incremental skip
 
-If you need to step through each phase by hand — typically
-while debugging emit-time / link-time mismatches — the
-underlying 4-step sequence is below. Each step is also
-exposed as its own `just` recipe so you can mix and match.
+`leo4RustBridgeLean` uses `freshcheck` (from logicutils) as
+a content-hash gate around the leanc/ar invocation, so a
+`lake build` that follows an unchanged glue-shim source
+skips the recompile.
+
+- Arch / Manjaro: `pacman -S logicutils`
+- Other platforms: `cargo install --git https://github.com/newsniper-org/logicutils logicutils`
+- Or omit entirely — `freshcheck`'s absence is detected
+  via `--protocol-version` probe in a try-block, and
+  `leo4RustBridgeLean` falls through to unconditional
+  rebuild. Per-build cost is small (~tens of ms for a
+  single C TU + ar), but the fallback is what ships if
+  the binary isn't on PATH.
+
+## Manual workflow (reference, debugging only)
+
+If `just rust-export-05-build` fails opaquely and you want
+to step through each phase by hand, the underlying calls are
+roughly:
 
 ```sh
 # 1. Build the user cdylib + the leo4-rust-bridge static archive.
