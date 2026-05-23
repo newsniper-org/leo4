@@ -40,6 +40,16 @@ oxilean-codegen = "=0.1.2"
 # bypasses OxiLean's evaluator entirely. The generated crate
 # has zero OxiLean runtime dep at consumer build time.
 
+# CLI binary (`leo4-oxilean-build`) — OX1 auto-invocation
+# surface. lake plugin / leo4-rust-emit / user's build.rs can
+# invoke it as a subprocess; it reads a JSON manifest from
+# stdin or `--manifest <path>`, runs the transpile pipeline
+# over every source listed, and writes the emitted crate to
+# `--out-dir`.
+[[bin]]
+name = "leo4-oxilean-build"
+path = "src/bin/leo4-oxilean-build.rs"
+
 [lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
 

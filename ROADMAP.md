@@ -679,21 +679,36 @@ all wait for the v1.0 RC window or later.
 - **G2** Publish to crates.io. API surface stabilises
   through Phase 10 first.
 - **OX1** `leo4-oxilean-build` invocation wiring (locked
-  2026-05-22). Either `leo4-rust-emit` or the lake plugin
-  must invoke `leo4-oxilean-build` automatically during a
-  user-package build when `--impl rust-transpile` (or the
-  equivalent marker) is selected. The wiring should:
+  2026-05-22; step a landed 2026-05-22).
+
+  **Step a (DONE 2026-05-22)** — `leo4-oxilean-build` CLI
+  binary exists at `sibling/leo4-oxilean-build/src/bin/`.
+  Reads a line-oriented manifest from `--manifest <path>`
+  or stdin, walks every `source=<lean> <mangled>` line,
+  drives `transpile_source_to_unit` (new lib fn — superset
+  of `transpile_source_if_exported` that assembles a
+  `TranspileUnit` including the wrapper source), then
+  `emit_crate` + `write_to_dir`. Exit codes 0/1/2 follow
+  the standard success / transpile-failure / usage-error
+  pattern. 6 integration tests in `tests/cli_smoke.rs`
+  exercise help / missing-arg / skip-path / stdin-input /
+  bogus-field / transpile-error.
+
+  **Step b (pending v1.0 RC)** — Either `leo4-rust-emit`
+  (workspace member) OR the lake plugin (Lean side) must
+  auto-invoke the CLI when a user package builds with
+  `--impl rust-transpile`. The orchestration:
   1. Walk the user package's `.lean` sources for
-     `@[leo4_export]` decls (Hook-3 layer already in place).
-  2. Drive `transpile_source_if_exported` →
-     `synthesize_canonical_wrapper` →
-     `emit_crate` → `write_to_dir`.
-  3. Land the generated Cargo crate where the consumer's
+     `@[leo4_export]` decls.
+  2. Compute the mangled name per `SPEC/mangling.md` §3
+     for each export.
+  3. Build the manifest + spawn the CLI subprocess.
+  4. Land the generated Cargo crate where the consumer's
      `build.rs` (via `leo4_build::wire`) can `path`-dep it.
-  4. Cross the sibling/main-workspace boundary cleanly —
-     leo4-oxilean-build stays a standalone Cargo workspace,
-     so the wiring goes via subprocess or registry dep, not
-     a path-dep across workspaces.
+
+  Crossing the sibling/main-workspace boundary is handled
+  by subprocess (the CLI is the abstraction barrier), not
+  path-deps across workspaces.
 - **OX2** Marshallable matrix expansion (locked 2026-05-22,
   carrier-types layer landed 2026-05-22).
   Built-ins now covered by `synthesize_canonical_wrapper`:

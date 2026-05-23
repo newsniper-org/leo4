@@ -7,6 +7,72 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX1 step a — `leo4-oxilean-build` CLI binary (2026-05-22)
+
+v1.0 RC blocker OX1 (step a — subprocess invocation
+surface). New CLI binary at
+`sibling/leo4-oxilean-build/src/bin/leo4-oxilean-build.rs`
+that lake plugin / leo4-rust-emit / a user's `build.rs` can
+spawn to drive the transpile pipeline without linking
+leo4-oxilean-build into their own crate.
+
+Manifest format (line-oriented `key=value`, no JSON dep):
+
+```text
+crate_name=my_pkg
+schema_hash=0123456789abc
+leo4_abi_dep={ path = "../leo4-abi" }
+out_dir=/tmp/transpiled
+source=lean/Foo.lean abc12345_a
+source=lean/Bar.lean def67890_a
+```
+
+`#` and blank lines ignored; multiple `source=` lines
+accumulate. Each source line is `<lean_path> <mangled>` —
+the caller (lake plugin / leo4-rust-emit) precomputes the
+mangled name per `SPEC/mangling.md` §3.
+
+Invocation:
+
+```text
+leo4-oxilean-build --manifest <path>
+leo4-oxilean-build --manifest -            # stdin
+leo4-oxilean-build --help
+```
+
+Exit codes: `0` = success (crate emitted), `1` = transpile
+failure (no crate emitted, errors on stderr), `2` = usage
+or IO error.
+
+New supporting lib API:
+
+- `transpile_source_to_unit(env, registry, src, mangled)
+  -> Result<Option<TranspileUnit>, LeanError>` — superset
+  of `transpile_source_if_exported` that bundles the
+  transpiled fn source + the §5 wrapper source + the
+  mangled-name dispatch key into a single `TranspileUnit`
+  ready for `emit_crate`. The CLI drives this one file at
+  a time; library callers can use it directly without
+  going through CLI args.
+
+Tests 44 → 46 (+2 lib) + 6 new CLI integration tests in
+`tests/cli_smoke.rs`:
+  + `cli_help_exits_success`
+  + `cli_missing_manifest_arg_exits_usage_error`
+  + `cli_skip_path_emits_dispatcher_only`
+  + `cli_reads_manifest_from_stdin`
+  + `cli_rejects_bogus_manifest_field`
+  + `cli_reports_transpile_error_with_nonzero_exit`
+
+Integration tests use `env!("CARGO_BIN_EXE_leo4-oxilean-build")`
++ `CARGO_TARGET_TMPDIR` for hermetic subprocess invocation
+with auto-cleaned scratch dirs.
+
+clippy --all-targets -D warnings clean. Workspace unaffected
+(sibling crate). **OX1 step b** (lake plugin / leo4-rust-emit
+auto-invocation) tracked in ROADMAP as the remaining v1.0 RC
+piece for the wiring.
+
 ### Added — `leo4-oxilean-build`: OX2 — carrier types + generics in wrapper marshalling matrix (2026-05-22)
 
 v1.0 RC blocker OX2 (carrier-types layer). The §5 wrapper

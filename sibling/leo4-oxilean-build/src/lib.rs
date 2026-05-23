@@ -655,6 +655,102 @@ pub fn transpile_source_if_exported(
     transpile_kernel_decl(&name, &params, &body).map(Some)
 }
 
+/// Superset of `transpile_source_if_exported` that also runs
+/// `synthesize_canonical_wrapper` against the same `RustFn`
+/// and bundles the result into a `TranspileUnit` ready for
+/// `emit_crate`. The `mangled` argument is the leo4 mangled
+/// name the caller has computed for this export (per
+/// `SPEC/mangling.md`); it ends up as the dispatch-table key
+/// in the emitted `LeanProc` impl.
+///
+/// Returns `Ok(None)` if the source isn't tagged with
+/// `@[leo4_export]`, matching `transpile_source_if_exported`'s
+/// skip semantics.
+///
+/// This is the entry the OX1 CLI binary drives one file at a
+/// time; library callers can use it directly without going
+/// through CLI args.
+///
+/// # Errors
+/// `LeanError` for any failure in the underlying parse / elab
+/// / LCNF / Rust-emit / wrapper-synthesis pipeline. Wrapper
+/// synthesis can fail for types not covered by
+/// `render_marshallable_type` (see OX2).
+pub fn transpile_source_to_unit(
+    env: &Environment,
+    registry: &mut Leo4ExportRegistry,
+    src: &str,
+    mangled: &str,
+) -> Result<Option<TranspileUnit>, LeanError> {
+    let normalised = lean4_normalize(src);
+
+    let mut lexer = Lexer::new(&normalised);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::new(tokens);
+    let parsed = parser.parse_decl().map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
+        )
+    })?;
+
+    if !decl_has_leo4_export(&parsed) {
+        return Ok(None);
+    }
+
+    if let Some(name) = decl_name(&parsed) {
+        registry.record_export(name);
+    }
+
+    let pending = elaborate_decl(env, &inner_decl(&parsed).value).map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!("leo4-oxilean-build: elaborate_decl failed: {e:?}"),
+        )
+    })?;
+
+    let (name, ty, val) = match pending {
+        PendingDecl::Definition { name, ty, val, .. } => (name, ty, val),
+        other => {
+            return Err(LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                format!(
+                    "leo4-oxilean-build: only `def` declarations are \
+                     transpilable today; got {other:?}"
+                ),
+            ));
+        }
+    };
+
+    let (params, body) = unfold_decl(&ty, &val);
+
+    let config = ToLcnfConfig::default();
+    let lcnf_decl: LcnfFunDecl =
+        decl_to_lcnf(&name, &params, &body, &config).map_err(|e| {
+            LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                format!("leo4-oxilean-build: decl_to_lcnf failed: {e:?}"),
+            )
+        })?;
+    let mut backend = RustTargetBackend::new();
+    let rust_fn = backend.compile_decl(&lcnf_decl).map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            format!("leo4-oxilean-build: compile_decl failed: {e:?}"),
+        )
+    })?;
+
+    let fn_src = rust_fn.emit();
+    let wrapper_src = synthesize_canonical_wrapper(&rust_fn)?;
+    let fn_name = rust_fn.name.clone();
+    Ok(Some(TranspileUnit {
+        fn_src,
+        wrapper_src,
+        fn_name,
+        mangled: mangled.to_string(),
+    }))
+}
+
 // ─── §5 Canonical-ABI wrapper synthesis ──────────────────────────────────
 //
 // SPEC/rust-native-lean.md §3: a `LeanProc` impl resolves
@@ -1840,6 +1936,49 @@ mod tests {
                     e.message.contains("LeanMarshal"),
                     "unexpected wrapper error: {}",
                     e.message
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn transpile_source_to_unit_skips_untagged() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "def g : Nat -> Nat := fun n -> n";
+        let out = transpile_source_to_unit(&env, &mut registry, src, "abc_a")
+            .expect("parse path succeeds");
+        assert!(out.is_none(), "untagged decl must yield Ok(None)");
+        assert!(registry.exported_names().is_empty());
+    }
+
+    #[test]
+    fn transpile_source_to_unit_assembles_unit_when_tagged() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "@[leo4_export] def f : Nat -> Nat := fun n -> n";
+
+        let result = transpile_source_to_unit(&env, &mut registry, src, "deadbeef_a");
+        // Tag must always be captured pre-elab.
+        let exported = registry.exported_names();
+        assert_eq!(exported.len(), 1);
+
+        // Same Ok/Err parity rule as transpile_source — empty
+        // env can either succeed or fail elab gracefully.
+        match result {
+            Ok(Some(unit)) => {
+                assert_eq!(unit.mangled, "deadbeef_a");
+                assert!(unit.fn_src.contains("pub fn"));
+                // Wrapper references the fn name + decode flow.
+                assert!(unit.wrapper_src.contains(&format!("{}_call", unit.fn_name)));
+            }
+            Ok(None) => panic!("tagged decl must NOT yield Ok(None)"),
+            Err(e) => {
+                let code = e.code;
+                eprintln!("transpile_source_to_unit → err 0x{code:08x}: {}", e.message);
+                assert!(
+                    code == leo4_abi::error::error_codes::DECODE_ERROR
+                        || code == leo4_abi::error::error_codes::ENCODE_ERROR,
                 );
             }
         }
