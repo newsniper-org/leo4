@@ -253,6 +253,129 @@ The adapter crate would live at e.g.
 on both `oxilean-runtime` and `leo4-abi` (path-deps or
 crates.io once leo4 publishes). leo4 itself doesn't change.
 
+### 7.1 OxiLean FFI deep-dive (2026-05-21)
+
+OxiLean ships a complete FFI infrastructure split across two
+layers, both already in v0.1.2:
+
+**Kernel layer** (`crates/oxilean-kernel/src/ffi/`) — the
+semantic model:
+
+```rust
+// FFI-compatible types. Matches leo4's IDL primitives 1-to-1.
+pub enum FfiType {
+    Bool,
+    UInt8, UInt16, UInt32, UInt64,
+    Int8,  Int16,  Int32,  Int64,
+    Float32, Float64,
+    String,         // null-terminated in C
+    ByteArray,      // ← canonical-ABI bytes go here
+    Unit,
+    Ptr(Box<FfiType>),
+    Fn(Vec<FfiType>, Box<FfiType>),   // ← first-class function pointer!
+    OxiLean(String),                  // opaque (≈ leo4 LeanResource)
+}
+
+// Runtime values that cross the boundary.
+pub enum FfiValue {
+    Bool(bool), UInt(u64), Int(i64), Float(f64),
+    Str(String), Bytes(Vec<u8>),     // ← canonical-ABI bytes payload
+    Unit,
+}
+
+// ExternDecl + ExternRegistry: where host functions live.
+pub struct ExternDecl {
+    name: Name,                       // Lean-side fn name
+    lean_type: Expr,                  // Lean-level type
+    lib_name: String,                 // e.g. "libc" or "leo4-rust-bridge"
+    symbol_name: String,              // C symbol (the mangled name)
+    safety: FfiSafety,                // Safe / Unsafe / System
+    calling_convention: CallingConvention, // Rust / C / System
+    signature: FfiSignature,          // params + return
+}
+
+pub struct ExternRegistry { /* HashMap<Name, ExternDecl> + lookup */ }
+
+// FfiValue ↔ Expr conversion (both directions exposed).
+impl FfiValue {
+    pub fn try_from_expr(expr: &Expr, ty: &FfiType) -> Result<Self, FfiError>;
+    pub fn to_expr(&self) -> Expr;
+}
+```
+
+**Codegen layer** (`crates/oxilean-codegen/src/ffi_bridge/`)
+— the mechanical wiring. Notably, `marshal_type(lcnf_ty)`
+emits C calls against **the reference Lean C ABI**:
+
+```rust
+pub fn marshal_type(lcnf_ty: &LcnfType) -> FfiMarshalInfo {
+    match lcnf_ty {
+        LcnfType::Nat => FfiMarshalInfo::with_conversion(
+            FfiNativeType::U64,
+            "lean_unbox(${arg})",
+            "lean_box(${result})",
+        ),
+        LcnfType::LcnfString => FfiMarshalInfo {
+            native_type: FfiNativeType::CStr,
+            to_native: "lean_string_cstr(${arg})".to_string(),
+            from_native: "lean_mk_string(${result})".to_string(),
+            …
+        },
+        LcnfType::Object => FfiMarshalInfo::trivial(FfiNativeType::LeanObject),
+        …
+    }
+}
+```
+
+i.e. OxiLean's *generated code* speaks `lean_box`,
+`lean_unbox`, `lean_string_cstr`, `lean_mk_string`,
+`lean_object*` — the same surface
+`SPEC/lean-runtime-compat.md` §1.2 lists. This means
+OxiLean's compile output is on a path to be link-compatible
+with leo4's existing forward-direction shim if
+`oxilean-runtime` exposes those symbols (currently unclear
+from public docs; verifying this is a key open question for
+the adapter author).
+
+**Implications for the leo4-rust-native trait surface**:
+
+| `LeanProc` / `LeanProcInvoker` need | OxiLean provides | Adapter work |
+|---|---|---|
+| `LeanProc::call(mangled, args: &[u8])` returning `Vec<u8>` | `ExternRegistry::lookup(mangled)` + invocation via `FfiValue::Bytes(args.to_vec())` | thin wrapper |
+| `LeanProc::schema_hash()` | Plugin scans `@[leo4_export]`s via OxiLean's attribute API; reuses leo4's `schema-idl` to compute the hash | the existing leo4 plugin's algorithm transferable |
+| `LeanProcInvoker::invoke(mangled, args)` | Register an `ExternDecl { name: …, lib_name: "leo4-rust-bridge", symbol_name: mangled, calling_convention: C, signature: FfiSignature{params: [Bytes], ret: Bytes} }` in OxiLean's `ExternRegistry`; the impl pointer is a closure that calls the leo4 dispatcher | one-time bulk registration of all `#[leo4::export]`s at adapter startup |
+| Phase 10-B1 callback ABI (function-arrow ABI) | OxiLean already has `FfiType::Fn(Vec<FfiType>, Box<FfiType>)` — first-class function pointers | leo4-rust-native's callback path is trivial: thread a Rust closure through `FfiValue::Fn`-equivalent |
+
+**Surprising finding — `Fn(params, ret)` is first-class in
+OxiLean's FFI from day one**. leo4-rust-native's callback
+ABI is essentially free with OxiLean as the impl, in
+contrast to native (B1.x re-entrant IPC frames) or wasm (WIT
+host-imports). This makes OxiLean potentially the
+*lowest-friction* integration point for the adsmt SMT-solver
+use case once a `leo4-oxilean` adapter exists.
+
+**Open questions** an adapter author still needs to settle:
+
+1. **Does `oxilean-runtime` link-expose `lean_box` /
+   `lean_unbox` / `lean_string_cstr` / `lean_mk_string` /
+   `lean_object*` / `lean_alloc_ctor` as its public C
+   surface?** `marshal_type` emits string templates against
+   these names, but whether `oxilean-runtime` provides their
+   actual implementations or expects to call out to
+   `libleanshared` for them is unclear. If the former,
+   `SPEC/lean-runtime-compat.md` §1.2 is *also* satisfied
+   and the leo4-mslean4 path can run unchanged against
+   OxiLean. If the latter, leo4-rust-native is the only
+   working path.
+2. **Does `oxilean-cli` / `oxilean-build` accept Lake-shaped
+   project layouts?** If yes, leo4's existing Lake plugin
+   can also drive OxiLean. If no, the adapter writes a
+   bridge.
+3. **Is the `lean4_compat/` layer mature enough to accept
+   the `lake/Leo4/` runtime library as-is?** Single best
+   litmus test for an adapter is "can OxiLean elaborate
+   `lake/Leo4/Leo4/Export.lean` without modification?"
+
 ## 8. Activation plan (not committed)
 
 This SPEC defines the contract but doesn't commit leo4 to any

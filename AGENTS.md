@@ -496,6 +496,39 @@ would be expensive to relitigate:
   source files. The two-axis surface satisfiability matrix
   lives in `SPEC/lean-runtime-compat.md` §2.
 
+  **FFI-deep-dive findings (2026-05-21)** — most
+  significant of the OxiLean investigations:
+  `crates/oxilean-kernel/src/ffi/` exposes a complete
+  `FfiType` / `FfiValue` / `ExternDecl` / `ExternRegistry`
+  model that matches leo4's `LeanProc` / `LeanProcInvoker`
+  trait surface (`SPEC/rust-native-lean.md`) almost
+  1-to-1:
+  * `FfiType` includes every primitive leo4 IDL has
+    (u8..u64, i8..i64, f32, f64, bool, String, ByteArray,
+    Unit, Ptr, **`Fn(params, ret)` first-class**, OxiLean
+    opaque ≈ `LeanResource`).
+  * `FfiValue::Bytes(Vec<u8>)` is the natural carrier for
+    leo4 canonical-ABI payloads.
+  * `ExternRegistry` is the mechanism a `leo4-oxilean`
+    adapter uses to register the `LeanProcInvoker::invoke`
+    callback for the reverse direction.
+  * `crates/oxilean-codegen/src/ffi_bridge/`'s `marshal_type`
+    emits `lean_box`/`lean_unbox`/`lean_string_cstr`/
+    `lean_mk_string`/`lean_object*` — *the same C ABI
+    symbols `SPEC/lean-runtime-compat.md` §1.2 requires.*
+    Whether `oxilean-runtime` actually link-exposes these
+    symbols (vs. delegating to `libleanshared`) is the
+    biggest open question for an adapter author —
+    answering it determines whether leo4-mslean4 can run
+    against OxiLean OR only leo4-rust-native can.
+  * `FfiType::Fn(…)` being first-class means the Phase
+    10-B1 callback ABI is **essentially free with OxiLean
+    as the impl** (no LECQ/LECR-equivalent re-entry
+    protocol needed — just a Rust closure threaded through
+    OxiLean's FFI). That's a big architectural win for the
+    adsmt flagship use case.
+  Full deep-dive table in `SPEC/rust-native-lean.md` §7.1.
+
   If 병익 (or any other contributor) ever proposes
   "support implementation X", redirect them to
   `SPEC/lean-runtime-compat.md` — that's the checklist that
