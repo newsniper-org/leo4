@@ -310,7 +310,117 @@ each feature comes from helps when reading commit messages.
         `LeanI128`, `LeanComplexF{32,64}x2`, `LeanF16` /
         `LeanBF16` / `LeanF128` (nightly), Mathlib bridges
         with IEEE-754 RTNE rounding.],
+  [9], [Reverse direction (Rust → Lean). `#[leo4::export]` on
+        Rust ↔ generated Lean wrapper that calls into a Rust
+        cdylib through a worker-process dispatcher
+        (`libleo4_rust_bridge.a` + `leo4-rust-worker`).
+        Isolation-backend-neutral; default mode is one
+        long-running worker per cdylib, opt-in fresh-worker
+        per call via `#[leo4::export(isolated)]`. Lake
+        `extern_lib` integration auto-links the bridge +
+        glue archives. See `SPEC/reverse-direction.md`.],
+  [10], [DX + ABI surface widening: `leo4 run` CLI orchestrates
+         build + emit + execute; function-arrow IDL type
+         (`fn(T1,…,Tn) -> R`) with `A_…_a` mangling for
+         the callback ABI; reserved `LeanError` codes
+         0x02–0x08 now have real triggers; `lake run
+         Leo4Rust/regenerate` script abstracts the
+         reverse-direction emit step;
+         `LEO4_RUST_WORKER_RECYCLE_SECONDS` time-based
+         recycle + `leo4_rust_bridge_take_restart_flag`
+         side-channel; variant payload widening
+         (all-scalars multi-field); `leo4-wasm` scaffold.],
 )
+
+= Phase 9 in detail --- the reverse direction
+
+leo4's first pipeline (forward direction) is Rust calling
+Lean: `@[leo4_export]` on Lean, `leo4::import!` on Rust,
+shim ↔ `lean.h` glue produced by the Lake plugin. Phase 9
+adds the *second* pipeline going the other way.
+
+== Why a second pipeline
+
+The forward direction's mental model is "Rust embeds Lean":
+the Lean side ships the entry points, the Rust side links
+against them. That fits use cases where Lean is the
+correctness-providing core and Rust is the runtime embedder.
+
+The Phase 9 driver is the *inverse* use case: a Rust-side
+solver (z3, cvc5, a research SMT prototype) that Lean's
+proof tooling wants to drive interactively with
+`push`/`pop`-style state preserved across calls. The
+architecture is genuinely different --- schema_hash travels
+in a JSON file (not baked into mangled symbols), the
+dispatch goes through a worker process (not `libloading`),
+and the C shim that touches `lean.h` sits on the Lean
+caller's side (not the Rust callee's).
+
+== Architecture summary
+
+```
+Lean process
+  │
+  ├── libleo4_rust_bridge.a    (statically linked dispatcher,
+  │     │                       single C TU, C17 / C2x)
+  │     ▼  posix_spawn / CreateProcess on first call
+  │   leo4-rust-worker          (one per cdylib; long-running;
+  │     │                       loads the user cdylib via dlopen)
+  │     ▼  dlsym(leo4_rust__<mangled>) cached
+  │   user cdylib               (#[leo4::export] functions)
+```
+
+The dispatcher is *isolation-backend-neutral*: a single C
+entry point `leo4_rust_call(mangled, args, ret)` lets the
+backend swap (long-running ↔ zygote-fork ↔ wasm sandbox)
+without the Lean wrapper or the Rust macro noticing.
+
+== Mangling delta
+
+Forward direction mangles `…__h<hash>` so the linker
+catches schema_hash mismatches at load time. Reverse
+direction *cannot* do that --- the Rust proc-macro runs at
+crate-compile time and has no access to the schema_hash
+(which is only computable after the *complete* cdylib's
+exports are known). Phase 9 puts the schema_hash in the
+handshake JSON file emitted by `leo4-rust-emit` and checks
+it at runtime via the worker's first frame.
+
+== Wire-level handshake
+
+The worker emits a 25-byte handshake immediately on spawn:
+`u32 magic` + `u32 hash_len (13)` + `u32 abi_version` +
+`13-byte schema_hash`. The dispatcher MUST consume this
+before any request goes out --- skipping it causes the
+handshake bytes to pile up in the IPC buffer and the
+dispatcher decodes them as a response header. (Watch for
+"garbage status values" if you see this.)
+
+== `#[leo4::export(isolated)]`
+
+The default mode is one long-running worker --- fast, but
+not memory-isolated against accumulating state. For
+security-sensitive workloads, add `(isolated)` to the
+attribute. The macro prepends an `iso:` prefix to the
+mangled name; the dispatcher detects it and routes through
+a per-call fresh-worker path (spawn → call → `_exit`). No
+wire-format or API change.
+
+== Phase 10 follow-ups already landed (2026-05-21)
+
+The Phase 9 surface has been smoothed out:
+
+- `leo4 run` (D1) collapses the cargo + emit + lake-build
+  + run ladder into one command.
+- `lake run Leo4Rust/regenerate` (D2) puts emit behind a
+  Lake script so the toolchain is abstracted.
+- Function-arrow IDL (`fn(T1,…,Tn) -> R`) with mangling
+  rule (`A_<tuple>_<ret>_a`) and re-entrant callback frame
+  protocol designed (B1; runtime in B1.x).
+- `LEO4_RUST_WORKER_RECYCLE_SECONDS` time-based recycle
+  alongside the existing `_CALLS` knob;
+  `leo4_rust_bridge_take_restart_flag` side-channel for
+  observing `LEO4_ERR_RUST_WORKER_RESTARTED` (A4 / A5).
 
 = Closing notes
 

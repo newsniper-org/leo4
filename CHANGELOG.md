@@ -7,6 +7,70 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-Docs (E1+E2+E3): Phase 9 chapters + reverse-byte-parity skeleton + SPEC quickstart (2026-05-21)
+
+A combined docs sweep covering three follow-ups that
+accompanied the Phase 10 ABI work:
+
+**E1 — Typst books: Phase 9 chapter**
+
+- `docs/learning/en/main.typ`: new "Phase 9 in detail —
+  the reverse direction" section. Includes architecture
+  diagram, mangling delta, handshake invariant, `iso:`
+  prefix design, and the Phase 10 follow-ups already
+  landed (D1 / D2 / B1 / A4 / A5). Phase ladder table
+  extended with rows 9 + 10.
+- `docs/implement-from-scratch/en/main.typ`: new "Part XI
+  — Reverse direction (Rust → Lean)" with sections on
+  the `#[leo4::export]` proc-macro, emit CLI, worker
+  harness, dispatcher, glue shim, Lake `extern_lib`
+  integration, sanity check via `examples/05`.
+
+Korean / Japanese / German translations of both new
+chapters land as part of task #62 (the in-progress
+four-language book translation effort) — not this
+commit. The English source is the canonical reference.
+
+**E2 — Reverse-direction byte-parity conformance**
+
+`tests/conformance/reverse/README.md` lays out the
+intended contract for a worker-frame byte-parity
+harness. The runnable harness (`run.sh` + per-fixture
+binary frames) is deferred to E2.x because it needs a
+fixture-recorder mode on the worker; the README
+documents exactly what that mode needs to do.
+
+The canonical-ABI byte parity itself is already covered
+by the forward harness (`tests/conformance/run.sh`) since
+both pipelines reuse the same `leo4-abi` encoders /
+decoders — what E2.x will add is the wire-envelope
+parity (handshake frame, request/response frames) that's
+unique to the reverse direction.
+
+**E3 — User-facing SPEC quickstart**
+
+New `SPEC/reverse-direction-quickstart.md` — a 60-second
+tour for new users, distinct from the normative
+`SPEC/reverse-direction.md`. Covers:
+
+- The minimum-effort flow (`leo4 create reverse … && leo4 run`).
+- What `leo4 run` actually does step-by-step.
+- Supported wire types today + what's not yet supported
+  (function-arrow params per B1, async exports, cross-
+  process resource handles).
+- The two isolation modes (default long-running vs.
+  `#[leo4::export(isolated)]`).
+- Recycle policies (`LEO4_RUST_WORKER_RECYCLE_CALLS` +
+  `_SECONDS`) with the restart-flag side-channel.
+- Common pitfalls (garbage status values, handshake
+  mismatch, cdylib not found).
+- Pointer to `adsmt` for the flagship demo + to
+  `examples/05-rust-export/` for the in-repo smoke.
+
+`SPEC/reverse-direction.md` gains a top-of-file pointer
+to the quickstart so readers can choose the right
+entry point.
+
 ### Added — Phase 10-C4: leo4-wasm scaffolding (2026-05-21)
 
 Promotes `crates/leo4-wasm` from an empty placeholder (the

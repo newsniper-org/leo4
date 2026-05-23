@@ -1111,13 +1111,120 @@ That's what `Float.div` and the host FPU implement, so the
 abstract-Real reverse path stays consistent with the
 round-trip that native code already performs.
 
+= Part XI --- Reverse direction (Rust → Lean)
+
+Phase 9 (2026-05-21). leo4's *second* pipeline. Where Parts
+I--X build Rust calling Lean, this part builds the inverse:
+Lean calling Rust. The build orchestration is mirror-image
+(cargo first, then Lake) and the schema_hash discipline is
+different (handshake JSON, not mangled-name suffix). The
+canonical-ABI wire format is reused unchanged.
+
+== Macro surface (`#[leo4::export]`)
+
+`crates/leo4-macros/src/lib.rs` gains a second proc-macro
+attribute. Apply to any function:
+
+```rust
+#[leo4::export]
+pub fn next_prime(n: u64) -> u64 { … }
+```
+
+The macro emits:
+
+1. A per-fn wrapper `leo4_rust__<body>` with the
+   canonical-ABI decode → call → encode pattern.
+2. A `linkme::distributed_slice` entry that registers the
+   fn's mangled body name + a function pointer to the
+   wrapper.
+
+`linkme::distributed_slice` collects every entry into a
+single static array (`EXPORTS`) at link time. The dispatcher
+walks that slice via a `dlsym`'d describer fn
+(`leo4_rust_describe_exports`) to enumerate exports without
+knowing them at compile time.
+
+== Emit CLI (`crates/leo4-rust-emit`)
+
+After `cargo build --release -p <user_pkg>` produces a
+cdylib, the emit CLI does what the Lake plugin does for the
+forward direction --- recomputes the schema_hash, writes
+the handshake, and emits a typed Lean wrapper:
+
+```
+$ leo4-rust-emit --cdylib lib<pkg>.so --emit-lean \
+                 --lean-module MyApp.Rust \
+                 --out-dir lean/.leo4-emit
+```
+
+Output files:
+
+- `<pkg>.leo4-rust-exports.idl` --- canonical IDL.
+- `<pkg>.leo4-rust-handshake` --- JSON with schema_hash,
+  abi_version, exports list.
+- `<pkg>.leo4-rust-imports.lean` --- typed Lean wrappers.
+
+== Worker harness (`crates/leo4-rust-worker`)
+
+A small Rust binary that `dlopen`s the cdylib, recomputes
+the schema_hash, sends a 25-byte handshake, then runs a
+serial request loop. `LEO4_RUST_HANDSHAKE_PKG` /
+`_IFACE` env vars must match what `leo4-rust-emit` used or
+the recomputed hash drifts and the wrapper rejects.
+
+== Dispatcher (`shim/leo4_rust_bridge.c`)
+
+A single C TU. C17 baseline, opportunistic C23 upgrade.
+`leo4_worker_ops_t` abstracts spawn / kill / reap / send /
+recv; backends are stub, POSIX (`posix_spawn` +
+`socketpair`), Windows-gnullvm (`CreateProcessA` + named
+pipe). `leo4_consume_handshake` *MUST* run immediately
+after spawn, before any request frame goes out.
+`leo4_dispatch_isolated` is the per-call fresh-worker path
+that the `iso:` prefix on a mangled name triggers.
+
+== Lean-side glue shim (`shim/leo4_rust_bridge_lean.c`)
+
+The *only* leo4 C file that includes `<lean/lean.h>`.
+Returns an `IO ByteArray` whose first 4 bytes carry a LE
+`u32` status and whose remaining bytes carry the
+canonical-ABI payload --- avoids the Prod inline-scalar
+ABI mismatch that `UInt32 × ByteArray` would create.
+
+== Lake `extern_lib` integration (`lake/Leo4Rust/`)
+
+A separate Lake package that exposes two `extern_lib`s:
+`leo4RustBridge` (cargo-built `libleo4_rust_bridge.a`) and
+`leo4RustBridgeLean` (leanc-compiled glue shim, ar-wrapped).
+User lakefiles `require Leo4Rust` and Lake's `lean_exe`
+link step picks both archives up automatically.
+
+== Sanity check
+
+`examples/05-rust-export` exercises every path. After
+`just rust-export-05-build` (or `leo4 run` from inside
+`examples/05-rust-export/`), the executable prints
+prime-related values. If you see "garbage" status values
+the dispatcher missed the handshake consume.
+
+== Phase 10 follow-ups
+
+The Phase 9 surface has been smoothed by the Phase 10
+substeps that already landed (2026-05-21): `leo4 run` CLI
+(D1), `lake run Leo4Rust/regenerate` script (D2),
+function-arrow IDL type (B1; runtime in B1.x), reserved
+`LeanError` codes 0x02--0x08 with real triggers (F1),
+`LEO4_RUST_WORKER_RECYCLE_SECONDS` + restart-flag side-
+channel (A4 / A5), variant payload widening (B5).
+
 == Closing
 
-You now have an end-to-end leo4 implementation. The next steps
-are stretch goals: WIT lowering refinements, additional
-Mathlib bridges, the `wasm32-wasip3` native target when it
-stabilises, and the schema-idl `ConstraintExpr<Atom>` typed
-AST when a consumer needs it.
+You now have an end-to-end leo4 implementation, including
+the reverse direction. The next steps are stretch goals:
+WIT lowering refinements, additional Mathlib bridges, the
+`wasm32-wasip3` native target when it stabilises, and the
+schema-idl `ConstraintExpr<Atom>` typed AST when a consumer
+needs it.
 
 The complete reference implementation is at
 `github.com/Honey-Be/leo4`. Compare your build against it as

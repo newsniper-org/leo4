@@ -16,6 +16,11 @@ The forward direction (`@[leo4_export]` on the Lean side, called
 from Rust via `leo4::import!`) is unaffected; this SPEC adds a
 second, **independent** pipeline.
 
+> **User-facing quickstart:**
+> `SPEC/reverse-direction-quickstart.md` — the 60-second tour,
+> common pitfalls, isolation modes. This document is the
+> normative reference; the quickstart is the introduction.
+
 ## 0. Scope
 
 In-scope (v0, Phase 9 entry):
