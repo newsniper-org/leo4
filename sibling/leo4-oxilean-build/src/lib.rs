@@ -1190,6 +1190,59 @@ pub fn transpile_kernel_decl_with_wrapper(
     Ok((fn_src, wrapper_src))
 }
 
+// ─── OX2: Rust keyword escaping for emitted identifiers ────────────────
+
+/// Strict Rust 2024 keywords that can be raw-escaped (`r#name`)
+/// to use as identifiers.
+const STRICT_KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "do", "dyn",
+    "else", "enum", "extern", "fn", "for", "gen", "if", "impl", "in",
+    "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+    "static", "struct", "trait", "try", "type", "unsafe", "use", "where",
+    "while",
+];
+
+/// Keywords that cannot be raw-escaped (Rust reference: raw
+/// idents can be any keyword *except* these). These get a
+/// trailing-underscore mangling instead.
+const RAW_INELIGIBLE: &[&str] = &[
+    "self", "Self", "super", "crate", "true", "false", "_",
+];
+
+/// Reserved-for-future-use identifiers — Rust forbids them as
+/// idents but allows raw-escape.
+const RESERVED_KEYWORDS: &[&str] = &[
+    "abstract", "become", "box", "final", "macro", "override", "priv",
+    "typeof", "unsized", "virtual", "yield",
+];
+
+/// Map a Lean identifier (field name, param name, ctor name)
+/// into a Rust-legal identifier for emit:
+///
+/// - Raw-ineligible (`self`, `Self`, `super`, `crate`, `true`,
+///   `false`, `_`) → trailing `_` suffix.
+/// - Strict / reserved keywords → `r#<name>` prefix.
+/// - Anything else → pass through unchanged.
+///
+/// Returned name is suitable for both:
+/// - Struct field name on the LHS of `pub <name>: T,`
+/// - Local binding name in fn body (`let (<name>, __next) = …`)
+/// - Field access on the RHS (`self.<name>`)
+///
+/// Note this transforms *only* the syntactic surface; the
+/// canonical-ABI wire form is unchanged (encoder / decoder
+/// visit fields in declaration order regardless of name).
+#[must_use]
+pub fn escape_rust_ident(name: &str) -> String {
+    if RAW_INELIGIBLE.contains(&name) {
+        format!("{name}_")
+    } else if STRICT_KEYWORDS.contains(&name) || RESERVED_KEYWORDS.contains(&name) {
+        format!("r#{name}")
+    } else {
+        name.to_string()
+    }
+}
+
 // ─── OX2: SurfaceExpr type lifter + user-type aware marshalling ────────
 
 /// Primitive Lean type names → matching `RustType`. Recognises
@@ -1479,11 +1532,14 @@ pub fn synthesize_struct_type_with_users(
         return Ok(s);
     }
 
-    // Pre-validate every field type; bail before emitting
-    // anything so a partial struct never lands.
+    // Pre-validate every field type AND escape every field
+    // name; bail before emitting anything so a partial struct
+    // never lands.
     let mut rendered_tys: Vec<String> = Vec::with_capacity(fields.len());
+    let mut esc_names: Vec<String> = Vec::with_capacity(fields.len());
     for f in fields {
         rendered_tys.push(render_marshallable_type_with_users(&f.ty, user_types)?);
+        esc_names.push(escape_rust_ident(&f.name));
     }
 
     let mut s = String::new();
@@ -1491,8 +1547,8 @@ pub fn synthesize_struct_type_with_users(
     // Struct decl
     writeln!(s, "#[derive(Debug, Clone)]").unwrap();
     writeln!(s, "pub struct {name} {{").unwrap();
-    for (f, rty) in fields.iter().zip(rendered_tys.iter()) {
-        writeln!(s, "    pub {fname}: {rty},", fname = f.name).unwrap();
+    for (fname, rty) in esc_names.iter().zip(rendered_tys.iter()) {
+        writeln!(s, "    pub {fname}: {rty},").unwrap();
     }
     writeln!(s, "}}").unwrap();
     writeln!(s).unwrap();
@@ -1506,11 +1562,10 @@ pub fn synthesize_struct_type_with_users(
         "    fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {{"
     )
     .unwrap();
-    for f in fields {
+    for fname in &esc_names {
         writeln!(
             s,
-            "        ::leo4_abi::LeanMarshal::canonical_encode(&self.{fname}, buf);",
-            fname = f.name
+            "        ::leo4_abi::LeanMarshal::canonical_encode(&self.{fname}, buf);"
         )
         .unwrap();
     }
@@ -1525,23 +1580,22 @@ pub fn synthesize_struct_type_with_users(
     .unwrap();
     writeln!(s, "    {{").unwrap();
     writeln!(s, "        let mut __off = off;").unwrap();
-    for (f, rty) in fields.iter().zip(rendered_tys.iter()) {
+    for (fname, rty) in esc_names.iter().zip(rendered_tys.iter()) {
         writeln!(
             s,
-            "        let ({fname}, __next) = <{rty} as ::leo4_abi::LeanMarshal>::canonical_decode(buf, __off)?;",
-            fname = f.name
+            "        let ({fname}, __next) = <{rty} as ::leo4_abi::LeanMarshal>::canonical_decode(buf, __off)?;"
         )
         .unwrap();
         s.push_str("        __off = __next;\n");
     }
     s.push_str("        ::core::result::Result::Ok((Self {");
-    for (i, f) in fields.iter().enumerate() {
+    for (i, fname) in esc_names.iter().enumerate() {
         if i > 0 {
             s.push_str(", ");
         } else {
             s.push(' ');
         }
-        s.push_str(&f.name);
+        s.push_str(fname);
     }
     s.push_str(" }, __off))\n");
     writeln!(s, "    }}").unwrap();
@@ -2926,6 +2980,58 @@ mod tests {
         // Single-field literal — no leading comma.
         assert!(out.contains("Self { inner }"));
         assert!(out.contains("pub inner: i64,"));
+    }
+
+    #[test]
+    fn escape_ident_handles_strict_keywords() {
+        assert_eq!(escape_rust_ident("type"), "r#type");
+        assert_eq!(escape_rust_ident("match"), "r#match");
+        assert_eq!(escape_rust_ident("async"), "r#async");
+        assert_eq!(escape_rust_ident("loop"), "r#loop");
+        assert_eq!(escape_rust_ident("yield"), "r#yield"); // reserved
+        // Pass-through for normal idents — including `from`,
+        // which is NOT a Rust keyword (it's a method name on
+        // the `From` trait, not a reserved word).
+        assert_eq!(escape_rust_ident("x"), "x");
+        assert_eq!(escape_rust_ident("from"), "from");
+        assert_eq!(escape_rust_ident("head"), "head");
+    }
+
+    #[test]
+    fn escape_ident_handles_raw_ineligible() {
+        // Cannot take r# — fall back to trailing-underscore.
+        assert_eq!(escape_rust_ident("self"), "self_");
+        assert_eq!(escape_rust_ident("Self"), "Self_");
+        assert_eq!(escape_rust_ident("super"), "super_");
+        assert_eq!(escape_rust_ident("crate"), "crate_");
+        assert_eq!(escape_rust_ident("true"), "true_");
+        assert_eq!(escape_rust_ident("false"), "false_");
+        assert_eq!(escape_rust_ident("_"), "__");
+    }
+
+    #[test]
+    fn struct_emits_raw_ident_for_keyword_field() {
+        let out = synthesize_struct_type(
+            "FlaggedRow",
+            &[
+                field("type", RustType::U32),     // strict keyword
+                field("match", RustType::Bool),    // strict keyword
+                field("super", RustType::I32),     // raw-ineligible
+            ],
+        )
+        .expect("keyword fields must synth");
+
+        assert!(
+            out.contains("pub r#type: u32,"),
+            "expected r#type field; got:\n{out}"
+        );
+        assert!(out.contains("pub r#match: bool,"));
+        // raw-ineligible — gets the _ suffix instead.
+        assert!(out.contains("pub super_: i32,"));
+        assert!(out.contains("self.r#type"));
+        assert!(out.contains("self.super_"));
+        assert!(out.contains("(r#type, __next)"));
+        assert!(out.contains("Self { r#type, r#match, super_ }"));
     }
 
     #[test]

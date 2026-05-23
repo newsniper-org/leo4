@@ -7,6 +7,57 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 user records — Rust-keyword identifier escaping (2026-05-22)
+
+OX2 user-records fourth increment. Lean field / param /
+ctor names that collide with Rust keywords are now escaped
+in the emitted source.
+
+New public API:
+
+- `escape_rust_ident(name: &str) -> String` — public so
+  callers (and future `synthesize_enum_type`) reuse the same
+  policy:
+  - Raw-ineligible names → trailing `_`:
+    `self → self_`, `Self → Self_`, `super → super_`,
+    `crate → crate_`, `true → true_`, `false → false_`,
+    `_ → __`
+  - Strict + reserved keywords → `r#name`:
+    `type → r#type`, `match → r#match`, `async → r#async`,
+    `yield → r#yield`, etc.
+  - Other names pass through (`from → from`,
+    `head → head`) — note Rust's `from` is *not* a keyword
+    (it's a `From::from` method name), so no escaping needed.
+
+`synthesize_struct_type_with_users` now escapes every field
+name in:
+- struct decl LHS (`pub r#type: u32,`)
+- encode body (`self.r#type`)
+- decode binding (`let (r#type, __next) = …`)
+- `Self { … }` struct-literal at end
+
+Wire form is unchanged — the canonical-ABI encoder /
+decoder visit fields in declaration order regardless of the
+Rust identifier shape, so a struct synthesised this way is
+still byte-compatible with a hand-written
+`#[derive(LeanMarshal)]` of the same field-type sequence.
+
+Tests 69 → 72 (+3):
+
+  + `escape_ident_handles_strict_keywords` — strict + reserved
+    keyword escaping
+  + `escape_ident_handles_raw_ineligible` — raw-ineligible
+    trailing-underscore fallback
+  + `struct_emits_raw_ident_for_keyword_field` — end-to-end
+    check that all four emit sites use the escaped form
+
+clippy --all-targets -D warnings clean.
+
+**OX2 user records remaining for v1.0 RC**: Inductive
+(multi-ctor enums) — `synthesize_enum_type` analogous to
+`synthesize_struct_type`, with variant payload widening per
+`SPEC/canonical-abi.md` §9.
+
 ### Added — `leo4-oxilean-build`: OX2 user records — `Decl::Structure` integration in `transpile_source_to_unit` (2026-05-22)
 
 OX2 user-records third increment. `transpile_source_to_unit`
