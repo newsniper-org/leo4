@@ -354,23 +354,48 @@ host-imports). This makes OxiLean potentially the
 *lowest-friction* integration point for the adsmt SMT-solver
 use case once a `leo4-oxilean` adapter exists.
 
-**Open questions** an adapter author still needs to settle:
+**Direct-inspection results (2026-05-21)** — three hooks
+needed for full leo4-rust-native integration; grep into
+OxiLean v0.1.2 sources verified which exist:
+
+| Hook | Status in v0.1.2 | Location of evidence |
+|---|---|---|
+| **(1) callback registration** — closure storage in evaluator | **NOT PRESENT** | `oxilean_kernel::ffi::ExternRegistry` + `oxilean_runtime::closure::FunctionTable` both metadata-only |
+| **(2) by-name dispatch** — `Env::call_by_mangled_name` analogue | **NOT PRESENT (high-level)** | `Environment` public API is query/merge only; runtime is `BytecodeChunk`-level (`execute_chunk`), not name-level |
+| **(3) attribute / deriving registration** — `registerBuiltinAttribute` analogue | **PRESENT** | `oxilean_elab::attribute::AttributeManager::register_custom_handler(AttrHandler)` + `DeriveHandlerRegistry::register(DeriveHandler)` |
+
+So 1-of-3 hooks ships today. Implications:
+
+* The **recognition layer** (scanning a user package for
+  `@[leo4_export]` + `deriving LeanMarshal` to emit
+  handshake JSON) is **unblocked** — a separate
+  `leo4-oxilean-build` companion crate can bind Hook 3
+  and ship today.
+* The **dispatch layer** (`LeanProc::call` +
+  `LeanProcInvoker::invoke` actually running) **stays
+  blocked on Hooks 1 + 2** until upstream PRs land. The
+  scaffold adapter at `sibling/leo4-oxilean/` currently
+  surfaces these as `LEO4_ERR_RUST_DLSYM_FAILED`
+  (0x0002_0005) stubs.
+
+Three remaining **maturity** questions an adapter author
+still needs to settle (in addition to the dispatch hooks):
 
 1. **Does `oxilean-runtime` link-expose `lean_box` /
    `lean_unbox` / `lean_string_cstr` / `lean_mk_string` /
    `lean_object*` / `lean_alloc_ctor` as its public C
    surface?** `marshal_type` emits string templates against
-   these names, but whether `oxilean-runtime` provides their
-   actual implementations or expects to call out to
+   these names, but whether `oxilean-runtime` provides
+   their actual implementations or expects to call out to
    `libleanshared` for them is unclear. If the former,
    `SPEC/lean-runtime-compat.md` §1.2 is *also* satisfied
    and the leo4-mslean4 path can run unchanged against
    OxiLean. If the latter, leo4-rust-native is the only
    working path.
-2. **Does `oxilean-cli` / `oxilean-build` accept Lake-shaped
-   project layouts?** If yes, leo4's existing Lake plugin
-   can also drive OxiLean. If no, the adapter writes a
-   bridge.
+2. **Does `oxilean-cli` / `oxilean-build` accept Lake-
+   shaped project layouts?** If yes, leo4's existing Lake
+   plugin can also drive OxiLean. If no, the adapter
+   writes a bridge.
 3. **Is the `lean4_compat/` layer mature enough to accept
    the `lake/Leo4/` runtime library as-is?** Single best
    litmus test for an adapter is "can OxiLean elaborate

@@ -57,44 +57,85 @@ work below.
 - All trait surfaces are object-safe per
   `SPEC/rust-native-lean.md`.
 
-## OxiLean upstream prerequisite
+## OxiLean upstream prerequisite — direct inspection results
 
-`leo4-oxilean` becomes fully functional once OxiLean
-upstream exposes the following hooks. Listed in dependency
-order:
+Three hooks needed for full integration; **direct grep into
+OxiLean v0.1.2 sources verified which exist** (2026-05-21):
 
-- [ ] **Callback-registration entry point in the OxiLean
-      evaluator** for ExternRegistry symbols.
+- [ ] **Hook 1 — Callback-registration entry point in the
+      OxiLean evaluator** for `ExternRegistry` symbols.
+      **Status: NOT PRESENT in v0.1.2.**
       `oxilean_kernel::ffi::ExternRegistry::register(decl)`
-      currently stores metadata only — `decl.lib_name` /
-      `decl.symbol_name` describe where the actual symbol
-      lives, and OxiLean's codegen / evaluator resolves it
-      via `dlsym(lib, symbol)` at runtime.
+      stores metadata only — `decl.lib_name` /
+      `decl.symbol_name` describe *where* the actual symbol
+      lives; the codegen / evaluator resolves it via
+      `dlsym(lib, symbol)` at runtime.
+      `oxilean_runtime::closure::FunctionTable` (the
+      parallel "function decl" registry) is the same
+      shape — `FunctionEntry { name, arity, convention,
+      is_builtin, … }`, no closure storage.
       `leo4-rust-native`'s in-process direct-call model
       needs OxiLean to accept a
       `Box<dyn Fn(&[u8]) -> Result<Vec<u8>, _>>` closure
       *per mangled name*, dispatching into it instead of
-      doing `dlsym`. Suggested API shape:
+      doing `dlsym`. Suggested API:
       `ExternRegistry::register_callback(decl, callback)`.
-- [ ] **By-name `@[leo4_export]` dispatch in the OxiLean
-      evaluator**. `OxiLeanProc::call(mangled, args)` needs
-      OxiLean to expose
-      `Env::call_by_mangled_name(name, ffi_args) ->
-      FfiValue`. Equivalent to reference Lean's
-      `dlsym(leo4_call_<mangled>)` for the forward
-      direction.
-- [ ] **`@[leo4_export]` attribute recognition** in the
-      `oxilean-elab` attribute pipeline (the
-      `registerBuiltinAttribute` analogue). Until this lands,
-      `lake/Leo4/Leo4/Export.lean` doesn't elaborate as-is on
-      OxiLean and a `leo4-oxilean-build` analogue can't scan
-      a user package's exports to emit handshake JSON.
+- [ ] **Hook 2 — By-name `@[leo4_export]` dispatch in the
+      OxiLean evaluator**.
+      **Status: NOT PRESENT (at high-level API surface)
+      in v0.1.2.**
+      `Environment`'s public API (30+ functions inspected)
+      is all metadata / query (`merge_environments`,
+      `filter_environment`, `constants_with_prefix`,
+      `contains_any`, …); no `Env::call_by_name` / `run` /
+      `invoke` entry point.
+      What's there at runtime side:
+      `oxilean_runtime::bytecode_interp::execute_chunk(
+      &BytecodeChunk)` and a wasm-side
+      `execute_function(...)` — both chunk-level, not
+      name-level. An adapter would either have to assemble
+      a `BytecodeChunk` for each call (deep + brittle) or
+      wait for an upstream high-level wrapper. Suggested
+      API: `Env::call_by_mangled_name(name, ffi_args) ->
+      FfiValue`.
+- [x] **Hook 3 — Attribute / deriving registration**
+      (the `registerBuiltinAttribute` analogue).
+      **Status: PRESENT in v0.1.2.**
+      `oxilean_elab::attribute::AttributeManager::
+      register_custom_handler(handler: AttrHandler)` lets
+      adapters register a custom attribute name with a
+      string-based `AttrAction`.
+      `oxilean_elab::attribute::DeriveHandlerRegistry::
+      register(handler: DeriveHandler)` accepts a custom
+      `deriving` handler keyed by class name — direct
+      analogue of reference Lean's
+      `registerDerivingHandler`.
+      *This means `@[leo4_export]` recognition and
+      `deriving LeanMarshal` are achievable today inside a
+      `leo4-oxilean-elab-plugin` companion crate. They're
+      the only piece of the three that doesn't block on
+      OxiLean upstream PRs.*
 
-These three items are tracked as
-`SPEC/rust-native-lean.md` §8's activation conditions. If
-you (or anyone) upstreams them to OxiLean, ping the leo4
-maintainers and this adapter's `LeanProc` / `LeanProcInvoker`
-bodies fill in transparently.
+Adapter implications:
+
+* The **forward-direction recognition layer** (a
+  `leo4-oxilean-build` analogue: scan a user package for
+  `@[leo4_export]`-tagged decls + emit handshake JSON) is
+  *unblocked* — it can ship today by binding
+  `AttributeManager::register_custom_handler("leo4_export",
+  ...)` and `DeriveHandlerRegistry::register(...)` for
+  `LeanMarshal`.
+* The **actual dispatch layer** (`OxiLeanProc::call` +
+  `OxiLeanInvoker::invoke`) stays blocked on Hooks 1 & 2.
+  Until they land upstream, this adapter's traits return
+  the `RUST_DLSYM_FAILED` (0x0002_0005) stubs that the
+  current 8 tests pin down.
+
+Tracking: `SPEC/rust-native-lean.md` §7.1 + §8 reflects
+this 1-of-3 status. If you (or anyone) upstreams Hooks 1 +
+2 to OxiLean, ping the leo4 maintainers and this adapter's
+`LeanProc` / `LeanProcInvoker` bodies fill in
+transparently.
 
 ## Activation checklist (orthogonal questions)
 

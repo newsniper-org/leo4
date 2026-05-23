@@ -496,8 +496,38 @@ would be expensive to relitigate:
   source files. The two-axis surface satisfiability matrix
   lives in `SPEC/lean-runtime-compat.md` §2.
 
-  **FFI-deep-dive findings (2026-05-21)** — most
-  significant of the OxiLean investigations:
+  **Direct hook-inspection (2026-05-21, supersedes the
+  FFI-deep-dive narrative)** — three upstream hooks
+  needed for leo4-oxilean adapter's dispatch layer to
+  function; grep into OxiLean v0.1.2 sources verified
+  which are present:
+  * Hook 1 (callback storage in evaluator):
+    **NOT PRESENT**. Both `ExternRegistry` and
+    `FunctionTable` are metadata-only; no
+    `Box<dyn Fn>`-accepting registration path.
+  * Hook 2 (by-name dispatch high-level API):
+    **NOT PRESENT (at high level)**. `Environment` API is
+    query/merge only; `bytecode_interp::execute_chunk`
+    operates at `BytecodeChunk` granularity, not mangled
+    name.
+  * Hook 3 (attribute / deriving handler registration):
+    **PRESENT**.
+    `oxilean_elab::attribute::AttributeManager::
+    register_custom_handler(AttrHandler)` +
+    `DeriveHandlerRegistry::register(DeriveHandler)`.
+  → **1-of-3 hooks ships today.** The recognition layer
+  (scanning for `@[leo4_export]` / `deriving LeanMarshal`)
+  is unblocked; the dispatch layer (running calls) stays
+  blocked on Hooks 1 + 2 until upstream PRs. The
+  `sibling/leo4-oxilean/` scaffold's 8 tests pin this
+  split (registration paths work; `invoke` / `call`
+  return `RUST_DLSYM_FAILED` stubs). Earlier text in this
+  entry (the "almost 1-to-1" claim) was based on type
+  inspection only and overstated the runtime-side fit;
+  see this paragraph for the corrected picture.
+
+  **FFI-deep-dive findings (2026-05-21)** — the FFI type
+  system itself (kept here for reference):
   `crates/oxilean-kernel/src/ffi/` exposes a complete
   `FfiType` / `FfiValue` / `ExternDecl` / `ExternRegistry`
   model that matches leo4's `LeanProc` / `LeanProcInvoker`

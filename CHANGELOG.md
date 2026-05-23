@@ -7,6 +7,52 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Fixed — OxiLean upstream-hook status: 1-of-3 present, not 0-of-3 (2026-05-21)
+
+Corrects an overgeneralisation in the previous adapter
+commit (`896e563`). Grep into the downloaded OxiLean v0.1.2
+sources verified which of the three upstream hooks
+`SPEC/rust-native-lean.md` lists actually exist:
+
+| Hook | Status | Evidence |
+|---|---|---|
+| (1) Callback storage in evaluator | **NOT PRESENT** | `oxilean_kernel::ffi::ExternRegistry` + `oxilean_runtime::closure::FunctionTable` both metadata-only; no `Box<dyn Fn>`-accepting register path. |
+| (2) By-name `@[leo4_export]` dispatch (high-level API) | **NOT PRESENT (at high level)** | `Environment`'s 30+ public fns are all query/merge; runtime side is `bytecode_interp::execute_chunk(BytecodeChunk)`, not name-level. |
+| (3) Attribute / deriving registration | **PRESENT** | `oxilean_elab::attribute::AttributeManager::register_custom_handler(AttrHandler)` + `DeriveHandlerRegistry::register(DeriveHandler)`. |
+
+Implications:
+
+* The **recognition layer** for leo4 (scanning a user
+  package for `@[leo4_export]`-tagged decls + `deriving
+  LeanMarshal` handler installation, mirroring the
+  reference `lake/Leo4Plugin/`) is **unblocked**. A
+  separate `leo4-oxilean-build` companion crate can ship
+  today by binding `register_custom_handler("leo4_export",
+  ...)` + `DeriveHandlerRegistry::register(...)` for
+  `LeanMarshal`. (Out of scope for this minimal adapter.)
+* The **dispatch layer** (`OxiLeanProc::call` +
+  `OxiLeanInvoker::invoke` actually running calls) stays
+  blocked on Hooks 1 + 2 until upstream PRs land. The 8
+  passing tests on `sibling/leo4-oxilean/` pin this split:
+  registration paths (`register_export`, registry lookup)
+  work against real OxiLean APIs; dispatch returns
+  `RUST_DLSYM_FAILED` (0x0002_0005) stubs.
+
+Files updated to reflect:
+* `sibling/leo4-oxilean/README.md` §"OxiLean upstream
+  prerequisite" — checklist split into [x] for Hook 3 +
+  [ ] for Hooks 1 / 2.
+* `sibling/leo4-oxilean/src/lib.rs` crate docs.
+* `SPEC/rust-native-lean.md` §7.1 — the 1-of-3 table.
+* `AGENTS.md` "Recent decisions" 2026-05-21 — corrected
+  paragraph above the kept FFI-deep-dive notes.
+
+The prior commit's broader "OxiLean's FFI types are
+isomorphic to leo4's LeanProc surface" claim still holds
+at the *type-system* level. The error in `896e563` was
+implying the *runtime* mechanism was equally close; that
+needed Hook 1 + Hook 2 upstream PRs which don't exist yet.
+
 ### Added — `sibling/leo4-oxilean/` adapter scaffold (2026-05-21)
 
 First concrete `leo4-rust-native` adapter. Bridges leo4's

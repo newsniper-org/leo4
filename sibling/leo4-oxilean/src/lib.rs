@@ -53,21 +53,40 @@
 //! 4. Tests that exercise the registration path against the
 //!    actual OxiLean v0.1.2 API.
 //!
-//! ## What's deferred to OxiLean upstream
+//! ## OxiLean upstream — direct inspection of v0.1.2
+//!
+//! Three hooks needed for full integration; direct grep
+//! into OxiLean v0.1.2 sources verified which exist:
 //!
 //! 1. Per-mangled-name **callback registration** in the
 //!    OxiLean evaluator (the hook this adapter would tie
-//!    `LeanProcInvoker::invoke` into).
+//!    `LeanProcInvoker::invoke` into). **NOT PRESENT** in
+//!    v0.1.2 — `ExternRegistry` + `FunctionTable` both
+//!    store metadata only; closure storage path doesn't
+//!    exist.
 //! 2. **By-name dispatch** of `@[leo4_export]` Lean
 //!    definitions (the hook `LeanProc::call` would tie
-//!    into).
-//! 3. Source-side **`@[leo4_export]` attribute recognition**
-//!    inside `oxilean-elab`'s attribute pipeline (the
-//!    equivalent of leo4 reference's
-//!    `registerBuiltinAttribute`).
+//!    into). **NOT PRESENT** at high-level API surface —
+//!    `Environment` is query-only; runtime side is
+//!    `BytecodeChunk`-level (`execute_chunk`), not
+//!    name-level.
+//! 3. Source-side **`@[leo4_export]` attribute
+//!    recognition** + `deriving LeanMarshal` handler
+//!    registration (the equivalent of reference Lean's
+//!    `registerBuiltinAttribute` /
+//!    `registerDerivingHandler`).
+//!    **PRESENT** in v0.1.2 —
+//!    `oxilean_elab::attribute::AttributeManager::
+//!    register_custom_handler` and
+//!    `DeriveHandlerRegistry::register`.
 //!
-//! Tracked as open items in `README.md` §"OxiLean upstream
-//! prerequisite".
+//! → Hooks 1 + 2 (dispatch layer) block this adapter's
+//! `call` / `invoke` bodies until upstream PRs land.
+//! Hook 3 (recognition layer) is unblocked — a separate
+//! `leo4-oxilean-build` companion crate (out of scope for
+//! this minimal adapter) can ship today by importing
+//! `oxilean-elab` and binding both registries. See
+//! `README.md` §"OxiLean upstream prerequisite".
 
 #![allow(clippy::missing_errors_doc)]
 
