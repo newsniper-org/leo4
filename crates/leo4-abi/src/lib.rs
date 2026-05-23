@@ -22,6 +22,8 @@ pub mod floats_nightly;
 pub mod handshake;
 #[cfg(feature = "rust-exports")]
 pub mod rust_exports;
+pub mod rust_native;
 
 pub use error::{error_codes, LeanError};
 pub use marshal::LeanMarshal;
+pub use rust_native::{LeanProc, LeanProcInvoker};

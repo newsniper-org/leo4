@@ -7,6 +7,44 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4_abi::{LeanProc, LeanProcInvoker}` trait surface (2026-05-21)
+
+Lifts `SPEC/rust-native-lean.md` §2 + §3's two-trait contract
+into actual Rust code. New `crates/leo4-abi/src/rust_native.rs`
+exports:
+
+```rust
+pub trait LeanProc: Send + Sync {
+    fn schema_hash(&self) -> &str;
+    fn abi_version(&self) -> u32;
+    fn call(&self, mangled: &str, args: &[u8]) -> Result<Vec<u8>, LeanError>;
+}
+
+pub trait LeanProcInvoker: Send + Sync {
+    fn invoke(&self, mangled: &str, args: &[u8]) -> Result<Vec<u8>, LeanError>;
+}
+```
+
+Both object-safe (`Box<dyn LeanProc>` is the type downstream
+adapters expose). Re-exported at the leo4-abi crate root so
+adapter crates do `use leo4_abi::{LeanProc, LeanProcInvoker}`.
+
+Why in `leo4-abi`, not a separate `leo4-rust-native-traits`
+crate: leo4-abi is already the natural shared-dep for
+adapters (`LeanError` + `LeanMarshal` are there), so adding
+the trait pair avoids a 1-trait-per-crate proliferation.
+`leo4-mslean4` / `leo4-wasm` don't import the traits — they
+have their own dispatcher shapes. No coupling introduced.
+
+Tests: 2 new (`dummy_impl_constructs_and_dispatches`,
+`dummy_invoker_constructs_and_invokes`) plus a compile-time
+object-safety assertion. `cargo test -p leo4-abi`: 25 → 27.
+Workspace total: 169 → 171.
+
+This is the leo4-side prerequisite for the
+`sibling/leo4-oxilean/` adapter scaffold that follows in the
+next commit.
+
 ### Added — OxiLean FFI deep-dive findings → `SPEC/rust-native-lean.md` §7.1 (2026-05-21)
 
 Documentation-only. Resolves the open question "how does
