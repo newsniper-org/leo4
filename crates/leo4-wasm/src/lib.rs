@@ -250,6 +250,39 @@ mod tests {
         assert_eq!(err.code, error_codes::DECODE_ERROR);
     }
 
+    /// Minimal valid Component Model binary: just the 8-byte
+    /// magic + component-header version words. Produced by
+    /// `echo '(component)' | wasm-tools parse`. Used as a
+    /// "smoke test" fixture — opens cleanly, instantiates with
+    /// no imports needed, but has no `exports` interface so
+    /// `call(…)` returns DLSYM_FAILED.
+    const EMPTY_COMPONENT_BYTES: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6d, // \0asm magic
+        0x0d, 0x00, 0x01, 0x00, // component encoding header (version 0x000d 0001)
+    ];
+
+    #[cfg(feature = "backend-wasmtime")]
+    #[test]
+    fn wasmtime_loads_empty_component_call_fails_dlsym() {
+        use crate::backend::wasmtime::WasmtimeRuntime;
+        use crate::runtime::WasmRuntime as _;
+        let rt = WasmtimeRuntime::new().expect("engine init");
+        let component = rt
+            .open_component(EMPTY_COMPONENT_BYTES)
+            .expect("empty component parses");
+        let mut instance = match component.instantiate() {
+            Ok(i) => i,
+            Err(e) => panic!("empty component must instantiate: {e:?}"),
+        };
+        let err = match instance.call("foo", &[]) {
+            Ok(_) => panic!("empty component has no exports; call must fail"),
+            Err(e) => e,
+        };
+        // No `leo4:host/exports@0.1.0` interface in an empty
+        // component → DLSYM_FAILED.
+        assert_eq!(err.code, 0x0002_0005);
+    }
+
     #[test]
     fn backend_default_open_rejects_empty_bytes() {
         // Empty input is not a valid wasm component; the wasmtime
