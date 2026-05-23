@@ -7,6 +7,75 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-6: Lean-side glue shim (`shim/leo4_rust_bridge_lean.c`) (2026-05-23)
+
+Seventh code landing on the Phase 9 ladder. Resolves the
+`@[extern "leo4_rust_call_lean"]` declaration the Phase 9-5
+wrapper emits, bridging the lean_object* ABI to the
+dispatcher's byte-pointer signature in
+`libleo4_rust_bridge.a`.
+
+- `shim/leo4_rust_bridge_lean.c` (new, ~110 lines). The ONE
+  leo4-side place that includes `<lean/lean.h>`. The
+  dispatcher and its backends stay free of Lean ABI details,
+  matching the forward-direction split
+  (`<pkg>.leo4-shim.c` vs `crates/leo4-native/`).
+- `leo4_rust_call_lean(b_lean_obj_arg mangled, b_lean_obj_arg
+  args, lean_object* world) -> lean_object*`:
+  1. Extract `(cstr, size)` from `mangled` via
+     `lean_string_cstr` + `lean_string_size` (subtracting the
+     trailing NUL from `size`).
+  2. Extract `(ptr, size)` from `args` via `lean_sarray_cptr`
+     + `lean_sarray_size`.
+  3. Allocate a 4 KiB initial response ByteArray
+     (`lean_alloc_sarray(1, cap, cap)`).
+  4. Call `leo4_rust_call(mangled, mangled_len, args_ptr,
+     args_len, ret_ptr, ret_cap, &ret_len)`.
+  5. On `LEO4_ERR_BUFFER_TOO_SMALL` (0x07): drop the
+     too-small ByteArray, re-allocate to the size the
+     dispatcher reported in `*ret_len`, retry once.
+  6. Shrink the response ByteArray's logical size to the
+     actual `ret_len` via `lean_sarray_set_size` (the
+     underlying allocation stays at `cap`).
+  7. Build the `(UInt32 × ByteArray)` tuple
+     (`lean_alloc_ctor(0, 2, 0)` + `lean_box_uint32` + the
+     ByteArray pointer) and wrap in `lean_io_result_mk_ok`.
+- Borrow contract preserved: both `mangled` and `args` are
+  `@&` on the Lean side / `b_lean_obj_arg` on the C side,
+  so the shim does not call `lean_dec` on them. The freshly
+  allocated `ret_array` and boxed status enter the tuple,
+  which the caller drops on its own schedule.
+- The `status` field surfaces dispatcher / worker failures
+  to the typed Lean wrapper (the wrapper raises
+  `IO.userError` on non-zero). The Lean IO error path is
+  reserved for cases the shim itself cannot reach (none
+  today).
+
+Verification: `leanc -c shim/leo4_rust_bridge_lean.c -o … -std=c2x`
+produces a clean ELF relocatable with `T leo4_rust_call_lean`
+visible to a follow-on link step. (A standalone link into a
+`.so` strips the symbol via `--gc-sections` since the test
+link has no Lean-side reference; the production link path
+preserves it because the `@[extern]` declaration is a real
+caller.)
+
+Build orchestration (Lake plugin auto-discovery of the
+glue-shim source + leanc invocation) is the natural home for
+a 9-6 follow-up. The user-facing
+workflow on 9-6 today is:
+
+```sh
+cargo build --release                            # cdylib
+leo4-rust-emit --cdylib … --out-dir … --emit-lean  # 9-2/9-5
+cargo build --release -p leo4-rust-bridge        # 9-4a/b
+leanc -c shim/leo4_rust_bridge_lean.c -o …       # 9-6
+# … leanc-link the user's Lean wrapper with the two .o /
+# .a above; SPEC/reverse-direction.md §7 step 4.
+```
+
+No code in the rest of the workspace changes; existing tests
+stay at 134/0.
+
 ### Added — Phase 9-5: Lean wrapper module emission (`leo4-rust-emit --emit-lean`) (2026-05-23)
 
 Sixth code landing on the Phase 9 ladder. `leo4-rust-emit`
