@@ -7,6 +7,53 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-4c: Windows backend (`CreateProcess` + named pipe) (2026-05-23)
+
+Fills the second real branch of `leo4_worker_ops_t`. Same
+single C TU; lives behind `#if defined(_WIN32)` next to the
+POSIX backend, with backend selection chain updated to pick
+`&leo4_windows_ops` on `_WIN32`.
+
+Workflow:
+
+1. `CreateNamedPipeA` opens a duplex pipe at
+   `\\.\pipe\leo4_rust_<pid>_<nonce>` (nonce: process-wide
+   `_Atomic uint32_t` counter for multi-spawn safety).
+2. `CreateProcessA` launches `leo4-rust-worker.exe --cdylib
+   <path> --ipc-pipe <name>` via PATH search
+   (`lpApplicationName = NULL`). `ERROR_FILE_NOT_FOUND`
+   maps to `LEO4_ERR_RUST_CDYLIB_NOT_FOUND`; everything
+   else to `LEO4_ERR_RUST_SPAWN_FAILED`.
+3. `ConnectNamedPipe` blocks until the worker's
+   `CreateFileA` on the same pipe name resolves. The
+   worker's `--ipc-pipe` argument carries the same string
+   (separate from POSIX's `--ipc-fd N`).
+4. `win_send_all` / `win_recv_exact` loop over `WriteFile` /
+   `ReadFile` with short-read detection. EOF / 0-byte ->
+   `LEO4_ERR_RUST_IPC_FAILED`.
+5. `win_alive_worker` polls via `WaitForSingleObject(.., 0)`;
+   `win_reap_worker` does the blocking wait + `GetExitCodeProcess`
+   + `CloseHandle` on both pipe and process.
+6. `win_kill_worker` calls `TerminateProcess`.
+
+Target triple: `x86_64-pc-windows-gnullvm` (Tier 2, per
+LEO4-DESIGN.md §9.1). Compiles under clang's gnullvm target —
+no `__declspec`, no MSVC ABI fork. Linux/macOS builds skip
+the whole block via the `#ifdef` guard.
+
+Cross-compile / runtime verification on Windows is deferred
+to the Tier 2 CI matrix when it lands. Today the code
+compiles in-source against the `windows.h` we'd see on a
+gnullvm clang invocation; the Linux host build is
+unaffected (no `_WIN32` defined).
+
+`leo4-rust-worker` (the Rust harness, Phase 9-3) already
+has the `--ipc-pipe <name>` arg parsed and returns
+"Windows named-pipe IPC not yet implemented (Phase 9-4c)" —
+that's the slot the worker side fills next.
+
+Workspace test count unchanged at 138/0.
+
 ### Added — Phase 9.X: env-driven worker recycle policy (2026-05-23)
 
 `LEO4_RUST_WORKER_RECYCLE_CALLS=N`: after N completed

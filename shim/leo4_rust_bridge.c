@@ -63,6 +63,11 @@
 extern char** environ;
 #endif
 
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
+
 /* ─── Wire constants (SPEC §5) ────────────────────────────────────── */
 
 #define LEO4_FRAME_MAGIC          0x4C45u  /* 'L', 'E' as 16 LSBs */
@@ -391,6 +396,225 @@ static const leo4_worker_ops_t leo4_posix_ops = {
 
 #endif /* __unix__ || __APPLE__ */
 
+/* ─── Windows backend (Phase 9-4c) ────────────────────────────────
+ *
+ * `CreateProcess` + named pipe + `WaitForSingleObject`.
+ *
+ * Worker process model:
+ *   * Dispatcher creates a duplex named pipe at
+ *     `\\.\pipe\leo4_rust_<pid>_<nonce>` (`CreateNamedPipeA`).
+ *   * Dispatcher invokes the worker binary with
+ *     `--cdylib <path> --ipc-pipe <pipe-name>`.
+ *     Worker opens the same name with `CreateFileA` and uses
+ *     `ReadFile` / `WriteFile` for I/O.
+ *   * No `posix_spawn` / `socketpair` / `dup2` — Windows
+ *     subprocess invocation is its own world. Lifecycle uses
+ *     `WaitForSingleObject` + `GetExitCodeProcess` instead of
+ *     `waitpid`, and `TerminateProcess` instead of `SIGKILL`.
+ *
+ * This file remains a single C TU; the Windows backend lives
+ * behind `#if defined(_WIN32)`. Linux/macOS builds skip it
+ * entirely. Verification on Windows happens via the gnullvm
+ * Tier 2 CI matrix (when it lands).
+ */
+
+#if defined(_WIN32)
+
+struct leo4_worker {
+    HANDLE proc;        /* process handle from CreateProcess */
+    HANDLE pipe;        /* parent end of duplex named pipe   */
+    DWORD  pid;         /* informational only                */
+};
+
+static int win_spawn_worker(const char* cdylib_path,
+                            leo4_worker_t** out,
+                            char*  err_buf, size_t err_cap) {
+    if (out) *out = NULL;
+
+    /* Build a unique pipe name: \\.\pipe\leo4_rust_<pid>_<nonce>.
+     * Nonce is a simple atomic counter — single-Lean-thread, but
+     * defensive in case multiple workers spawn during the same
+     * dispatcher session. */
+    static _Atomic uint32_t nonce_counter = 0;
+    uint32_t nonce = atomic_fetch_add_explicit(&nonce_counter, 1,
+                                               memory_order_relaxed);
+    char pipe_name[128];
+    int n = snprintf(pipe_name, sizeof pipe_name,
+                     "\\\\.\\pipe\\leo4_rust_%lu_%u",
+                     (unsigned long)GetCurrentProcessId(), nonce);
+    if (n < 0 || (size_t)n >= sizeof pipe_name) {
+        if (err_buf && err_cap) (void)snprintf(err_buf, err_cap, "pipe name overflow");
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    HANDLE pipe = CreateNamedPipeA(
+        pipe_name,
+        PIPE_ACCESS_DUPLEX,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        1,                          /* one instance */
+        65536, 65536,               /* out/in buffer sizes */
+        0,                          /* default timeout */
+        NULL);                      /* default security */
+    if (pipe == INVALID_HANDLE_VALUE) {
+        if (err_buf && err_cap)
+            (void)snprintf(err_buf, err_cap,
+                           "CreateNamedPipeA(%s) failed: GLE=%lu",
+                           pipe_name, GetLastError());
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    /* Resolve worker binary path. Env override, else fall back to
+     * "leo4-rust-worker.exe" and let CreateProcess find it on
+     * PATH (NULL lpApplicationName + lpCommandLine == PATH search). */
+    const char* worker_bin = getenv("LEO4_RUST_WORKER_BIN");
+    if (!worker_bin || !worker_bin[0]) worker_bin = "leo4-rust-worker.exe";
+
+    /* Build the command line. CreateProcess wants a single mutable
+     * string. Format:
+     *   "<worker-bin>" --cdylib "<cdylib>" --ipc-pipe "<pipe>"  */
+    char cmdline[1024];
+    int cl = snprintf(cmdline, sizeof cmdline,
+                      "\"%s\" --cdylib \"%s\" --ipc-pipe \"%s\"",
+                      worker_bin, cdylib_path, pipe_name);
+    if (cl < 0 || (size_t)cl >= sizeof cmdline) {
+        CloseHandle(pipe);
+        if (err_buf && err_cap)
+            (void)snprintf(err_buf, err_cap, "cmdline overflow");
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    STARTUPINFOA si = { .cb = sizeof si };
+    PROCESS_INFORMATION pi = {0};
+    BOOL ok = CreateProcessA(
+        NULL,              /* lpApplicationName — let cmdline drive */
+        cmdline,
+        NULL, NULL,        /* default security attrs */
+        FALSE,             /* don't inherit handles */
+        0,                 /* default creation flags */
+        NULL,              /* inherit env */
+        NULL,              /* current working dir */
+        &si, &pi);
+    if (!ok) {
+        DWORD gle = GetLastError();
+        CloseHandle(pipe);
+        if (err_buf && err_cap)
+            (void)snprintf(err_buf, err_cap,
+                           "CreateProcessA(%s) failed: GLE=%lu",
+                           cmdline, gle);
+        return gle == ERROR_FILE_NOT_FOUND
+            ? LEO4_ERR_RUST_CDYLIB_NOT_FOUND
+            : LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+    CloseHandle(pi.hThread);   /* main thread handle unused */
+
+    /* Wait for the worker to connect. The worker calls
+     * `CreateFileA(pipe_name, ...)`; ConnectNamedPipe blocks until
+     * the child end is open. */
+    BOOL connected = ConnectNamedPipe(pipe, NULL);
+    if (!connected && GetLastError() != ERROR_PIPE_CONNECTED) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pipe);
+        if (err_buf && err_cap)
+            (void)snprintf(err_buf, err_cap,
+                           "ConnectNamedPipe failed: GLE=%lu",
+                           GetLastError());
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    leo4_worker_t* w = (leo4_worker_t*)calloc(1, sizeof *w);
+    if (!w) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pipe);
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+    w->proc = pi.hProcess;
+    w->pipe = pipe;
+    w->pid  = pi.dwProcessId;
+    *out = w;
+    return LEO4_OK;
+}
+
+static void win_kill_worker(leo4_worker_t* w) {
+    if (!w) return;
+    if (w->proc) TerminateProcess(w->proc, 1);
+}
+
+static int win_reap_worker(leo4_worker_t* w, int* exit_status) {
+    if (!w) return LEO4_ERR_RUST_SPAWN_FAILED;
+    if (w->proc) {
+        WaitForSingleObject(w->proc, INFINITE);
+        DWORD ec = 0;
+        if (exit_status) {
+            if (GetExitCodeProcess(w->proc, &ec)) *exit_status = (int)ec;
+            else                                  *exit_status = -1;
+        }
+        CloseHandle(w->proc);
+        w->proc = NULL;
+    }
+    if (w->pipe) {
+        CloseHandle(w->pipe);
+        w->pipe = NULL;
+    }
+    free(w);
+    return LEO4_OK;
+}
+
+static int win_send_all(leo4_worker_t* w, const void* buf, size_t len) {
+    if (!w || !w->pipe) return LEO4_ERR_RUST_IPC_FAILED;
+    const uint8_t* p = (const uint8_t*)buf;
+    size_t left = len;
+    while (left) {
+        DWORD wrote = 0;
+        BOOL ok = WriteFile(w->pipe, p, (DWORD)left, &wrote, NULL);
+        if (!ok || wrote == 0) return LEO4_ERR_RUST_IPC_FAILED;
+        p    += (size_t)wrote;
+        left -= (size_t)wrote;
+    }
+    return LEO4_OK;
+}
+
+static int win_recv_exact(leo4_worker_t* w, void* buf, size_t cap, size_t* out_len) {
+    if (!w || !w->pipe) {
+        if (out_len) *out_len = 0;
+        return LEO4_ERR_RUST_IPC_FAILED;
+    }
+    uint8_t* p = (uint8_t*)buf;
+    size_t left = cap;
+    while (left) {
+        DWORD got = 0;
+        BOOL ok = ReadFile(w->pipe, p, (DWORD)left, &got, NULL);
+        if (!ok || got == 0) {
+            if (out_len) *out_len = cap - left;
+            return LEO4_ERR_RUST_IPC_FAILED;
+        }
+        p    += (size_t)got;
+        left -= (size_t)got;
+    }
+    if (out_len) *out_len = cap;
+    return LEO4_OK;
+}
+
+static int win_alive_worker(leo4_worker_t* w) {
+    if (!w || !w->proc) return 0;
+    DWORD r = WaitForSingleObject(w->proc, 0);
+    if (r == WAIT_TIMEOUT)  return 1;   /* still running */
+    if (r == WAIT_OBJECT_0) return 0;   /* exited */
+    return 0;
+}
+
+static const leo4_worker_ops_t leo4_windows_ops = {
+    .spawn = win_spawn_worker,
+    .kill  = win_kill_worker,
+    .reap  = win_reap_worker,
+    .send  = win_send_all,
+    .recv  = win_recv_exact,
+    .alive = win_alive_worker,
+};
+
+#endif /* _WIN32 */
+
 /* ─── Backend selection ───────────────────────────────────────────
  *
  * The dispatcher body below does not change when backends light up
@@ -400,8 +624,7 @@ static const leo4_worker_ops_t leo4_posix_ops = {
 #if defined(__unix__) || defined(__APPLE__)
 static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_posix_ops;
 #elif defined(_WIN32)
-/* TODO(9-4c): replace with `&leo4_windows_ops`. */
-static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_stub_ops;
+static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_windows_ops;
 #else
 static const leo4_worker_ops_t* const leo4_worker_ops = &leo4_stub_ops;
 #endif
