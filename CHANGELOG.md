@@ -7,6 +7,68 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-D2: `lake run Leo4Rust/regenerate` script (2026-05-21)
+
+Moves the reverse-direction `leo4-rust-emit` invocation
+behind a Lake-native script so users no longer have to
+manually run a Cargo binary with long arg lists. From
+inside a Lean project directory:
+
+```sh
+LEO4_RUST_EMIT_BIN=/abs/path/leo4-rust-emit \
+LEO4_RUST_IFACE=MyApp \
+  lake run Leo4Rust/regenerate
+```
+
+The script:
+1. Reads `Cargo.toml` one level up to derive the crate name.
+2. Locates the cdylib via (a) `LEO4_RUST_CDYLIB` env, then
+   (b) `<project>/target/release/lib<crate>.{so,dylib,dll}`,
+   then (c) walks upward looking for any `target/release/`
+   that holds the cdylib — handles cargo workspace
+   projects whose target/ lives at the workspace root.
+3. Invokes `leo4-rust-emit --emit-lean`.
+4. Moves the generated wrapper to `<iface>/Rust.lean`.
+
+`leo4 run` (Phase 10-D1) now delegates its emit step to
+`lake run Leo4Rust/regenerate` instead of calling
+`leo4-rust-emit` directly + manually moving the file —
+the orchestration logic lives in one place
+(`lake/Leo4Rust/lakefile.lean`).
+
+The original "auto-trigger on `lake build`" goal turned
+out to require importing the helper module from a
+dependency package in the user's lakefile, which
+Lake's lakefile/dep ordering doesn't support
+(lakefile compiles before deps build). The
+`lake run`-based design is the next-best abstraction:
+emit is now invoked through Lake (not via a raw Cargo
+binary path), and `leo4 run` chains both steps so
+end-to-end users see a single command.
+
+Justfile: `rust-export-05-build` recipe updated to use
+the new script. `examples/05-rust-export` end-to-end
+verified — `is_prime`, `next_prime`, `count_primes_below`,
+`factor_smallest` all return correct values after the
+Lake-script-driven emit.
+
+Scaffold `README.md`'s manual workflow now shows
+`lake run Leo4Rust/regenerate` in place of the verbose
+`leo4-rust-emit --cdylib ... --out-dir ... --emit-lean
+--lean-module ... && mv ...` ladder.
+
+Workspace test count: 156 unchanged (no new tests added;
+existing `cargo test --workspace` + `lake build` +
+end-to-end smoke all pass).
+
+**D2.x follow-ups** (deferred):
+* `lake build` auto-trigger via `extraDepTargets` once Lake
+  exposes a way to import dep modules from a user lakefile
+  (or once Leo4Rust ships its helper as inline lakefile
+  code in the scaffold).
+* `CARGO_TARGET_DIR` env support for `cargo --target-dir`
+  users.
+
 ### Added — Phase 10-B1: function-arrow / callback ABI (IDL + mangling entry-gate, 2026-05-21)
 
 Wires the previously-TBD function-arrow mangling slot

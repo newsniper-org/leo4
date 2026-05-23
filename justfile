@@ -140,22 +140,19 @@ glue-shim-build OUT_OBJ:
     leanc -c -std=c2x shim/leo4_rust_bridge_lean.c -o {{OUT_OBJ}}
 
 # End-to-end pipeline wrapper for examples/05-rust-export. With
-# Phase 9-6 follow-up's Leo4Rust Lake package in place, `lake build`
-# itself handles glue-shim compilation + final link via the
-# extern_libs, so the 4-step manual workflow collapses to 3.
+# Phase 10-D2's `lake run Leo4Rust/regenerate` script, emit now
+# goes through Lake rather than via a direct cargo-binary
+# invocation. Steps collapse to 3.
 rust-export-05-build: rust-bridge-build
     @echo "[1/3] Building example cdylib..."
     cargo build --release -p leo4-example-05-rust-export
-    @echo "[2/3] Emitting handshake / IDL / Lean wrapper..."
-    rm -rf examples/05-rust-export/lean/Leo4ExampleMiniSolverRust
-    mkdir -p examples/05-rust-export/lean/.leo4-emit
-    mkdir -p examples/05-rust-export/lean/Leo4ExampleMiniSolverRust
-    just rust-emit \
-      `realpath target/release/libleo4_example_05_rust_export.so` \
-      examples/05-rust-export/lean/.leo4-emit \
-      Leo4ExampleMiniSolverRust.Rust
-    mv examples/05-rust-export/lean/.leo4-emit/leo4_example_05_rust_export.leo4-rust-imports.lean \
-       examples/05-rust-export/lean/Leo4ExampleMiniSolverRust/Rust.lean
+    @echo "[2/3] lake run Leo4Rust/regenerate (Lake-driven emit, Phase 10-D2)..."
+    rm -rf examples/05-rust-export/lean/Leo4ExampleMiniSolverRust \
+           examples/05-rust-export/lean/.leo4-emit
+    cd examples/05-rust-export/lean && \
+      LEO4_RUST_EMIT_BIN=`realpath ../../../target/release/leo4-rust-emit` \
+      LEO4_RUST_IFACE=Leo4ExampleMiniSolverRust \
+        lake run Leo4Rust/regenerate
     @echo "[3/3] Lake build (auto-links bridge + glue-shim via Leo4Rust extern_libs)..."
     cd examples/05-rust-export/lean && lake build
     @echo "Done. Run via:"

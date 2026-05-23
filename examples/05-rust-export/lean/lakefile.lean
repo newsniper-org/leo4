@@ -3,8 +3,8 @@ open Lake DSL
 
 package leo4Example05 where
   -- The Lean wrapper module that `leo4-rust-emit --emit-lean`
-  -- generates lives at `Generated/Leo4ExampleMiniSolverRust.lean`.
-  -- Lake picks it up from `srcDir`.
+  -- generates lives at `Leo4ExampleMiniSolverRust/Rust.lean`.
+  -- Lake picks it up from `srcDir` via the `.submodules` glob below.
   srcDir := "."
 
 require Leo4     from "../../../lake/Leo4"
@@ -14,6 +14,12 @@ require Leo4Rust from "../../../lake/Leo4Rust"
 -- executable: `libleo4_rust_bridge.a` (cargo-built) and
 -- `libleo4_rust_bridge_lean.a` (leanc-compiled glue shim).
 -- The manual `leanc -o` final link line is no longer needed.
+--
+-- Phase 10-D2 (2026-05-21): the Lake-side emit step is exposed as
+-- `lake exe Leo4Rust/regenerate` (declared in Leo4Rust's lakefile).
+-- Run it after `cargo build --release` to drop the generated
+-- wrapper at `Leo4ExampleMiniSolverRust/Rust.lean`, then `lake
+-- build`. `leo4 run` (Phase 10-D1) chains both for you.
 
 -- Carries the auto-generated wrapper module produced by
 -- `leo4-rust-emit --emit-lean` at

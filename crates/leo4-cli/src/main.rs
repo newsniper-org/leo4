@@ -385,33 +385,17 @@ fn run_reverse(
     let cargo_target = dir.join("target").join("release");
     let cdylib = find_cdylib(&cargo_target, crate_name)?;
 
-    step("[2/4] leo4-rust-emit --emit-lean");
-    let emit_out = lean_dir.join(".leo4-emit");
-    fs::create_dir_all(&emit_out)
-        .map_err(|e| format!("create_dir_all {emit_out:?}: {e}"))?;
-    let iface_dir = lean_dir.join(iface);
-    fs::create_dir_all(&iface_dir)
-        .map_err(|e| format!("create_dir_all {iface_dir:?}: {e}"))?;
-    let lean_module = format!("{iface}.Rust");
-    run_cmd(
-        Command::new(&emit_bin).args([
-            "--cdylib", &cdylib.display().to_string(),
-            "--out-dir", &emit_out.display().to_string(),
-            "--emit-lean",
-            "--lean-module", &lean_module,
-        ]),
-        "leo4-rust-emit",
-    )?;
-    let emitted = emit_out.join(format!("{crate_name}.leo4-rust-imports.lean"));
-    let dest = iface_dir.join("Rust.lean");
-    if !emitted.exists() {
-        return Err(format!("emit: expected {emitted:?} not produced"));
-    }
-    if dest.exists() {
-        fs::remove_file(&dest).map_err(|e| format!("rm {dest:?}: {e}"))?;
-    }
-    fs::rename(&emitted, &dest)
-        .map_err(|e| format!("rename {emitted:?} -> {dest:?}: {e}"))?;
+    step("[2/4] lake run Leo4Rust/regenerate (emit wrapper)");
+    // Pre-resolved cdylib path goes through env so the script
+    // doesn't have to walk-search the workspace target dir again.
+    let mut emit_cmd = Command::new("lake");
+    emit_cmd
+        .args(["run", "Leo4Rust/regenerate"])
+        .current_dir(&lean_dir)
+        .env("LEO4_RUST_EMIT_BIN", &emit_bin)
+        .env("LEO4_RUST_CDYLIB", &cdylib)
+        .env("LEO4_RUST_IFACE", iface);
+    run_cmd(&mut emit_cmd, "Leo4Rust/regenerate")?;
 
     step("[3/4] lake build (auto-links bridge + glue via Leo4Rust extern_libs)");
     run_cmd(
@@ -724,18 +708,16 @@ cargo build --release
 (cd {leo4_root} && cargo build --release -p leo4-rust-bridge \
                                         -p leo4-rust-worker \
                                         -p leo4-rust-emit)
-CDYLIB=$(realpath target/release/lib{crate_name}.so)
-mkdir -p lean/{iface}
-{leo4_root}/target/release/leo4-rust-emit \
-  --cdylib $CDYLIB --out-dir lean/.leo4-emit --emit-lean \
-  --lean-module {iface}.Rust
-mv lean/.leo4-emit/{crate_name}.leo4-rust-imports.lean lean/{iface}/Rust.lean
-cd lean && lake build
-LEO4_RUST_CDYLIB=$CDYLIB \
+cd lean
+LEO4_RUST_EMIT_BIN={leo4_root}/target/release/leo4-rust-emit \
+LEO4_RUST_IFACE={iface} \
+  lake run Leo4Rust/regenerate   # Phase 10-D2 Lake-driven emit
+lake build
+LEO4_RUST_CDYLIB=$(realpath ../target/release/lib{crate_name}.so) \
 LEO4_RUST_WORKER_BIN={leo4_root}/target/release/leo4-rust-worker \
 LEO4_RUST_HANDSHAKE_PKG={crate_name} \
 LEO4_RUST_HANDSHAKE_IFACE={iface} \
-  ./lean/.lake/build/bin/{crate_name}
+  ./.lake/build/bin/{crate_name}
 ```
 "#
     )
