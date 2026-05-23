@@ -7,6 +7,118 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `SPEC/lean-runtime-compat.md` — Lean impl compatibility surface (2026-05-21)
+
+Documentation-only landing in response to "should leo4
+support OxiLean?".
+
+**TL;DR**: leo4 is *runtime-spec-agnostic* — any Lean 4
+implementation that satisfies §1.1–1.4 of the new SPEC is
+supported transparently; impls that don't need a glue layer.
+That's leo4's policy; OxiLean (or any other alt-impl) doesn't
+get a special case.
+
+The new `SPEC/lean-runtime-compat.md` extracts the contract
+leo4 currently depends on from the reference Lean 4 impl:
+
+  §1.1 — Meta-programming API (`Lean.importModules`,
+         `ext.getModuleEntries`,
+         `Lean.Meta.SynthInstance.getInstances`,
+         attribute system, `leo4_constraint` syntax
+         category, deriving handler, Lake DSL).
+  §1.2 — `lean.h` C ABI symbols (full table of `lean_*`
+         functions the shim emitter uses, layout invariants
+         for `lean_alloc_ctor` / `lean_io_result_*` /
+         `lean_alloc_sarray` that Phase 10-B5 + the C4.x.x
+         wasm path both depend on).
+  §1.3 — `leanc` + `libleanshared` + `lean-toolchain` file
+         convention.
+  §1.4 — Reverse-direction surface (`@[extern]`,
+         `IO ByteArray` lowering ABI, `dlopen`-capable
+         `lean_exe` host).
+  §1.5 — Optional: Phase 7 (`IO α` → `future<α>`) + Phase 8
+         (Mathlib bridges) + external-marshal carriers.
+
+§2 is a case-study on **OxiLean**
+([cool-japan/oxilean](https://github.com/cool-japan/oxilean),
+pure-Rust CiC ITP, v0.1.2 2026-05-03). Inspection of
+`oxilean-elab/` + `oxilean-meta/` + the project's TODO.md
+revealed a far more mature compat surface than initial
+investigation suggested:
+
+  Strong signals:
+  * **Mathlib4 99.7% parse rate** (181,326 / 181,890 decls)
+    — OxiLean parses essentially all Lean 4 source.
+  * 32,345 tests passing; 320 curated theorem proofs at 100%.
+  * `oxilean-elab/src/lean4_compat/` — active source-syntax
+    compat layer (`Lean4CompatMatrix`, `Lean4NamespaceTracker`,
+    `Lean4OptionConfig`, `Lean4SectionManager`,
+    `Lean4SyntaxAdapter`, `Lean4SyntaxVersion`,
+    `Lean4TermRewriter`).
+  * `oxilean-elab/src/attribute/` (10+ kinds),
+    `derive/` + `derive_adv/` (10+ handlers),
+    `macro_expand/` (5 kinds) + `notation/` —
+    `@[leo4_export]`, `deriving LeanMarshal`,
+    `leo4_constraint` syntax category are all plausibly
+    registrable.
+  * `oxilean-meta/src/synth_instance/` — trait-based
+    (`InstanceSynthesizer`, `SynthInstanceConfig`);
+    direct adapter point for the admit-set algorithm's
+    `Lean.Meta.SynthInstance.getInstances` dependency.
+  * Codegen backends: Rust / WASM / LLVM / JS / C —
+    multiple lowering targets exist as analogues.
+  * `oxilean-runtime`: pluggable GC + refcount-closure
+    model + WASM runtime integration — same conceptual
+    ABI shape as reference Lean.
+  * OxiZ SMT integration already exercises the
+    SMT-backed-tactic pattern that adsmt targets via
+    leo4's Phase 9-B1.
+
+  Cautionary signals:
+  * Most modules carry `//! Auto-generated module structure`
+    — heavy codegen usage; trait surfaces may move fast.
+  * Mathlib4 99.7% is parse, not elaborate — leo4's needs
+    are closer to "elaborate + run handlers" than to
+    parse-only.
+  * C / WASM codegen targets OxiLean's *own* runtime ABI,
+    not `<lean/lean.h>` and not the
+    `leo4:host/leo4-component@0.1.0` WIT world.
+
+  Surface satisfiability matrix (revised after the deeper
+  dive — §1.1 score ↑ vs. initial pass):
+
+  | Section | Status | Effort |
+  |---|---|---|
+  | §1.1 meta-programming API | **likely satisfiable** via existing OxiLean infra | medium, may be 80%+ there |
+  | §1.2 `lean.h` C ABI | unsupported | large; OR bypass via leo4-wasm CM path |
+  | §1.3 `leanc` toolchain | unsupported | medium |
+  | §1.4 reverse direction | unsupported | large |
+  | §1.5 Phase 7 / 8 optional | trivial | none |
+
+**Two-axis surface matrix** in §2 ranks integration ROI:
+
+  1. OxiLean exposes `leo4:host/leo4-component@0.1.0` WIT
+     world via `oxilean-wasm` — bypasses §1.2 / §1.3
+     entirely; leo4-wasm pipeline becomes the transport.
+     Smallest scope.
+  2. OxiLean's `lean4_compat/` compiles
+     `lake/Leo4/Leo4/Export.lean` as a litmus test — if
+     that works, `@[leo4_export]` transfers transparently.
+  3. Otherwise a separate **leo4-OxiLean compat crate**
+     (out-of-tree) — keeps leo4 itself runtime-agnostic.
+
+Nothing in leo4 changes. ROADMAP.md "Future" section gains
+"Alternative Lean 4 implementation support" as a Phase 11+
+candidate. AGENTS.md "Recent decisions" gains a 2026-05-21
+entry pointing at this SPEC.
+
+If a future contributor proposes "support implementation
+X" for any X, the response is: read
+`SPEC/lean-runtime-compat.md`, run the §1.1–1.4 checklist,
+report which sections X satisfies. Integration work then
+follows from that diagnostic, not from leo4-side
+speculation.
+
 ### Added — Phase 10-C4.x.x step 1: real wasmtime Component Model dispatch (2026-05-21)
 
 Replaces the wasmtime backend stub with a working

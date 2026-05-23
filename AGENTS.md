@@ -431,6 +431,59 @@ would be expensive to relitigate:
   one process (multi-tenancy, etc.), they can use both
   backend modules' types directly bypassing `Default`, in a
   downstream crate.
+- **2026-05-21 — leo4 is Lean-impl-spec-agnostic; OxiLean is
+  the canonical alt-impl case study**. Reference Lean 4 is the
+  only impl leo4 currently runs against, but the surface leo4
+  depends on is now extracted as
+  `SPEC/lean-runtime-compat.md` (§1.1 meta-programming API,
+  §1.2 `lean.h` C ABI surface, §1.3 `leanc` toolchain, §1.4
+  reverse-direction extern/FFI). Any impl that satisfies that
+  surface is supported transparently; impls that don't need a
+  glue layer.
+
+  [OxiLean](https://github.com/cool-japan/oxilean) (pure-Rust
+  CiC ITP, v0.1.2 2026-05-03) is the canonical "alt impl"
+  reference case in that SPEC. It satisfies §1.5 (Mathlib
+  bridges) trivially (opt-in modules) but **NOT** §1.1–1.4 —
+  Rust-native `oxilean-runtime` doesn't expose `lean.h`
+  symbols, `oxilean-build` is not Lake, and the meta-
+  programming API is OxiLean-shaped. Integration is
+  achievable but requires substantial work **on the OxiLean
+  side** (or in a leo4-OxiLean compat-layer crate), not on
+  leo4 itself.
+
+  Most plausible OxiLean integration point: the C4.x.x wasm
+  pipeline. OxiLean's `oxilean-wasm` could expose the
+  `leo4:host/leo4-component@0.1.0` world from
+  `SPEC/wit/leo4-host.wit`; that bypasses §1.2's C-ABI
+  requirement entirely. Track as a Phase 11+ opportunity, not
+  a Phase 10 deliverable.
+
+  **Deeper-dive findings (2026-05-21)**:
+  `oxilean-elab/src/lean4_compat/` and
+  `oxilean-meta/src/synth_instance/` are encouraging — the
+  former is a source-level Lean 4 syntax compat layer in
+  active development (submodule names: `Lean4CompatMatrix`,
+  `Lean4NamespaceTracker`, `Lean4OptionConfig`,
+  `Lean4SectionManager`, `Lean4SyntaxAdapter`,
+  `Lean4SyntaxVersion`, `Lean4TermRewriter`), and the latter
+  exposes typeclass synthesis via a trait surface
+  (`InstanceSynthesizer`, `SynthInstanceConfig`) that's a
+  plausible adapter point for the admit-set algorithm. So
+  §1.1 of `SPEC/lean-runtime-compat.md` may be more
+  satisfiable than the surface inspection suggested.
+  Counterbalance: many OxiLean modules carry an
+  `//! Auto-generated module structure` doc-comment — a
+  project-maturity tell. Production use should wait until a
+  leo4-relevant integration test exists upstream that
+  exercises the compat layer end-to-end against real Lean 4
+  source files. The two-axis surface satisfiability matrix
+  lives in `SPEC/lean-runtime-compat.md` §2.
+
+  If 병익 (or any other contributor) ever proposes
+  "support implementation X", redirect them to
+  `SPEC/lean-runtime-compat.md` — that's the checklist that
+  determines whether the work is leo4-side or X-side.
 - **2026-05-21 — `SPEC/wit/leo4-host.wit` pinned at v0.1.0**.
   The Component Model interface that wasm-targeting leo4
   backends wrap. Key design choices: (a) **opaque `list<u8>`

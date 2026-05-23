@@ -699,6 +699,35 @@ solver backend. Do NOT bundle SMT-specific types
 
 ## Future / not yet on the phase ladder
 
+- **Alternative Lean 4 implementation support** (Phase 11+
+  candidate, 2026-05-21): leo4 was developed against the
+  reference Lean 4 implementation
+  ([leanprover/lean4](https://github.com/leanprover/lean4)).
+  The surface leo4 depends on is now extracted as
+  `SPEC/lean-runtime-compat.md` — any implementation
+  satisfying §1.1–1.4 is supported transparently; impls that
+  don't need a glue layer.
+
+  The canonical case study: **OxiLean**
+  ([cool-japan/oxilean](https://github.com/cool-japan/oxilean),
+  pure-Rust CiC ITP, v0.1.2 2026-05-03). OxiLean explicitly
+  targets CiC semantics compatible with Lean 4 but NOT byte-
+  level ABI / Lake / `lean.h` compatibility. Integration
+  requires substantial work on OxiLean's side (or in a leo4-
+  OxiLean compat-layer crate); leo4 itself doesn't change.
+
+  Most plausible OxiLean integration point: the C4.x.x wasm
+  pipeline. OxiLean's `oxilean-wasm` could expose the
+  `leo4:host/leo4-component@0.1.0` world from
+  `SPEC/wit/leo4-host.wit` — that bypasses §1.2's C-ABI
+  requirement entirely and uses CM-based interop instead.
+  No leo4 change needed; the bottleneck is OxiLean-side
+  plugin development.
+
+  Tracking position: Phase 11+ opportunity (not Phase 10
+  deliverable). Activates if/when an OxiLean contributor (or
+  the maintainers of another alt-impl) proposes a compat
+  layer.
 - **WASM backend** (`crates/leo4-wasm`): Lean→wasm itself is fragile;
   needs WASIp3 stable (Phase 7's gate) and a concrete use case. May
   fold into Phase 7 once both arrive.
