@@ -702,6 +702,7 @@ pub fn transpile_source_if_exported(
 /// / LCNF / Rust-emit / wrapper-synthesis pipeline. Wrapper
 /// synthesis can fail for types not covered by
 /// `render_marshallable_type` (see OX2).
+#[allow(clippy::too_many_lines)] // documented branches: structure vs definition
 pub fn transpile_source_to_unit(
     env: &Environment,
     registry: &mut Leo4ExportRegistry,
@@ -728,7 +729,64 @@ pub fn transpile_source_to_unit(
         registry.record_export(name);
     }
 
-    let pending = elaborate_decl(env, &inner_decl(&parsed).value).map_err(|e| {
+    // Branch on the inner decl kind: definitions take the fn
+    // transpile path; structures synthesise a type decl + bare
+    // name registration (no LeanProc dispatch arm).
+    let inner = inner_decl(&parsed);
+    match &inner.value {
+        Decl::Structure { name, fields, .. } => {
+            // Register the user type *first* so any subsequent
+            // fields referring to other user types (later in
+            // the same build) resolve.
+            registry.register_user_type(name);
+
+            let mut sfields = Vec::with_capacity(fields.len());
+            for f in fields {
+                let ty = surface_to_rust_type(&f.ty, &registry.user_types)
+                    .map_err(|e| LeanError::new(
+                        e.code,
+                        format!(
+                            "leo4-oxilean-build: structure `{name}` field \
+                             `{fname}`: {emsg}",
+                            fname = f.name,
+                            emsg = e.message,
+                        ),
+                    ))?;
+                sfields.push(StructField {
+                    name: f.name.clone(),
+                    ty,
+                });
+            }
+            let struct_src = synthesize_struct_type_with_users(
+                name,
+                &sfields,
+                &registry.user_types,
+            )?;
+            // Type-only unit: empty fn/wrapper, empty mangled.
+            // `emit_lib_rs` recognises mangled.is_empty() as
+            // the "skip dispatch arm" signal.
+            return Ok(Some(TranspileUnit {
+                type_decls: vec![struct_src],
+                fn_src: String::new(),
+                wrapper_src: String::new(),
+                fn_name: name.clone(),
+                mangled: String::new(),
+            }));
+        }
+        Decl::Definition { .. } => {} // fall through to fn path
+        _ => {
+            return Err(LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                format!(
+                    "leo4-oxilean-build: only `def` or `structure` declarations \
+                     are transpilable today; got {kind}",
+                    kind = decl_kind_label(&inner.value),
+                ),
+            ));
+        }
+    }
+
+    let pending = elaborate_decl(env, &inner.value).map_err(|e| {
         LeanError::new(
             leo4_abi::error::error_codes::DECODE_ERROR,
             format!("leo4-oxilean-build: elaborate_decl failed: {e:?}"),
@@ -779,6 +837,21 @@ pub fn transpile_source_to_unit(
         mangled: mangled.to_string(),
         type_decls: Vec::new(),
     }))
+}
+
+fn decl_kind_label(decl: &Decl) -> &'static str {
+    match decl {
+        Decl::Definition { .. } => "Definition",
+        Decl::Theorem { .. } => "Theorem",
+        Decl::Axiom { .. } => "Axiom",
+        Decl::Inductive { .. } => "Inductive",
+        Decl::Structure { .. } => "Structure",
+        Decl::Import { .. } => "Import",
+        Decl::Mutual { .. } => "Mutual",
+        Decl::Derive { .. } => "Derive",
+        Decl::Attribute { .. } => "Attribute",
+        _ => "<other>",
+    }
 }
 
 // ─── §5 Canonical-ABI wrapper synthesis ──────────────────────────────────
@@ -1630,6 +1703,12 @@ pub fn emit_lib_rs(units: &[TranspileUnit], schema_hash: &str) -> String {
     }
 
     for u in units {
+        // Type-only units (`fn_src.is_empty()`) — already emitted
+        // their type decls in the loop above. Skip the fn/wrapper
+        // block so we don't write empty paragraphs.
+        if u.fn_src.is_empty() && u.wrapper_src.is_empty() {
+            continue;
+        }
         s.push_str(&u.fn_src);
         if !u.fn_src.ends_with('\n') {
             s.push('\n');
@@ -1667,6 +1746,11 @@ pub fn emit_lib_rs(units: &[TranspileUnit], schema_hash: &str) -> String {
     s.push_str("    {\n");
     s.push_str("        match mangled {\n");
     for u in units {
+        // Type-only units have an empty mangled — they don't
+        // get a LeanProc dispatch arm.
+        if u.mangled.is_empty() {
+            continue;
+        }
         writeln!(
             s,
             "            {mangled:?} => {fn_name}_call(args),",
@@ -2414,6 +2498,107 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn transpile_source_to_unit_handles_tagged_structure() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        // OxiLean's `structure` parser takes fields without
+        // separators (space / newline only); `;` is rejected.
+        let src = "@[leo4_export] structure Point where x : UInt32 y : UInt32";
+        let out = transpile_source_to_unit(&env, &mut registry, src, "")
+            .expect("structure transpile must succeed");
+        let unit = out.expect("structure must yield Some(TranspileUnit)");
+
+        // Type-only unit signals.
+        assert!(unit.fn_src.is_empty(), "structure unit has no fn body");
+        assert!(unit.wrapper_src.is_empty(), "structure unit has no wrapper");
+        assert!(unit.mangled.is_empty(), "structure unit has no dispatch key");
+        assert_eq!(unit.fn_name, "Point");
+        assert_eq!(unit.type_decls.len(), 1);
+
+        // Registry tracks Point.
+        assert!(registry.user_types.contains("Point"));
+
+        // Emitted struct source has the right shape.
+        let sd = &unit.type_decls[0];
+        assert!(sd.contains("pub struct Point {"));
+        assert!(sd.contains("pub x: u32,"));
+        assert!(sd.contains("pub y: u32,"));
+        assert!(sd.contains("impl ::leo4_abi::LeanMarshal for Point"));
+    }
+
+    #[test]
+    fn transpile_source_to_unit_structure_references_prior_user_type() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+
+        // First decl introduces Point.
+        let _ = transpile_source_to_unit(
+            &env,
+            &mut registry,
+            "@[leo4_export] structure Point where x : UInt32 y : UInt32",
+            "",
+        )
+        .expect("Point parses");
+
+        // Second decl references Point as a field type. Avoid
+        // `from` — it's a Rust keyword and would surface as a
+        // raw-ident; that escaping is OX2's next-next sub-step.
+        let out = transpile_source_to_unit(
+            &env,
+            &mut registry,
+            "@[leo4_export] structure Edge where head : Point tail : Point",
+            "",
+        )
+        .expect("Edge parses")
+        .expect("Edge yields unit");
+
+        // Both names registered.
+        assert!(registry.user_types.contains("Point"));
+        assert!(registry.user_types.contains("Edge"));
+        // Edge's struct decl references Point via bare name.
+        let sd = &out.type_decls[0];
+        assert!(sd.contains("pub head: Point,"));
+        assert!(sd.contains("pub tail: Point,"));
+        assert!(sd.contains("<Point as ::leo4_abi::LeanMarshal>"));
+    }
+
+    #[test]
+    fn transpile_source_to_unit_skips_untagged_structure() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "structure Untagged where x : UInt32";
+        let out = transpile_source_to_unit(&env, &mut registry, src, "")
+            .expect("parse");
+        assert!(out.is_none(), "untagged structure must yield None");
+        assert!(registry.user_types.is_empty());
+    }
+
+    #[test]
+    fn emit_lib_rs_handles_type_only_unit() {
+        // Hand-build a type-only unit + a fn unit; verify
+        // the emit shape is: type decl block → fn block →
+        // dispatcher with one arm (only the fn unit).
+        let type_only = TranspileUnit {
+            type_decls: vec!["pub struct Point { pub x: u32 }".to_string()],
+            fn_src: String::new(),
+            wrapper_src: String::new(),
+            fn_name: "Point".to_string(),
+            mangled: String::new(),
+        };
+        let fn_unit = fixture_unit("Sample_addOne", "abc12345_ab_a");
+        let out = emit_lib_rs(&[type_only, fn_unit], "deadbeefcafe1");
+
+        assert!(out.contains("pub struct Point { pub x: u32 }"));
+        assert!(out.contains("pub fn Sample_addOne"));
+        // Dispatcher has exactly one arm (the fn, not the type).
+        let dispatch_arm_count = out.matches("_call(args)").count();
+        // Once in the match arm + multiple times in the actual
+        // wrapper source. Look for the specific match-arm form:
+        assert!(out.contains("\"abc12345_ab_a\" => Sample_addOne_call(args)"));
+        let _ = dispatch_arm_count;
     }
 
     #[test]

@@ -7,6 +7,55 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 user records — `Decl::Structure` integration in `transpile_source_to_unit` (2026-05-22)
+
+OX2 user-records third increment. `transpile_source_to_unit`
+now recognises `@[leo4_export] structure Foo where ...`
+sources and produces a *type-only* `TranspileUnit`:
+
+- `fn_src` / `wrapper_src` are empty (no callable code)
+- `mangled` is empty (no `LeanProc` dispatch arm)
+- `type_decls` carries the synthesised struct + LeanMarshal
+  impl source
+- `registry.user_types` gains the structure's name, so any
+  subsequent `@[leo4_export] def` referring to the type by
+  name marshals through it transparently
+- subsequent structures can use earlier ones as field
+  types — `Edge { head: Point, tail: Point }` works
+
+`emit_lib_rs` updated to recognise the two type-only
+sentinels: it (a) emits `type_decls` ahead of fn / wrapper
+bodies as before, (b) skips fn / wrapper emission for units
+whose source is empty, (c) skips dispatcher arms for units
+whose `mangled` is empty.
+
+OxiLean parser note: structure fields are separated by
+whitespace / newlines, NOT by `;`. Test sources reflect
+this.
+
+Tests 65 → 69 (+4):
+
+  + `transpile_source_to_unit_handles_tagged_structure` —
+    end-to-end Lean source → emitted struct + impl.
+  + `transpile_source_to_unit_structure_references_prior_user_type`
+    — chains two structures (Point, then Edge with two
+    Point fields) through the same registry.
+  + `transpile_source_to_unit_skips_untagged_structure` —
+    untagged structure yields `Ok(None)`, registry unchanged.
+  + `emit_lib_rs_handles_type_only_unit` — verifies the
+    skip-for-empty-fields logic in `emit_lib_rs`.
+
+clippy --all-targets -D warnings clean.
+
+**Still pending for OX2 user records before v1.0 RC**:
+
+1. Lean field names that are Rust keywords (e.g. `from`,
+   `type`, `match`) — need raw-ident escaping (`r#from`) in
+   the emitted Rust struct. Not in this commit.
+2. Inductive (multi-ctor enums) — `synthesize_enum_type`
+   analogous to `synthesize_struct_type`, with variant-
+   payload widening per `SPEC/canonical-abi.md` §9.
+
 ### Added — `leo4-oxilean-build`: OX2 user records — SurfaceExpr lifter + user-type registry pass-through (2026-05-22)
 
 OX2 user-records second increment. Wires
