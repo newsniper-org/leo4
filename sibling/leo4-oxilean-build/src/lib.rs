@@ -47,7 +47,7 @@
 //!    handler, and writes the result to a destination Cargo
 //!    crate dir.
 //!
-//! ## What works today (9 / 9 tests)
+//! ## What works today (17 / 17 tests)
 //!
 //! - Cargo deps resolve + compile (5 OxiLean crates
 //!   reachable).
@@ -124,16 +124,17 @@
 //!    `def f (x : T) := …`) need a richer adapter — the
 //!    upstream `lean4_compat` v0.1.2 layer is textual only.
 //! 3. **`@[leo4_export]` discovery** — bind a custom handler
-//!    via `oxilean_elab::attribute::AttributeManager::
-//!    register_custom_handler(AttrHandler { name:
-//!    "leo4_export", … })`. Walk the elaborated env to
-//!    collect tagged decls.
+//!    via `oxilean_elab::attribute::AttributeManager::register_custom_handler`.
+//!    Walk the elaborated env to collect tagged decls.
+//!    **(Done 2026-05-22 — `Leo4ExportRegistry` +
+//!    `transpile_source_if_exported`.)**
 //! 4. **`deriving LeanMarshal`** — analogous binding via
-//!    `oxilean_elab::attribute::DeriveHandlerRegistry::
-//!    register(DeriveHandler{ class_name: "LeanMarshal", …
-//!    })`. The handler emits the encoder/decoder boilerplate
-//!    that `lake/Leo4Plugin/Leo4Plugin/Deriving.lean` does on
-//!    the reference Lean side.
+//!    `oxilean_elab::attribute::DeriveHandlerRegistry::register`.
+//!    The handler emits the encoder/decoder boilerplate that
+//!    `lake/Leo4Plugin/Leo4Plugin/Deriving.lean` does on the
+//!    reference Lean side. **(Wired 2026-05-22 — handler
+//!    registered with `.no_instance()`; Rust-side impl
+//!    synthesis is part of step 5.)**
 //! 5. **Canonical-ABI wrapper synthesis** — for each
 //!    transpiled fn, generate a sibling
 //!    `pub fn <name>_call(args: &[u8]) -> Vec<u8>` that
@@ -151,10 +152,27 @@ use leo4_abi::LeanError;
 use oxilean_codegen::lcnf::LcnfFunDecl;
 use oxilean_codegen::rust_target_backend::{RustItem, RustTargetBackend};
 use oxilean_codegen::to_lcnf::{decl_to_lcnf, ToLcnfConfig};
+use oxilean_elab::attribute::{
+    AttrAction, AttrEntry, AttrHandler, AttributeManager, DeriveHandler,
+    DeriveHandlerRegistry,
+};
 use oxilean_elab::elab_decl::{elaborate_decl, PendingDecl};
 use oxilean_elab::lean4_compat::{Lean4SyntaxAdapter, Lean4TermRewriter};
 use oxilean_kernel::{env::Environment, Expr, Name};
-use oxilean_parse::{Lexer, Parser};
+use oxilean_parse::{AttributeKind, Decl, Lexer, Located, Parser};
+
+/// Custom attribute name leo4 owns: `@[leo4_export]`. Tag a Lean
+/// definition with this attribute to mark it for export through
+/// leo4's canonical-ABI boundary; the transpiler only emits Rust
+/// wrappers for tagged decls.
+pub const LEO4_EXPORT_ATTR: &str = "leo4_export";
+
+/// Lean class name leo4 owns for auto-derive: `deriving LeanMarshal`.
+/// Registered into OxiLean's `DeriveHandlerRegistry` so the
+/// elaborator recognises it as a known class; the transpiler
+/// emits the actual `LeanMarshal` impl on the Rust side, not
+/// inside OxiLean.
+pub const LEAN_MARSHAL_DERIVE: &str = "LeanMarshal";
 
 /// Normalise a Lean 4 surface-syntax source string into a form
 /// `oxilean-parse::Parser` can consume. Drives
@@ -401,6 +419,233 @@ pub fn type_mapper_is_lean_h_free() -> bool {
     true
 }
 
+// ─── Hook 3 — `@[leo4_export]` / `deriving LeanMarshal` discovery ──────────
+//
+// SPEC/rust-native-lean.md §7.1 lists three OxiLean evaluator
+// hooks (Hooks 1 + 2 absent; Hook 3 PRESENT). Hook 3 is
+// upstream's `AttributeManager::register_custom_handler` +
+// `DeriveHandlerRegistry::register`. leo4 plugs into Hook 3 to
+// register its own attribute name (`@[leo4_export]`) and its
+// own deriving handler (`LeanMarshal`). The actual transpile
+// then walks parsed `Decl::Attribute { attrs, decl }` outer
+// wrappers, matches `attrs` against `LEO4_EXPORT_ATTR`, and
+// only emits Rust for tagged decls — the rest are skipped.
+//
+// Note on parser shape: OxiLean's `Parser::parse_decl` returns
+// `@[name] def f := body` as `Decl::Attribute { attrs:
+// Vec<String>, decl: Box<Located<Decl>> }`. The *inner*
+// `Decl::Definition.attrs` field is left empty by the parser —
+// the outer wrapper is the only place attribute names appear.
+// `elaborate_decl` further unwraps `Decl::Attribute` and
+// discards the outer `attrs` (upstream code path; v0.1.2). So
+// leo4 inspects the parser AST *before* elaboration to spot
+// the tag, then elaborates the inner decl normally.
+
+/// Registry owning leo4's attribute + derive handlers, plus the
+/// `AttributeManager` accumulating discovered `@[leo4_export]`
+/// tags across a build. Mutable across `transpile_source_if_exported`
+/// calls so a whole package's transpile produces a single
+/// registry capturing every export.
+///
+/// Created with `Leo4ExportRegistry::new()`; the constructor
+/// pre-populates the manager + derive registry with leo4's two
+/// handlers (`leo4_export` custom attribute, `LeanMarshal`
+/// derive). Inspect with `has_export_handler()` /
+/// `has_marshal_derive()` (used for tests + status diagnostics).
+pub struct Leo4ExportRegistry {
+    pub manager: AttributeManager,
+    pub derive: DeriveHandlerRegistry,
+}
+
+impl Leo4ExportRegistry {
+    /// Build a registry pre-populated with leo4's attribute +
+    /// derive handlers.
+    #[must_use]
+    pub fn new() -> Self {
+        let mut manager = AttributeManager::new();
+        manager.register_custom_handler(AttrHandler::new(
+            LEO4_EXPORT_ATTR,
+            "Mark a top-level definition for export through leo4's \
+             canonical-ABI boundary. The leo4-oxilean-build transpiler \
+             emits a Rust wrapper for each tagged decl; untagged decls \
+             are skipped.",
+            AttrAction::Custom(LEO4_EXPORT_ATTR.into()),
+        ));
+
+        let mut derive = DeriveHandlerRegistry::new();
+        derive.register(
+            DeriveHandler::new(
+                Name::str(LEAN_MARSHAL_DERIVE),
+                "Auto-derive leo4 canonical-ABI marshalling for a record \
+                 / inductive type. The handler emits no Lean instance — \
+                 the transpiler synthesises the equivalent Rust \
+                 `LeanMarshal` impl on the boundary crate side.",
+            )
+            // The transpile path doesn't need OxiLean to emit a
+            // Lean-side instance; we generate the marshalling
+            // Rust directly. `no_instance()` documents this and
+            // suppresses upstream instance-generation work.
+            .no_instance(),
+        );
+
+        Self { manager, derive }
+    }
+
+    /// True iff the `@[leo4_export]` custom-attribute handler
+    /// is registered with the inner `AttributeManager`.
+    #[must_use]
+    pub fn has_export_handler(&self) -> bool {
+        self.manager.get_handler(LEO4_EXPORT_ATTR).is_some()
+    }
+
+    /// True iff the `LeanMarshal` derive handler is registered
+    /// with the inner `DeriveHandlerRegistry`.
+    #[must_use]
+    pub fn has_marshal_derive(&self) -> bool {
+        self.derive.has(&Name::str(LEAN_MARSHAL_DERIVE))
+    }
+
+    /// Record an `@[leo4_export]` discovery in the manager so
+    /// downstream queries (`manager.get_by_kind("leo4_export")`)
+    /// can enumerate every export across a package's source.
+    /// Used by `transpile_source_if_exported` after parse.
+    pub fn record_export(&mut self, decl_name: &str) {
+        // Map the parser-level decl-name string into a kernel
+        // Name (the AttributeManager indexes by kernel Name).
+        let kernel_name = Name::str(decl_name);
+        let entry = AttrEntry::new(
+            AttributeKind::Custom(LEO4_EXPORT_ATTR.into()),
+            kernel_name,
+        );
+        // `register_attribute` errors on duplicates; treat as
+        // best-effort — duplicates in a single build pass would
+        // indicate a parser-level issue, not user error.
+        let _ = self.manager.register_attribute(entry);
+    }
+
+    /// Enumerate every decl name (kernel `Name`) the manager
+    /// has recorded as `@[leo4_export]`-tagged so far.
+    #[must_use]
+    pub fn exported_names(&self) -> Vec<Name> {
+        self.manager.get_by_kind(LEO4_EXPORT_ATTR)
+    }
+}
+
+impl Default for Leo4ExportRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Inspect a parsed top-level decl + return whether its outer
+/// attribute wrapper contains `@[leo4_export]`. Inspects only
+/// the parser AST — does NOT elaborate.
+#[must_use]
+pub fn decl_has_leo4_export(decl: &Located<Decl>) -> bool {
+    if let Decl::Attribute { attrs, .. } = &decl.value {
+        attrs.iter().any(|s| s == LEO4_EXPORT_ATTR)
+    } else {
+        false
+    }
+}
+
+/// Unwrap one layer of `Decl::Attribute { decl, .. }` if
+/// present; otherwise return the decl unchanged. Mirrors
+/// `elaborate_decl`'s upstream behaviour so the inner decl
+/// reaches kernel-level layers identically.
+#[must_use]
+pub fn inner_decl(decl: &Located<Decl>) -> &Located<Decl> {
+    if let Decl::Attribute { decl, .. } = &decl.value {
+        decl.as_ref()
+    } else {
+        decl
+    }
+}
+
+/// Best-effort name extraction from a parsed `Decl`. Used to
+/// register a discovery with the `AttributeManager` after
+/// parsing but before elaboration.
+#[must_use]
+pub fn decl_name(decl: &Located<Decl>) -> Option<&str> {
+    let target = inner_decl(decl);
+    match &target.value {
+        Decl::Definition { name, .. }
+        | Decl::Theorem { name, .. }
+        | Decl::Axiom { name, .. }
+        | Decl::Inductive { name, .. } => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+/// Hook-3-aware variant of `transpile_source`. Parses the
+/// source, checks the outer-wrapper attribute list against
+/// `LEO4_EXPORT_ATTR`, and:
+///
+/// - If `@[leo4_export]` is **not** present → returns
+///   `Ok(None)` (skipped, no transpile work done).
+/// - If `@[leo4_export]` **is** present → records the discovery
+///   in `registry.manager` and returns `Ok(Some(rust_source))`
+///   with the same pipeline as `transpile_source`.
+///
+/// Errors propagate as for `transpile_source` (parse / elab /
+/// LCNF / Rust-emit failures wrap into `LeanError`).
+pub fn transpile_source_if_exported(
+    env: &Environment,
+    registry: &mut Leo4ExportRegistry,
+    src: &str,
+) -> Result<Option<String>, LeanError> {
+    let normalised = lean4_normalize(src);
+
+    let mut lexer = Lexer::new(&normalised);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::new(tokens);
+    let parsed = parser.parse_decl().map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
+        )
+    })?;
+
+    if !decl_has_leo4_export(&parsed) {
+        return Ok(None);
+    }
+
+    // Record the discovery before elaboration so even if elab
+    // chokes, the registry still knows what was *intended* to
+    // be exported (useful for diagnostics in a multi-decl
+    // build pass).
+    if let Some(name) = decl_name(&parsed) {
+        registry.record_export(name);
+    }
+
+    // Elaborate the inner decl directly — upstream
+    // `elaborate_decl(env, Decl::Attribute{..})` does the same
+    // unwrap and drops outer attrs; we've already captured the
+    // tag.
+    let pending = elaborate_decl(env, &inner_decl(&parsed).value).map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!("leo4-oxilean-build: elaborate_decl failed: {e:?}"),
+        )
+    })?;
+
+    let (name, ty, val) = match pending {
+        PendingDecl::Definition { name, ty, val, .. } => (name, ty, val),
+        other => {
+            return Err(LeanError::new(
+                leo4_abi::error::error_codes::ENCODE_ERROR,
+                format!(
+                    "leo4-oxilean-build: only `def` declarations are \
+                     transpilable today; got {other:?}"
+                ),
+            ));
+        }
+    };
+
+    let (params, body) = unfold_decl(&ty, &val);
+    transpile_kernel_decl(&name, &params, &body).map(Some)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -609,5 +854,155 @@ mod tests {
         assert!(!src.contains("lean_box"));
         assert!(!src.contains("lean_unbox"));
         assert!(!src.contains("lean_object"));
+    }
+
+    // ─── Hook 3 — `@[leo4_export]` discovery tests ────────────────────
+
+    #[test]
+    fn registry_registers_leo4_export_handler() {
+        let registry = Leo4ExportRegistry::new();
+        assert!(
+            registry.has_export_handler(),
+            "Leo4ExportRegistry::new() must register the leo4_export custom-attr handler"
+        );
+        // Verify the handler's recorded name + doc are what we
+        // wrote (defends against accidental rename in upstream).
+        let handler = registry
+            .manager
+            .get_handler(LEO4_EXPORT_ATTR)
+            .expect("export handler must be retrievable by name");
+        assert_eq!(handler.name, LEO4_EXPORT_ATTR);
+        assert!(
+            handler.doc.contains("leo4")
+                && handler.doc.contains("canonical-ABI"),
+            "doc string must mention leo4 + canonical-ABI"
+        );
+    }
+
+    #[test]
+    fn registry_registers_lean_marshal_derive() {
+        let registry = Leo4ExportRegistry::new();
+        assert!(
+            registry.has_marshal_derive(),
+            "Leo4ExportRegistry::new() must register the LeanMarshal derive handler"
+        );
+    }
+
+    #[test]
+    fn registry_default_matches_new() {
+        let a = Leo4ExportRegistry::new();
+        let b = Leo4ExportRegistry::default();
+        // Both should have leo4's handlers populated.
+        assert!(a.has_export_handler() && b.has_export_handler());
+        assert!(a.has_marshal_derive() && b.has_marshal_derive());
+    }
+
+    #[test]
+    fn decl_has_leo4_export_detects_tag_via_parser() {
+        // Drive a real parser pass so the test exercises the
+        // exact AST shape upstream produces, not a hand-built
+        // mock.
+        let src = "@[leo4_export] def f : Nat -> Nat := fun n -> n";
+        let normalised = lean4_normalize(src);
+        let mut lexer = Lexer::new(&normalised);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let decl = parser
+            .parse_decl()
+            .expect("parser must accept @[leo4_export] def");
+        assert!(
+            decl_has_leo4_export(&decl),
+            "tagged decl must be recognised"
+        );
+        // The unwrapped inner decl is a Definition.
+        let inner = inner_decl(&decl);
+        assert!(
+            matches!(&inner.value, Decl::Definition { .. }),
+            "inner unwrap must surface the Definition"
+        );
+        // Name extraction works.
+        assert_eq!(decl_name(&decl), Some("f"));
+    }
+
+    #[test]
+    fn decl_has_leo4_export_rejects_untagged_decl() {
+        let src = "def g : Nat -> Nat := fun n -> n";
+        let mut lexer = Lexer::new(src);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let decl = parser.parse_decl().expect("plain def parses");
+        assert!(!decl_has_leo4_export(&decl));
+        // Untagged inner decl == outer decl.
+        assert!(matches!(&decl.value, Decl::Definition { .. }));
+        assert_eq!(decl_name(&decl), Some("g"));
+    }
+
+    #[test]
+    fn decl_has_leo4_export_ignores_unrelated_attrs() {
+        // `@[simp]` doesn't activate leo4 transpile.
+        let src = "@[simp] def h : Nat -> Nat := fun n -> n";
+        let mut lexer = Lexer::new(src);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let decl = parser.parse_decl().expect("@[simp] def parses");
+        assert!(!decl_has_leo4_export(&decl));
+    }
+
+    #[test]
+    fn transpile_source_if_exported_skips_untagged() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "def g : Nat -> Nat := fun n -> n";
+        let out = transpile_source_if_exported(&env, &mut registry, src)
+            .expect("parse path succeeds");
+        assert!(out.is_none(), "untagged decl must yield Ok(None)");
+        // Manager records nothing for skipped decls.
+        assert!(registry.exported_names().is_empty());
+    }
+
+    #[test]
+    fn transpile_source_if_exported_records_when_tagged() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "@[leo4_export] def f : Nat -> Nat := fun n -> n";
+
+        let result = transpile_source_if_exported(&env, &mut registry, src);
+        // Same Ok/Err parity rule as transpile_source: parse +
+        // pre-record happens regardless of whether elab against
+        // an empty env succeeds. The tag must always be
+        // captured by the time we exit, since recording happens
+        // *before* elab.
+        let exported = registry.exported_names();
+        assert_eq!(
+            exported.len(),
+            1,
+            "registry must contain one export — got {exported:?}"
+        );
+        assert_eq!(exported[0].to_string(), "f");
+
+        // Pipeline outcome is documented as either Ok(Some(_))
+        // or Err depending on whether elab finds `Nat` in the
+        // empty env. Both are valid for this empty-env probe.
+        match result {
+            Ok(Some(rust_src)) => {
+                assert!(!rust_src.contains("lean_box"));
+                eprintln!("transpile_source_if_exported → emitted:\n{rust_src}");
+            }
+            Ok(None) => {
+                panic!("tagged decl must NOT yield Ok(None) — got skipped");
+            }
+            Err(e) => {
+                let code = e.code;
+                eprintln!(
+                    "transpile_source_if_exported → expected-ish err (code 0x{code:08x}): {}",
+                    e.message
+                );
+                assert!(
+                    code == leo4_abi::error::error_codes::DECODE_ERROR
+                        || code == leo4_abi::error::error_codes::ENCODE_ERROR,
+                    "unexpected error code: 0x{code:08x}"
+                );
+            }
+        }
     }
 }

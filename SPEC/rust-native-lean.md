@@ -499,12 +499,23 @@ forever, this path doesn't need them.
         │                              `where; → where`, `∧∨¬ → &&||!`)
         ▼
 [Lean source in OxiLean parser dialect]
-        │ oxilean-parse + oxilean-elab (parses, elaborates,
-        │                                runs `@[leo4_export]` /
-        │                                `deriving LeanMarshal`
-        │                                handlers via Hook 3)
+        │ oxilean-parse::Parser::parse_decl
         ▼
-[OxiLean Env + LcnfModule]
+[Located<Decl> (parser AST)]
+        │ leo4_oxilean_build::decl_has_leo4_export
+        │   → Decl::Attribute { attrs, .. } inspection
+        │   → tagged decls recorded into Leo4ExportRegistry
+        │     (Hook 3: AttributeManager + DeriveHandlerRegistry
+        │      pre-populated with @[leo4_export] custom handler
+        │      + LeanMarshal derive handler)
+        │   → untagged decls returned as Ok(None) — skipped
+        ▼
+[Tagged Located<Decl>]
+        │ oxilean-elab::elaborate_decl (unwraps Decl::Attribute,
+        │                               elaborates inner decl)
+        ▼
+[OxiLean Env + PendingDecl]
+        │ leo4_oxilean_build::unfold_decl + decl_to_lcnf
         │ oxilean-codegen::lcnf normalisation
         ▼
 [LcnfFunDecl[]]
@@ -578,10 +589,20 @@ Rust source**.
       packages that use header-binder syntax will need a
       pre-pass. Wired in `sibling/leo4-oxilean-build/src/lib.rs::lean4_normalize`
       (2026-05-22).
-- [ ] **Does the LCNF lowering preserve attribute metadata
-      (specifically `@[leo4_export]` tags)?** Hook 3 is
-      present at the elaborator level but its propagation to
-      LCNF / codegen needs verification.
+- [x] **Does the LCNF lowering preserve attribute metadata
+      (specifically `@[leo4_export]` tags)?** No — upstream
+      `elaborate_decl` v0.1.2 unwraps `Decl::Attribute { attrs,
+      decl }` and discards the outer `attrs`. The inner
+      `Decl::Definition.attrs` field is left empty by the
+      parser, so attribute info doesn't reach `PendingDecl` /
+      LCNF. **leo4's wiring works around this** by inspecting
+      the parser AST *before* elaboration
+      (`decl_has_leo4_export` + `inner_decl` in
+      `sibling/leo4-oxilean-build/src/lib.rs`), recording the
+      tag in a separate `Leo4ExportRegistry::manager`, then
+      elaborating the inner decl normally. The tag survives
+      in the registry, not in the elab output. Wired
+      2026-05-22.
 - [ ] **How does the transpiled Rust handle Lean
       `Nat`-vs-`UInt64` distinction?** `lcnf_to_rust_type`
       maps both to `u64`; that's fine for leo4's IDL surface

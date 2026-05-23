@@ -7,6 +7,70 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: Hook 3 `@[leo4_export]` / `LeanMarshal` discovery wired (2026-05-22)
+
+Plugs leo4 into OxiLean evaluator Hook 3 (SPEC/rust-native-lean.md
+§7.1, listed as PRESENT). New public surface:
+
+- `LEO4_EXPORT_ATTR` / `LEAN_MARSHAL_DERIVE` — string
+  constants leo4 owns at the OxiLean boundary.
+- `Leo4ExportRegistry` — owns an `AttributeManager` +
+  `DeriveHandlerRegistry`. `::new()` pre-populates both with
+  leo4's handlers:
+  - `AttrHandler::new("leo4_export", …, AttrAction::Custom)`
+    registered via `manager.register_custom_handler`.
+  - `DeriveHandler::new(Name::str("LeanMarshal"), …).no_instance()`
+    registered via `derive.register`. `no_instance()` signals
+    that the transpiler emits the Rust `LeanMarshal` impl
+    directly — no Lean-side typeclass instance is needed.
+- `decl_has_leo4_export(&Located<Decl>) -> bool` — inspect a
+  parsed top-level decl's outer `Decl::Attribute` wrapper for
+  the `leo4_export` tag. AST-only, no elaboration.
+- `inner_decl(&Located<Decl>) -> &Located<Decl>` — unwrap
+  one layer of `Decl::Attribute` (mirrors `elaborate_decl`'s
+  upstream unwrap).
+- `decl_name(&Located<Decl>) -> Option<&str>` — best-effort
+  declaration-name extraction (Definition / Theorem / Axiom /
+  Inductive). Used to record discoveries in the manager
+  before elaboration.
+- `transpile_source_if_exported(env, registry, src) ->
+  Result<Option<String>, LeanError>` — Hook-3-aware variant
+  of `transpile_source`. Untagged decls yield `Ok(None)` with
+  no work done; tagged decls record themselves into
+  `registry.manager` (visible via `registry.exported_names()`)
+  and proceed through the full pipeline.
+
+Parser-shape note documented inline: OxiLean's parser maps
+`@[name] def f := body` to `Decl::Attribute { attrs:
+Vec<String>, decl: Box<Located<Decl>> }`, leaving the inner
+`Decl::Definition.attrs` field empty. `elaborate_decl` in
+v0.1.2 unwraps `Decl::Attribute` and discards the outer
+`attrs`. So leo4 inspects the *parser* AST (not the
+elaborated `PendingDecl`) to spot the tag, then elaborates
+the inner decl normally — captured tag is preserved in the
+registry, not the elab output.
+
+Tests 9 → 17:
+
+  + `registry_registers_leo4_export_handler`
+  + `registry_registers_lean_marshal_derive`
+  + `registry_default_matches_new`
+  + `decl_has_leo4_export_detects_tag_via_parser`
+  + `decl_has_leo4_export_rejects_untagged_decl`
+  + `decl_has_leo4_export_ignores_unrelated_attrs`
+  + `transpile_source_if_exported_skips_untagged`
+  + `transpile_source_if_exported_records_when_tagged`
+
+All exercise real parser fixtures (not hand-built ASTs) so
+the test relationships to upstream AST shape are concrete.
+clippy --all-targets -D warnings clean.
+
+Activation plan §3 + §4 (in lib.rs module docstring) ticked
+done. Next layer is §5 — canonical-ABI wrapper synthesis
+(per-fn `<name>_call(args: &[u8]) -> Vec<u8>` boundary
+shim that adapts the transpiled fn to leo4-rust-native's
+`LeanProc` contract).
+
 ### Added — `leo4-oxilean-build`: `lean4_compat` syntax adapter pre-processor wired (2026-05-22)
 
 Drops a `lean4_normalize(src: &str) -> String` helper at the
