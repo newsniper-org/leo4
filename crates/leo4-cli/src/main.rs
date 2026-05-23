@@ -1,6 +1,6 @@
 //! `leo4` — top-level CLI.
 //!
-//! Two scaffolding subcommands with distinct semantics:
+//! Three subcommands:
 //!
 //! - `leo4 create <direction> <dir>` — **new project**. Creates
 //!   the target directory (or expects it to exist + be empty)
@@ -18,14 +18,20 @@
 //!     * creates `lean/` with a starter `Sample.lean` +
 //!       `lakefile.lean` if absent.
 //!
-//! Both flavours support `--forward` (default) and `--reverse`
-//! direction. Forward = Lean exports + Rust caller (`@[leo4_export]`
-//! / `leo4::import!`). Reverse = Rust cdylib + Lean caller
-//! (`#[leo4::export]` / generated Lean wrapper).
+//! - `leo4 run` — **one-shot build + run** (Phase 10-D1).
+//!   Detects direction from `Cargo.toml` (`crate-type =
+//!   ["cdylib"]` ⇒ reverse, else forward), then executes the
+//!   pipeline end-to-end: Lake build, plugin/emit invocation,
+//!   Cargo build or final lean_exe build, then runs the binary
+//!   with the matching env matrix wired up.
 //!
-//! The CLI does not invoke `cargo` or `lake` — it just edits /
-//! writes files. The README in each scaffold walks the user
-//! through the build commands.
+//! Both `create` and `init` support `--forward` (default) and
+//! `--reverse` direction. Forward = Lean exports + Rust caller
+//! (`@[leo4_export]` / `leo4::import!`). Reverse = Rust cdylib
+//! + Lean caller (`#[leo4::export]` / generated Lean wrapper).
+//!
+//! `create` / `init` do not invoke `cargo` or `lake` — they just
+//! edit / write files. `run` is the orchestration entry point.
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -33,6 +39,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use clap::{Parser, Subcommand};
@@ -78,6 +85,32 @@ enum Cmd {
         #[arg(long)]
         leo4_root: Option<PathBuf>,
     },
+
+    /// Build + run the project end-to-end. Detects direction
+    /// automatically from `Cargo.toml`'s `[lib] crate-type`
+    /// (`["cdylib"]` ⇒ reverse, else forward).
+    Run {
+        /// Override auto-detection of forward vs reverse.
+        #[arg(long)]
+        direction: Option<Direction>,
+        /// Forward: Lean root module name to invoke
+        /// `leo4plugin` on (default `Sample`). Reverse: Lean
+        /// `lean_lib` that hosts the generated wrapper
+        /// (default `CamelCase(crate_name)`).
+        #[arg(long)]
+        iface: Option<String>,
+        /// Path to a checkout of the leo4 repo (helper binaries
+        /// + Lake packages live there). Defaults to `../leo4`.
+        #[arg(long)]
+        leo4_root: Option<PathBuf>,
+        /// Project directory containing `Cargo.toml`. Defaults
+        /// to cwd.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Extra args forwarded to the final binary.
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -96,6 +129,9 @@ fn main() {
         }
         Cmd::Init { direction, dir, leo4_root } => {
             run_init(direction, dir, leo4_root)
+        }
+        Cmd::Run { direction, iface, leo4_root, dir, args } => {
+            run_run(direction, iface, leo4_root, dir, args)
         }
     };
     if let Err(e) = res {
@@ -212,6 +248,234 @@ leo4 = {{ path = "{leo4_root}/crates/leo4", features = ["rust-exports"] }}
     write_if_absent_dir(dir, "lean/lean-toolchain", "leanprover/lean4:v4.29.1\n")?;
     write_if_absent_dir(dir, "lean/Main.lean", &main_lean_reverse(&iface))?;
     Ok(())
+}
+
+// ─── `leo4 run` (build + execute) ───────────────────────────────────
+
+fn run_run(
+    direction_arg: Option<Direction>,
+    iface_arg: Option<String>,
+    leo4_root: Option<PathBuf>,
+    dir: Option<PathBuf>,
+    args: Vec<String>,
+) -> Result<(), String> {
+    let dir = match dir {
+        Some(d) => abs(&d)?,
+        None => std::env::current_dir()
+            .map_err(|e| format!("getcwd: {e}"))?,
+    };
+    let cargo_toml = dir.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        return Err(format!(
+            "run: no Cargo.toml at {dir:?}. Run from inside a leo4 project."
+        ));
+    }
+    let pkg_name = read_cargo_pkg_name(&cargo_toml)
+        .ok_or_else(|| format!("run: cannot read package name from {cargo_toml:?}"))?;
+    let crate_name = pkg_name.replace('-', "_");
+    let direction = direction_arg.unwrap_or_else(|| detect_direction(&cargo_toml));
+    let leo4_root_dir = resolve_leo4_root_dir(leo4_root, &dir)?;
+
+    match direction {
+        Direction::Forward => {
+            let iface = iface_arg.unwrap_or_else(|| "Sample".to_string());
+            run_forward(&dir, &iface, &leo4_root_dir, &args)
+        }
+        Direction::Reverse => {
+            let iface = iface_arg.unwrap_or_else(|| camel_case(&crate_name));
+            run_reverse(&dir, &pkg_name, &crate_name, &iface, &leo4_root_dir, &args)
+        }
+    }
+}
+
+fn detect_direction(cargo_toml: &Path) -> Direction {
+    let s = fs::read_to_string(cargo_toml).unwrap_or_default();
+    if s.contains("\"cdylib\"") {
+        Direction::Reverse
+    } else {
+        Direction::Forward
+    }
+}
+
+fn resolve_leo4_root_dir(p: Option<PathBuf>, project_dir: &Path) -> Result<PathBuf, String> {
+    let raw = match p {
+        Some(p) if p.is_absolute() => p,
+        Some(p) => project_dir.join(p),
+        None => project_dir.join("..").join("leo4"),
+    };
+    raw.canonicalize().map_err(|e| {
+        format!("--leo4-root {raw:?}: {e} (pass --leo4-root explicitly if leo4 is not at ../leo4)")
+    })
+}
+
+fn run_forward(
+    dir: &Path,
+    iface: &str,
+    _leo4_root: &Path,
+    args: &[String],
+) -> Result<(), String> {
+    let lean_dir = dir.join("lean");
+    if !lean_dir.exists() {
+        return Err(format!("run: no `lean/` directory at {dir:?}"));
+    }
+
+    step("[1/3] lake build");
+    run_cmd(
+        Command::new("lake").arg("build").current_dir(&lean_dir),
+        "lake build",
+    )?;
+
+    step(&format!("[2/3] lake exe leo4plugin {iface}"));
+    run_cmd(
+        Command::new("lake")
+            .args(["exe", "leo4plugin", iface])
+            .current_dir(&lean_dir),
+        "leo4plugin",
+    )?;
+
+    step("[3/3] cargo run");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run").current_dir(dir);
+    if !args.is_empty() {
+        cmd.arg("--").args(args);
+    }
+    run_cmd(&mut cmd, "cargo run")
+}
+
+fn run_reverse(
+    dir: &Path,
+    pkg_name: &str,
+    crate_name: &str,
+    iface: &str,
+    leo4_root: &Path,
+    args: &[String],
+) -> Result<(), String> {
+    let lean_dir = dir.join("lean");
+    if !lean_dir.exists() {
+        return Err(format!("run: no `lean/` directory at {dir:?}"));
+    }
+    let leo4_target = leo4_root.join("target").join("release");
+    let emit_bin = leo4_target.join(bin_name("leo4-rust-emit"));
+    let worker_bin = leo4_target.join(bin_name("leo4-rust-worker"));
+    let bridge_ar = leo4_target.join("libleo4_rust_bridge.a");
+
+    if !emit_bin.exists() || !worker_bin.exists() || !bridge_ar.exists() {
+        step("[helpers] cargo build --release -p leo4-rust-{emit,worker,bridge}");
+        run_cmd(
+            Command::new("cargo")
+                .args([
+                    "build", "--release",
+                    "-p", "leo4-rust-emit",
+                    "-p", "leo4-rust-worker",
+                    "-p", "leo4-rust-bridge",
+                ])
+                .current_dir(leo4_root),
+            "cargo build (leo4 helpers)",
+        )?;
+    }
+
+    step(&format!("[1/4] cargo build --release -p {pkg_name}"));
+    run_cmd(
+        Command::new("cargo")
+            .args(["build", "--release", "-p", pkg_name])
+            .current_dir(dir),
+        "cargo build (cdylib)",
+    )?;
+
+    let cargo_target = dir.join("target").join("release");
+    let cdylib = find_cdylib(&cargo_target, crate_name)?;
+
+    step("[2/4] leo4-rust-emit --emit-lean");
+    let emit_out = lean_dir.join(".leo4-emit");
+    fs::create_dir_all(&emit_out)
+        .map_err(|e| format!("create_dir_all {emit_out:?}: {e}"))?;
+    let iface_dir = lean_dir.join(iface);
+    fs::create_dir_all(&iface_dir)
+        .map_err(|e| format!("create_dir_all {iface_dir:?}: {e}"))?;
+    let lean_module = format!("{iface}.Rust");
+    run_cmd(
+        Command::new(&emit_bin).args([
+            "--cdylib", &cdylib.display().to_string(),
+            "--out-dir", &emit_out.display().to_string(),
+            "--emit-lean",
+            "--lean-module", &lean_module,
+        ]),
+        "leo4-rust-emit",
+    )?;
+    let emitted = emit_out.join(format!("{crate_name}.leo4-rust-imports.lean"));
+    let dest = iface_dir.join("Rust.lean");
+    if !emitted.exists() {
+        return Err(format!("emit: expected {emitted:?} not produced"));
+    }
+    if dest.exists() {
+        fs::remove_file(&dest).map_err(|e| format!("rm {dest:?}: {e}"))?;
+    }
+    fs::rename(&emitted, &dest)
+        .map_err(|e| format!("rename {emitted:?} -> {dest:?}: {e}"))?;
+
+    step("[3/4] lake build (auto-links bridge + glue via Leo4Rust extern_libs)");
+    run_cmd(
+        Command::new("lake").arg("build").current_dir(&lean_dir),
+        "lake build",
+    )?;
+
+    let exe = lean_dir.join(".lake").join("build").join("bin").join(bin_name(crate_name));
+    if !exe.exists() {
+        return Err(format!(
+            "run: lean exe not found at {exe:?}. Check `lean_exe {crate_name}` is defined in lakefile.lean."
+        ));
+    }
+
+    step(&format!("[4/4] running {}", exe.display()));
+    let mut cmd = Command::new(&exe);
+    cmd.env("LEO4_RUST_CDYLIB", &cdylib)
+        .env("LEO4_RUST_WORKER_BIN", &worker_bin)
+        .env("LEO4_RUST_HANDSHAKE_PKG", crate_name)
+        .env("LEO4_RUST_HANDSHAKE_IFACE", iface);
+    if !args.is_empty() {
+        cmd.args(args);
+    }
+    run_cmd(&mut cmd, "lean exe")
+}
+
+fn step(label: &str) {
+    eprintln!("[leo4 run] {label}");
+}
+
+fn run_cmd(cmd: &mut Command, label: &str) -> Result<(), String> {
+    let status = cmd
+        .status()
+        .map_err(|e| format!("{label}: spawn: {e}"))?;
+    if !status.success() {
+        return Err(format!("{label}: exited {status}"));
+    }
+    Ok(())
+}
+
+fn find_cdylib(target_release: &Path, crate_name: &str) -> Result<PathBuf, String> {
+    let candidates = [
+        format!("lib{crate_name}.so"),
+        format!("lib{crate_name}.dylib"),
+        format!("{crate_name}.dll"),
+    ];
+    for c in &candidates {
+        let p = target_release.join(c);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    Err(format!(
+        "cdylib not found under {}; tried {candidates:?}. Did `cargo build --release` succeed?",
+        target_release.display()
+    ))
+}
+
+fn bin_name(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{stem}.exe")
+    } else {
+        stem.to_string()
+    }
 }
 
 // ─── full scaffold (`create`) ────────────────────────────────────────
@@ -357,11 +621,17 @@ open Lake DSL
 package {crate_name} where
   srcDir := "."
 
-require Leo4 from "{leo4_root}/lake/Leo4"
+require Leo4     from "{leo4_root}/lake/Leo4"
+require Leo4Rust from "{leo4_root}/lake/Leo4Rust"
+-- `require Leo4Rust` pulls in two `extern_lib`s that Lake
+-- auto-links into `lean_exe`: `libleo4_rust_bridge.a` (the
+-- cargo-built dispatcher) and `libleo4_rust_bridge_lean.a`
+-- (the leanc-compiled glue shim).
 
-@[default_target]
+-- The generated wrapper lands at `{iface}/Rust.lean`. The
+-- `.submodules` glob pulls every file under that directory in.
 lean_lib {iface} where
-  globs := #[`{iface}]
+  globs := #[.submodules `{iface}]
 
 @[default_target]
 lean_exe {crate_name} where
@@ -394,7 +664,15 @@ leo4 forward-direction scaffold. Lean exports
 `hello : String` and `add (a b : UInt64) : UInt64`; Rust calls
 them via `leo4::import!`.
 
-## Build + run
+## Build + run (recommended)
+
+```sh
+leo4 run
+```
+
+This runs the three steps below automatically.
+
+## Build + run (manual, for debugging)
 
 ```sh
 cd lean && lake build && lake exe leo4plugin Sample && cd ..
@@ -419,42 +697,45 @@ fn readme_reverse(name: &str, iface: &str, leo4_root: &str) -> String {
 leo4 reverse-direction scaffold. Rust exposes `double` and
 `greet` via `#[leo4::export]`; Lean calls them.
 
-## Build + run
+## Build + run (recommended)
 
 ```sh
-# 1. Build the cdylib + leo4 helper binaries.
+leo4 run --leo4-root {leo4_root}
+```
+
+`leo4 run` orchestrates the whole pipeline:
+1. Builds the cdylib via `cargo build --release`.
+2. Builds the leo4 helper binaries
+   (`leo4-rust-{{emit,worker,bridge}}`) under `{leo4_root}`
+   if absent.
+3. Emits the Lean wrapper module to `lean/{iface}/Rust.lean`.
+4. Runs `lake build` (which auto-links the dispatcher +
+   glue archives via Lake `extern_lib`s exposed by
+   `Leo4Rust`).
+5. Executes `lean/.lake/build/bin/{crate_name}` with
+   `LEO4_RUST_CDYLIB` / `LEO4_RUST_WORKER_BIN` /
+   `LEO4_RUST_HANDSHAKE_PKG` / `LEO4_RUST_HANDSHAKE_IFACE`
+   wired up.
+
+## Build + run (manual, for debugging)
+
+```sh
 cargo build --release
 (cd {leo4_root} && cargo build --release -p leo4-rust-bridge \
                                         -p leo4-rust-worker \
                                         -p leo4-rust-emit)
-
-# 2. Emit IDL / handshake / Lean wrapper.
 CDYLIB=$(realpath target/release/lib{crate_name}.so)
 mkdir -p lean/{iface}
 {leo4_root}/target/release/leo4-rust-emit \
   --cdylib $CDYLIB --out-dir lean/.leo4-emit --emit-lean \
   --lean-module {iface}.Rust
 mv lean/.leo4-emit/{crate_name}.leo4-rust-imports.lean lean/{iface}/Rust.lean
-
-# 3. Lean-side glue shim.
-leanc -c -std=c2x {leo4_root}/shim/leo4_rust_bridge_lean.c \
-  -o lean/.leo4-emit/glue.o
-
-# 4. Lake build + manual leanc -o link.
 cd lean && lake build
-leanc .lake/build/lib/Main.olean.o \
-      .lake/build/lib/{iface}/Rust.olean.o \
-      {leo4_root}/lake/Leo4/.lake/build/lib/Leo4.olean.o \
-      .leo4-emit/glue.o \
-      {leo4_root}/target/release/libleo4_rust_bridge.a \
-      -o {crate_name}
-
-# 5. Run with env matrix.
 LEO4_RUST_CDYLIB=$CDYLIB \
 LEO4_RUST_WORKER_BIN={leo4_root}/target/release/leo4-rust-worker \
 LEO4_RUST_HANDSHAKE_PKG={crate_name} \
 LEO4_RUST_HANDSHAKE_IFACE={iface} \
-  ./{crate_name}
+  ./lean/.lake/build/bin/{crate_name}
 ```
 "#
     )
@@ -599,6 +880,59 @@ name = "my-app"
 version = "0.1.0"
 "#).unwrap();
         assert_eq!(read_cargo_pkg_name(&p).as_deref(), Some("my-app"));
+    }
+
+    #[test]
+    fn detect_direction_picks_reverse_when_cdylib() {
+        let dir = tempdir();
+        let p = dir.join("Cargo.toml");
+        fs::write(&p, r#"[package]
+name = "x"
+[lib]
+crate-type = ["cdylib"]
+"#).unwrap();
+        assert!(matches!(detect_direction(&p), Direction::Reverse));
+    }
+
+    #[test]
+    fn detect_direction_defaults_forward() {
+        let dir = tempdir();
+        let p = dir.join("Cargo.toml");
+        fs::write(&p, r#"[package]
+name = "x"
+"#).unwrap();
+        assert!(matches!(detect_direction(&p), Direction::Forward));
+    }
+
+    #[test]
+    fn find_cdylib_picks_linux_so() {
+        let dir = tempdir();
+        let so = dir.join("libfoo.so");
+        fs::write(&so, b"\x7fELF").unwrap();
+        assert_eq!(find_cdylib(&dir, "foo").unwrap(), so);
+    }
+
+    #[test]
+    fn find_cdylib_errors_when_missing() {
+        let dir = tempdir();
+        assert!(find_cdylib(&dir, "foo").is_err());
+    }
+
+    #[test]
+    fn bin_name_strips_exe_on_unix() {
+        let n = bin_name("leo4-rust-emit");
+        #[cfg(windows)]
+        assert_eq!(n, "leo4-rust-emit.exe");
+        #[cfg(not(windows))]
+        assert_eq!(n, "leo4-rust-emit");
+    }
+
+    #[test]
+    fn lakefile_reverse_requires_leo4rust_and_uses_submodules() {
+        let s = lakefile_reverse("my-app", "MyApp", "../leo4");
+        assert!(s.contains("require Leo4Rust"), "lakefile must require Leo4Rust");
+        assert!(s.contains(".submodules `MyApp"), "lib glob must be .submodules");
+        assert!(s.contains("lean_exe my_app"), "lean_exe name = crate_name");
     }
 
     #[test]

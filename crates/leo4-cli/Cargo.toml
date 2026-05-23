@@ -1,12 +1,18 @@
 [package]
 name        = "leo4-cli"
-version.workspace      = true
+# Version is INTENTIONALLY detached from `version.workspace`. The
+# `leo4` CLI is a scaffolding + orchestration tool that must work
+# across leo4 lib versions without rebuild — bumping it lockstep
+# with the workspace would make installs brittle. Bump this on
+# CLI surface changes (new subcommand, flag rename, scaffold
+# layout shift) only. See `AGENTS.md` "Recent decisions" 2026-05-21.
+version     = "0.2.0"
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "leo4 — top-level CLI. Scaffolds new projects (`leo4 init`) and aliases convenient day-to-day commands. Distinct from `leo4c` (the IDL parser / mangler CLI)."
+description = "leo4 — top-level CLI. Scaffolds new projects (`leo4 create` / `leo4 init`), runs them end-to-end (`leo4 run`), and aliases convenient day-to-day commands. Distinct from `leo4c` (the IDL parser / mangler CLI). Version-independent from the leo4 lib."
 
 [[bin]]
 name = "leo4"

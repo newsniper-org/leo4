@@ -389,6 +389,19 @@ would be expensive to relitigate:
   separate project at https://github.com/Honey-Be/adsmt
   that consumes leo4 as a dependency. Do not bundle
   SMT-specific types (`Term`, `Sort`, …) into leo4.
+- **2026-05-21 — `leo4-cli` must remain version-independent
+  from `leo4` lib**. No `use leo4_*::…` imports inside
+  `crates/leo4-cli/src/`. Scaffold output uses
+  `path = "{leo4_root}/..."` (never `version = "x.y.z"`).
+  `crates/leo4-cli/Cargo.toml` carries its own `version`,
+  detached from `version.workspace`. Helper-binary
+  invocations (`leo4-rust-emit`, `-worker`) go through
+  user-overridable `--leo4-root` / env so leo4-cli stays
+  agnostic to which leo4 lib version is in use. Future
+  changes that would require knowing a specific leo4
+  internal are a signal the work belongs in a different
+  crate (e.g. `leo4-build` or a leo4-version-aware
+  subcrate), not in `leo4-cli`.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

@@ -7,6 +7,65 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-D1: `leo4 run` CLI (2026-05-21)
+
+`leo4 run` collapses every forward / reverse build +
+execute step into a single command. Detects direction
+automatically from `Cargo.toml`'s `[lib] crate-type`
+(`["cdylib"]` ⇒ reverse, else forward), and orchestrates
+the full pipeline:
+
+**Forward**: `lake build` → `lake exe leo4plugin <iface>`
+→ `cargo run`. The build.rs picks up `LEO4_SHIM_SO` /
+`LEO4_HANDSHAKE_FILE` via `leo4_build::wire` so no env
+plumbing is needed.
+
+**Reverse**: ensures `leo4-rust-{emit,worker,bridge}` are
+built under `--leo4-root` (auto-builds if absent) →
+`cargo build --release -p <pkg>` → `leo4-rust-emit
+--emit-lean` → move wrapper to `lean/<iface>/Rust.lean`
+→ `lake build` (auto-links bridge + glue via
+`Leo4Rust`'s `extern_lib`s) → run
+`lean/.lake/build/bin/<crate_name>` with
+`LEO4_RUST_CDYLIB` / `LEO4_RUST_WORKER_BIN` /
+`LEO4_RUST_HANDSHAKE_PKG` / `LEO4_RUST_HANDSHAKE_IFACE`
+wired up automatically.
+
+Flags: `--direction` (override auto-detect), `--iface`
+(override default iface name), `--leo4-root` (default
+`../leo4`), `--dir` (project dir, default cwd), trailing
+`-- <args>` forwarded to the final binary.
+
+Scaffold fixes shipped alongside (the reverse direction's
+generated `lakefile.lean` was missing two pieces needed
+for `leo4 run` to work end-to-end):
+- `require Leo4Rust from "{leo4_root}/lake/Leo4Rust"` now
+  emitted so Lake auto-links the dispatcher + glue
+  archives.
+- `lean_lib {iface}` glob changed from `#[`{iface}]`
+  (matched only the bare module) to `#[.submodules
+  `{iface}]` (matches `{iface}.Rust` produced by
+  `leo4-rust-emit`).
+- Scaffold READMEs lead with `leo4 run`; the verbose
+  manual workflow stays documented for debugging.
+
+**leo4-cli version-independence**: `version.workspace`
+removed from `crates/leo4-cli/Cargo.toml`. The CLI now
+carries its own `version = "0.2.0"`, bumped only on CLI
+surface changes — independent of leo4 lib's
+schema-hash-rotating cuts. Rationale: a user with one
+installed `leo4` CLI must be able to run projects pinned
+to many different leo4 lib versions. AGENTS.md "Recent
+decisions" 2026-05-21 entry captures the policy.
+
+New unit tests (6): direction detection (forward /
+reverse from Cargo.toml content), cdylib path resolution
+(Linux `.so`), binary name OS dispatch, scaffold's
+reverse lakefile containing the new `require Leo4Rust`
+and `.submodules` glob.
+
+Workspace test count: 141 → 147.
+
 ### Planned — Phase 10 plan locked (2026-05-21)
 
 Phase 10 substep order locked after the
