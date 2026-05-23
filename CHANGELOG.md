@@ -7,6 +7,42 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9.X: env-driven worker recycle policy (2026-05-23)
+
+`LEO4_RUST_WORKER_RECYCLE_CALLS=N`: after N completed
+dispatcher calls, the persistent worker is killed and a
+fresh one lazy-spawns on the next call. Default `0` (or
+unset / invalid) keeps the worker up for the whole Lean
+process lifetime, matching pre-9.X behaviour.
+
+Dispatcher changes (`shim/leo4_rust_bridge.c`):
+
+- `leo4_worker_slot_t` gains a `_Atomic uint64_t call_count`
+  field. Incremented after each successful
+  request/response round-trip.
+- `leo4_recycle_calls_limit` (file-scoped `_Atomic uint64_t`)
+  parsed once from the env via `strtoull`; non-numeric or
+  zero leaves recycling disabled.
+- `leo4_recycle_init_once` runs at most once per process via
+  a compare-exchange guard.
+- `leo4_recycle_persistent_slot` atomically swaps the
+  worker pointer out, then `kill` + `reap` via the ops
+  table — no OS syscall named outside the backend block, per
+  SPEC §4.4.
+- `leo4_rust_call`'s persistent-worker branch checks the
+  counter *before* the lazy-spawn lookup; if reached, reaps
+  the current worker before falling into the standard lazy
+  spawn path.
+
+Time-based recycle (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) is a
+further 9.X follow-up; call-based is what ships today
+(simpler, sufficient for "keep memory bounded over long-run
+SMT-solver sessions").
+
+Workspace test count unchanged at 138/0; full end-to-end
+exercise of the recycle path lives in the manual
+`just rust-export-05-build` workflow with the env set.
+
 ### Added — Phase 9.X: `#[leo4::export(isolated)]` dispatcher path (2026-05-23)
 
 Per-call fresh worker for `isolated`-tagged exports. The

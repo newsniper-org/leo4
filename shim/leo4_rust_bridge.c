@@ -425,9 +425,68 @@ typedef struct {
      * invariant means contention is impossible today; the field is
      * here for future multi-Lean models (LEO4-DESIGN §16). */
     _Atomic int        spawn_in_progress;
+
+    /* Recycle policy: number of completed calls since this worker
+     * spawned. Compared against `leo4_recycle_calls_limit` after
+     * each successful request/response round-trip. */
+    _Atomic uint64_t   call_count;
 } leo4_worker_slot_t;
 
 static leo4_worker_slot_t leo4_persistent_slot = {0};
+
+/* Recycle policy (SPEC/reverse-direction.md §4.3).
+ *
+ * Read once on first call from env LEO4_RUST_WORKER_RECYCLE_CALLS.
+ * Value 0 (the default) disables recycling — the persistent worker
+ * stays up across the whole Lean process lifetime. Positive values
+ * cap the worker at N completed calls; on the N+1-th call the
+ * dispatcher reaps the worker and spawns a fresh one before
+ * dispatching.
+ *
+ * Time-based recycle (LEO4_RUST_WORKER_RECYCLE_SECONDS) is a 9.X
+ * follow-on; call-based is what ships today.
+ */
+static _Atomic int      leo4_recycle_initialized = 0;
+static _Atomic uint64_t leo4_recycle_calls_limit = 0;
+
+static void leo4_recycle_init_once(void) {
+    int expected = 0;
+    if (!atomic_compare_exchange_strong_explicit(
+            &leo4_recycle_initialized, &expected, 1,
+            memory_order_acquire, memory_order_relaxed)) {
+        return;
+    }
+    const char* env = getenv("LEO4_RUST_WORKER_RECYCLE_CALLS");
+    if (!env || !env[0]) {
+        atomic_store_explicit(&leo4_recycle_calls_limit, 0, memory_order_release);
+        return;
+    }
+    /* Parse a u64. Reject negatives / non-numeric silently — fall
+     * back to "no recycling" rather than break the run. */
+    char* end = NULL;
+    unsigned long long parsed = strtoull(env, &end, 10);
+    if (end == env || (end && *end != '\0') || parsed == 0) {
+        atomic_store_explicit(&leo4_recycle_calls_limit, 0, memory_order_release);
+    } else {
+        atomic_store_explicit(&leo4_recycle_calls_limit,
+                              (uint64_t)parsed, memory_order_release);
+    }
+}
+
+/* Reap + clear the persistent slot. Caller holds the
+ * single-Lean-thread invariant; no atomics for the worker
+ * pointer swap. */
+static void leo4_recycle_persistent_slot(void) {
+    uintptr_t cur = atomic_exchange_explicit(
+        &leo4_persistent_slot.worker, 0, memory_order_acq_rel);
+    if (cur) {
+        leo4_worker_t* w = (leo4_worker_t*)cur;
+        leo4_worker_ops->kill(w);
+        leo4_worker_ops->reap(w, NULL);
+    }
+    atomic_store_explicit(&leo4_persistent_slot.call_count, 0,
+                          memory_order_release);
+}
 
 /* Resolve the cdylib path the dispatcher should hand to the
  * worker. SPEC §9 chain:
@@ -698,6 +757,21 @@ int32_t leo4_rust_call(
     }
 
     /* Persistent-worker path (default). */
+    leo4_recycle_init_once();
+
+    /* Recycle the persistent worker if call_count has reached the
+     * limit. Reap before the lazy spawn happens inside
+     * `leo4_get_or_spawn_persistent`. */
+    uint64_t limit = atomic_load_explicit(&leo4_recycle_calls_limit,
+                                          memory_order_acquire);
+    if (limit != 0) {
+        uint64_t cnt = atomic_load_explicit(&leo4_persistent_slot.call_count,
+                                            memory_order_acquire);
+        if (cnt >= limit) {
+            leo4_recycle_persistent_slot();
+        }
+    }
+
     leo4_worker_t* worker = NULL;
     int rc = leo4_get_or_spawn_persistent(&worker);
     if (rc != LEO4_OK) {
@@ -718,6 +792,10 @@ int32_t leo4_rust_call(
     if (rc != LEO4_OK) {
         return rc;
     }
+
+    /* Bump call count for recycle bookkeeping. */
+    atomic_fetch_add_explicit(&leo4_persistent_slot.call_count, 1,
+                              memory_order_acq_rel);
     return status;
 }
 
