@@ -9,10 +9,20 @@ Cargo.lock.bak
 /lake/build
 /lake/**/.lake
 /lake/**/build
+/lake/**/lake-manifest.json
 
 # leo4 build outputs
 /target/leo4
 **/.leo4-tmp
+# Phase 9 reverse-direction emit staging dir (created by
+# `lake run Leo4Rust/regenerate` / `leo4 run`).
+**/.leo4-emit
+
+# Per-example Lake build outputs. Distinct from /lake/**/.lake
+# above — `/lake` is the leo4 runtime + plugin source dir;
+# `/examples/**/lean/.lake` is each example's local Lake cache.
+/examples/**/lean/.lake
+/examples/**/lean/lake-manifest.json
 
 # IDE
 /.idea

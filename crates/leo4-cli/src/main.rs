@@ -226,6 +226,7 @@ leo4-build = {{ path = "{leo4_root}/crates/leo4-build" }}
     write_if_absent_dir(dir, "lean/lakefile.lean", &lakefile_forward(name, leo4_root))?;
     write_if_absent_dir(dir, "lean/lean-toolchain", "leanprover/lean4:v4.29.1\n")?;
     write_if_absent_dir(dir, "lean/Sample.lean", SAMPLE_LEAN_FORWARD)?;
+    write_if_absent_dir(dir, "lean/.gitignore", GITIGNORE_FORWARD_LEAN)?;
     Ok(())
 }
 
@@ -247,6 +248,7 @@ leo4 = {{ path = "{leo4_root}/crates/leo4", features = ["rust-exports"] }}
     write_if_absent_dir(dir, "lean/lakefile.lean", &lakefile_reverse(name, &iface, leo4_root))?;
     write_if_absent_dir(dir, "lean/lean-toolchain", "leanprover/lean4:v4.29.1\n")?;
     write_if_absent_dir(dir, "lean/Main.lean", &main_lean_reverse(&iface))?;
+    write_if_absent_dir(dir, "lean/.gitignore", &gitignore_reverse_lean(&iface))?;
     Ok(())
 }
 
@@ -471,6 +473,8 @@ fn scaffold_forward_full(dir: &Path, name: &str, leo4_root: &str) -> Result<(), 
     write_required(dir, "lean/lakefile.lean", &lakefile_forward(name, leo4_root))?;
     write_required(dir, "lean/lean-toolchain", "leanprover/lean4:v4.29.1\n")?;
     write_required(dir, "lean/Sample.lean", SAMPLE_LEAN_FORWARD)?;
+    write_required(dir, "lean/.gitignore", GITIGNORE_FORWARD_LEAN)?;
+    write_required(dir, ".gitignore", GITIGNORE_REVERSE_ROOT)?;
     write_required(dir, "README.md", &readme_forward(name, leo4_root))?;
     Ok(())
 }
@@ -482,6 +486,8 @@ fn scaffold_reverse_full(dir: &Path, name: &str, leo4_root: &str) -> Result<(), 
     write_required(dir, "lean/lakefile.lean", &lakefile_reverse(name, &iface, leo4_root))?;
     write_required(dir, "lean/lean-toolchain", "leanprover/lean4:v4.29.1\n")?;
     write_required(dir, "lean/Main.lean", &main_lean_reverse(&iface))?;
+    write_required(dir, "lean/.gitignore", &gitignore_reverse_lean(&iface))?;
+    write_required(dir, ".gitignore", GITIGNORE_REVERSE_ROOT)?;
     write_required(dir, "README.md", &readme_reverse(name, &iface, leo4_root))?;
     Ok(())
 }
@@ -493,6 +499,48 @@ fn main() {
     let lake_build = "lean/.lake/build/leo4";
     leo4_build::wire(lake_build).expect("leo4-build: wire shim");
 }
+"#;
+
+/// `.gitignore` block for a reverse-direction scaffold's `lean/`
+/// dir. The `<iface>/` ignore covers the auto-generated wrapper
+/// module dir produced by `lake run Leo4Rust/regenerate`.
+fn gitignore_reverse_lean(iface: &str) -> String {
+    format!(
+        r#"# Lake-local build cache + dep manifest (regenerated on every `lake build`).
+.lake/
+lake-manifest.json
+
+# Phase 9 reverse-direction emit staging dir.
+.leo4-emit/
+
+# Auto-generated Lean wrapper module (produced by
+# `lake run Leo4Rust/regenerate` / `leo4 run` from the cdylib's
+# EXPORTS slice). Regenerated on every build.
+{iface}/
+"#
+    )
+}
+
+/// `.gitignore` block for the project root of a reverse-direction
+/// scaffold (alongside the Cargo crate). `cargo` already ignores
+/// `target/` but we set it explicitly so users running `git init`
+/// from a fresh `leo4 create` get a complete starting state.
+const GITIGNORE_REVERSE_ROOT: &str = r#"# Cargo
+/target/
+
+# IDE
+/.idea/
+/.vscode/
+.DS_Store
+"#;
+
+/// `.gitignore` block for the forward-direction scaffold's `lean/`
+/// dir. The plugin-emitted `.lake/build/leo4/` files (schema /
+/// mangling / handshake) are regenerated every `lake exe leo4plugin`
+/// run; the user shouldn't commit them.
+const GITIGNORE_FORWARD_LEAN: &str = r#"# Lake-local build cache + dep manifest (regenerated on every `lake build`).
+.lake/
+lake-manifest.json
 "#;
 
 const SAMPLE_LEAN_FORWARD: &str = r#"import Leo4
