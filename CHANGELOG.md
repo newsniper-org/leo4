@@ -7,6 +7,89 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 user records — SurfaceExpr lifter + user-type registry pass-through (2026-05-22)
+
+OX2 user-records second increment. Wires
+`synthesize_struct_type` into the same parser-AST layer the
+fn transpile uses, so a Lean structure source flows through
+the same `surface_to_rust_type` path as fn param / return
+types do.
+
+New public API:
+
+- `surface_to_rust_type(&Located<SurfaceExpr>, &HashSet<String>)
+  -> Result<RustType, LeanError>` — lifts a parser-AST type
+  annotation into a marshallable `RustType`. Walks the App
+  spine for generics (`Vec Nat` → `Vec<U64>`, `Vec (Option
+  Nat)` → `Vec<Option<U64>>`), looks up bare names in the
+  primitive table, carrier table, then the caller's set
+  of registered user types.
+- `primitive_name_to_rust_type(&str) -> Option<RustType>` —
+  Lean primitive name → matching `RustType`. Recognises both
+  Lean 4 forms (`UInt32`, `Float`, `Nat`) and Rust forms
+  (`U32`, `F64`). Mirrors OxiLean's LCNF lowering: Lean
+  `Nat` → `u64`, `Int` → `i64` (carrier types are opt-in
+  via explicit `BigNat` / `BigInt` use).
+- `Leo4ExportRegistry::user_types: HashSet<String>` —
+  registry now tracks user-defined type names discovered
+  during a build.
+- `Leo4ExportRegistry::register_user_type(&str)` /
+  `Leo4ExportRegistry::user_type_names()` — registration +
+  snapshot.
+- `synthesize_canonical_wrapper_with_users(&RustFn,
+  &HashSet<String>)` — user-types-aware variant. The
+  non-suffixed `synthesize_canonical_wrapper` now wraps this
+  with an empty set.
+- `synthesize_struct_type_with_users(name, fields,
+  &HashSet<String>)` — user-types-aware struct synth.
+  A struct's fields can reference *other* registered
+  user types via bare names (e.g. `Edge { from: Point, to:
+  Point }`).
+- `render_marshallable_type_with_users(&RustType,
+  &HashSet<String>)` — bare `Custom("Foo")` resolves to
+  the same name (no carrier path lookup, no rejection) if
+  `Foo` is in the user-types set.
+
+Surface-AST lifter accepts:
+
+- `Var(name)` — primitive / carrier / user type by name
+- `App` spine — `Vec`, `Option`, `Result`, `Box`, `Prod` get
+  dedicated lowering; other heads fall through as
+  `RustType::Generic(name, args)`
+- `Ann(inner, _)` — strips the annotation, lifts the inner
+
+Rejects (returns `DECODE_ERROR`):
+- `Pi` / `Lam` / `Sort` / `Lit` / `Let` / `Have` / `Hole` /
+  `Proj` / `If` / `Match` / `Do` / future-added variants
+  (catch-all `_` arm).
+
+`TranspileUnit` gained a `type_decls: Vec<String>` field —
+each unit now carries the user-defined type declarations it
+depends on. `emit_lib_rs` deduplicates these across units
+(via verbatim-source equality) and emits them ahead of fn
+bodies so forward references resolve.
+
+Tests 53 → 65 (+12): primitive lifter coverage, carrier
+lifting, user-types lookup, unknown-name rejection, generic
+App + nested App, registry round-trip, user-type wrapper
+synthesis, user-typed struct fields.
+
+clippy --all-targets -D warnings clean (added
+`implicit_hasher = "allow"` since the user-types set always
+uses the default `RandomState` hasher in this crate; no
+benefit to generalising over `BuildHasher`).
+
+**OX2 user records still pending for v1.0 RC**:
+
+1. `transpile_source_to_unit` extension recognising
+   `Decl::Structure` decls in the source stream — auto-
+   populates `registry.user_types` + builds the `type_decls`
+   list per unit. (Lib pieces all in place; just needs the
+   parser-AST visitor wired through.)
+2. Inductive (multi-ctor enums) — `synthesize_enum_type`
+   analogous to `synthesize_struct_type`, with the variant-
+   payload-widening rule from `SPEC/canonical-abi.md` §9.
+
 ### Added — `leo4-oxilean-build`: OX2 user records — `synthesize_struct_type` layer (2026-05-22)
 
 OX2 user-records sub-blocker, option (b) per ROADMAP

@@ -59,3 +59,7 @@ missing_errors_doc = "allow"
 # Product name `OxiLean` appears in docs unbracketed. Don't
 # force backticks around it — it's a brand, not a code symbol.
 doc_markdown = "allow"
+# `HashSet<String>` user-type set is always built with the
+# default hasher in this crate. Generalising over `BuildHasher`
+# would force every caller to pick one for zero benefit.
+implicit_hasher = "allow"

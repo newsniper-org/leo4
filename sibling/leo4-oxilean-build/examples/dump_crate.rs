@@ -17,6 +17,7 @@ fn unit(name: &str, mangled: &str) -> TranspileUnit {
     );
     let wrapper = synthesize_canonical_wrapper(&f).unwrap();
     TranspileUnit {
+        type_decls: Vec::new(),
         fn_src: f.emit(),
         wrapper_src: wrapper,
         fn_name: name.to_string(),

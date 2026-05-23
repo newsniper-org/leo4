@@ -1,7 +1,6 @@
-//! `cargo run --example dump_struct` — prints the Rust struct
-//! + LeanMarshal impl `leo4-oxilean-build` synthesises for a
-//! fixture Lean structure. Useful when iterating on OX2's
-//! user-record path.
+//! `cargo run --example dump_struct` prints the Rust struct +
+//! `LeanMarshal` impl `leo4-oxilean-build` synthesises for a fixture
+//! Lean structure. Useful when iterating on OX2's user-record path.
 
 use leo4_oxilean_build::{synthesize_struct_type, StructField};
 use oxilean_codegen::rust_target_backend::RustType;
@@ -24,5 +23,5 @@ fn main() {
         ],
     )
     .unwrap();
-    println!("{}", out);
+    println!("{out}");
 }

@@ -168,7 +168,8 @@ use oxilean_elab::attribute::{
 use oxilean_elab::elab_decl::{elaborate_decl, PendingDecl};
 use oxilean_elab::lean4_compat::{Lean4SyntaxAdapter, Lean4TermRewriter};
 use oxilean_kernel::{env::Environment, Expr, Name};
-use oxilean_parse::{AttributeKind, Decl, Lexer, Located, Parser};
+use oxilean_parse::{AttributeKind, Decl, Lexer, Located, Parser, SurfaceExpr};
+use std::collections::HashSet;
 
 /// Custom attribute name leo4 owns: `@[leo4_export]`. Tag a Lean
 /// definition with this attribute to mark it for export through
@@ -464,6 +465,12 @@ pub fn type_mapper_is_lean_h_free() -> bool {
 pub struct Leo4ExportRegistry {
     pub manager: AttributeManager,
     pub derive: DeriveHandlerRegistry,
+    /// User-defined type names (Lean `structure` / `inductive`)
+    /// discovered during a build. Tracked here so wrapper
+    /// synthesis can pass these names through
+    /// `render_marshallable_type_with_users` rather than
+    /// rejecting them as unknown carriers.
+    pub user_types: HashSet<String>,
 }
 
 impl Leo4ExportRegistry {
@@ -497,7 +504,26 @@ impl Leo4ExportRegistry {
             .no_instance(),
         );
 
-        Self { manager, derive }
+        Self {
+            manager,
+            derive,
+            user_types: HashSet::new(),
+        }
+    }
+
+    /// Record a user-defined type name (Lean `structure` /
+    /// `inductive`) so subsequent wrapper synthesis recognises
+    /// it as marshallable. Idempotent (HashSet semantics).
+    pub fn register_user_type(&mut self, name: &str) {
+        self.user_types.insert(name.to_string());
+    }
+
+    /// Snapshot of every user type registered so far.
+    /// Returned in arbitrary order (HashSet); callers that
+    /// need determinism should sort.
+    #[must_use]
+    pub fn user_type_names(&self) -> Vec<String> {
+        self.user_types.iter().cloned().collect()
     }
 
     /// True iff the `@[leo4_export]` custom-attribute handler
@@ -741,13 +767,17 @@ pub fn transpile_source_to_unit(
     })?;
 
     let fn_src = rust_fn.emit();
-    let wrapper_src = synthesize_canonical_wrapper(&rust_fn)?;
+    let wrapper_src = synthesize_canonical_wrapper_with_users(
+        &rust_fn,
+        &registry.user_types,
+    )?;
     let fn_name = rust_fn.name.clone();
     Ok(Some(TranspileUnit {
         fn_src,
         wrapper_src,
         fn_name,
         mangled: mangled.to_string(),
+        type_decls: Vec::new(),
     }))
 }
 
@@ -969,6 +999,25 @@ fn render_marshallable_type(ty: &RustType) -> Result<String, LeanError> {
 /// v0 marshalling matrix — carrier types and user records are
 /// the typical reasons).
 pub fn synthesize_canonical_wrapper(transpiled: &RustFn) -> Result<String, LeanError> {
+    synthesize_canonical_wrapper_with_users(transpiled, &HashSet::new())
+}
+
+/// Variant of `synthesize_canonical_wrapper` aware of
+/// user-defined types previously registered with a
+/// `Leo4ExportRegistry`. Params / return types named in
+/// `user_types` are accepted without further marshalling
+/// validation (their `LeanMarshal` impls land in the same
+/// emit module via `synthesize_struct_type` / future
+/// `synthesize_enum_type`).
+///
+/// # Errors
+/// Same conditions as `synthesize_canonical_wrapper` —
+/// non-marshallable types not registered as user types
+/// still reject.
+pub fn synthesize_canonical_wrapper_with_users(
+    transpiled: &RustFn,
+    user_types: &HashSet<String>,
+) -> Result<String, LeanError> {
     use std::fmt::Write as _;
 
     let wrapper_name = format!("{}_call", transpiled.name);
@@ -993,7 +1042,7 @@ pub fn synthesize_canonical_wrapper(transpiled: &RustFn) -> Result<String, LeanE
     } else {
         s.push_str("    let mut __off: usize = 0;\n");
         for (i, (pname, pty, _)) in transpiled.params.iter().enumerate() {
-            let rust_ty = render_marshallable_type(pty)?;
+            let rust_ty = render_marshallable_type_with_users(pty, user_types)?;
             writeln!(
                 s,
                 "    let ({pname}, __next_{i}) = <{rust_ty} as ::leo4_abi::LeanMarshal>::canonical_decode(args, __off)?;"
@@ -1023,7 +1072,7 @@ pub fn synthesize_canonical_wrapper(transpiled: &RustFn) -> Result<String, LeanE
         Some(ty) => {
             // Validate the return type has a LeanMarshal impl
             // before emitting the encode call.
-            let _ = render_marshallable_type(ty)?;
+            let _ = render_marshallable_type_with_users(ty, user_types)?;
             s.push_str("    ::core::result::Result::Ok(::leo4_abi::encode_to_vec(&__ret))\n");
         }
     }
@@ -1066,6 +1115,186 @@ pub fn transpile_kernel_decl_with_wrapper(
     let fn_src = rust_fn.emit();
     let wrapper_src = synthesize_canonical_wrapper(&rust_fn)?;
     Ok((fn_src, wrapper_src))
+}
+
+// ─── OX2: SurfaceExpr type lifter + user-type aware marshalling ────────
+
+/// Primitive Lean type names → matching `RustType`. Recognises
+/// the surface vocabulary the user writes in field / param
+/// annotations.
+fn primitive_name_to_rust_type(name: &str) -> Option<RustType> {
+    // OxiLean's LCNF lowering maps Lean `Nat` → u64 and `Int`
+    // → i64; mirror that here. Users who need BigNat / BigInt
+    // wire-shaped fields use the carrier names directly.
+    match name {
+        // UInt families
+        "UInt8"  | "U8"             => Some(RustType::U8),
+        "UInt16" | "U16"            => Some(RustType::U16),
+        "UInt32" | "U32"            => Some(RustType::U32),
+        "UInt64" | "U64" | "Nat"    => Some(RustType::U64),
+        "USize"                     => Some(RustType::Usize),
+        // Int families
+        "Int8"  | "I8"             => Some(RustType::I8),
+        "Int16" | "I16"            => Some(RustType::I16),
+        "Int32" | "I32"            => Some(RustType::I32),
+        "Int64" | "I64" | "Int"    => Some(RustType::I64),
+        "ISize"                    => Some(RustType::Isize),
+        // Floats
+        "Float"   | "F64" => Some(RustType::F64),
+        "Float32" | "F32" => Some(RustType::F32),
+        // Other primitives
+        "Bool"   => Some(RustType::Bool),
+        "Char"   => Some(RustType::Char),
+        "String" => Some(RustType::RustString),
+        "Unit"   => Some(RustType::Unit),
+        _ => None,
+    }
+}
+
+/// Lift a parser `SurfaceExpr` (the user's type annotation as
+/// they wrote it) into a `RustType` the OX2 marshalling
+/// matrix can validate. Walks the surface AST recursively so
+/// applications like `Vec Nat` become `Vec(U64)`.
+///
+/// Accepted shapes:
+/// - `Var(name)` — primitive name (`Nat`, `Bool`, …), carrier
+///   name (`BigNat`, …), or known user-defined type name
+///   (lookup by `user_types`).
+/// - `App(head, arg)` — generic applications walk down the
+///   spine accumulating type arguments. The head's name
+///   determines the container constructor (`Vec`, `Option`,
+///   `Result`, `Box`); other heads emit `Generic(name, args)`
+///   for downstream classification.
+///
+/// Rejects (returns `Err(LeanError(DECODE_ERROR))`):
+/// - Higher-rank / dependent types (`Pi`, `Lam` in type
+///   position).
+/// - Term-level expressions surfacing in a type slot
+///   (`Lit`, `Let`, `If`, `Match`, …).
+/// - Sort / type-of-type expressions (`Sort`).
+///
+/// # Errors
+/// `LeanError(DECODE_ERROR)` for shapes the lifter can't
+/// translate.
+pub fn surface_to_rust_type(
+    expr: &Located<SurfaceExpr>,
+    user_types: &HashSet<String>,
+) -> Result<RustType, LeanError> {
+    surface_to_rust_type_inner(&expr.value, user_types)
+}
+
+fn surface_to_rust_type_inner(
+    expr: &SurfaceExpr,
+    user_types: &HashSet<String>,
+) -> Result<RustType, LeanError> {
+    let reject = |label: &str| -> LeanError {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!(
+                "leo4-oxilean-build: surface type shape `{label}` is not \
+                 liftable to a marshallable Rust type"
+            ),
+        )
+    };
+
+    match expr {
+        SurfaceExpr::Var(name) => {
+            if let Some(ty) = primitive_name_to_rust_type(name) {
+                Ok(ty)
+            } else if carrier_path_for(name).is_some() || user_types.contains(name) {
+                Ok(RustType::Custom(name.clone()))
+            } else {
+                Err(LeanError::new(
+                    leo4_abi::error::error_codes::DECODE_ERROR,
+                    format!(
+                        "leo4-oxilean-build: unknown type name `{name}` — \
+                         not a primitive, carrier, or registered user type"
+                    ),
+                ))
+            }
+        }
+        SurfaceExpr::App(_, _) => {
+            // Walk left-associative App spine: `App(App(App(Var("Vec"), …), …))`
+            let (head_name, args) = peel_app_spine(expr, user_types)?;
+            let head_str = head_name.as_str();
+            match head_str {
+                "Vec" if args.len() == 1 => Ok(RustType::Vec(Box::new(args[0].clone()))),
+                "Option" if args.len() == 1 => {
+                    Ok(RustType::Option(Box::new(args[0].clone())))
+                }
+                "Result" if args.len() == 2 => Ok(RustType::Result(
+                    Box::new(args[0].clone()),
+                    Box::new(args[1].clone()),
+                )),
+                "Box" if args.len() == 1 => {
+                    // Box isn't a dedicated RustType variant — fall through to
+                    // the Generic form that `render_marshallable_type`
+                    // recognises.
+                    Ok(RustType::Generic("Box".to_string(), args))
+                }
+                "Prod" if args.len() == 2 => Ok(RustType::Tuple(args)),
+                _ => Ok(RustType::Generic(head_str.to_string(), args)),
+            }
+        }
+        SurfaceExpr::Pi(_, _) | SurfaceExpr::Lam(_, _) => Err(reject("Pi/Lam")),
+        SurfaceExpr::Sort(_) => Err(reject("Sort")),
+        SurfaceExpr::Lit(_) => Err(reject("Lit")),
+        SurfaceExpr::Let(_, _, _, _) => Err(reject("Let")),
+        SurfaceExpr::Ann(inner, _) => surface_to_rust_type_inner(&inner.value, user_types),
+        SurfaceExpr::Hole => Err(reject("Hole")),
+        SurfaceExpr::Proj(_, _) => Err(reject("Proj")),
+        SurfaceExpr::If(_, _, _) => Err(reject("If")),
+        SurfaceExpr::Match(_, _) => Err(reject("Match")),
+        SurfaceExpr::Do(_) => Err(reject("Do")),
+        SurfaceExpr::Have(..) => Err(reject("Have")),
+        // SurfaceExpr is non-exhaustive across OxiLean
+        // versions; catch any variant added after v0.1.2.
+        _ => Err(reject("unknown surface form")),
+    }
+}
+
+fn peel_app_spine(
+    expr: &SurfaceExpr,
+    user_types: &HashSet<String>,
+) -> Result<(String, Vec<RustType>), LeanError> {
+    let mut args_rev: Vec<RustType> = Vec::new();
+    let mut cur = expr;
+    loop {
+        match cur {
+            SurfaceExpr::App(head, arg) => {
+                args_rev.push(surface_to_rust_type_inner(&arg.value, user_types)?);
+                cur = &head.value;
+            }
+            SurfaceExpr::Var(name) => {
+                args_rev.reverse();
+                return Ok((name.clone(), args_rev));
+            }
+            _ => {
+                return Err(LeanError::new(
+                    leo4_abi::error::error_codes::DECODE_ERROR,
+                    "leo4-oxilean-build: generic application head is not a name"
+                        .to_string(),
+                ));
+            }
+        }
+    }
+}
+
+/// Variant of `render_marshallable_type` that also accepts the
+/// given set of user-defined type names as bare `Custom` types.
+/// Falls back to the standard matrix otherwise.
+fn render_marshallable_type_with_users(
+    ty: &RustType,
+    user_types: &HashSet<String>,
+) -> Result<String, LeanError> {
+    // User types are emitted at module level, so a bare name
+    // reference resolves correctly in the wrapper context.
+    if let RustType::Custom(name) = ty
+        && user_types.contains(name)
+    {
+        return Ok(name.clone());
+    }
+    render_marshallable_type(ty)
 }
 
 // ─── OX2 user-record synthesis (option (b) per ROADMAP) ─────────────────
@@ -1141,6 +1370,23 @@ pub fn synthesize_struct_type(
     name: &str,
     fields: &[StructField],
 ) -> Result<String, LeanError> {
+    synthesize_struct_type_with_users(name, fields, &HashSet::new())
+}
+
+/// Variant of `synthesize_struct_type` that accepts the
+/// caller's previously-registered user-defined type names as
+/// marshallable field types. Used when a struct references
+/// another struct emitted in the same crate.
+///
+/// # Errors
+/// Same conditions as `synthesize_struct_type` — fields whose
+/// type is neither a built-in nor a registered user type
+/// reject before any source emits.
+pub fn synthesize_struct_type_with_users(
+    name: &str,
+    fields: &[StructField],
+    user_types: &HashSet<String>,
+) -> Result<String, LeanError> {
     use std::fmt::Write as _;
 
     if fields.is_empty() {
@@ -1164,7 +1410,7 @@ pub fn synthesize_struct_type(
     // anything so a partial struct never lands.
     let mut rendered_tys: Vec<String> = Vec::with_capacity(fields.len());
     for f in fields {
-        rendered_tys.push(render_marshallable_type(&f.ty)?);
+        rendered_tys.push(render_marshallable_type_with_users(&f.ty, user_types)?);
     }
 
     let mut s = String::new();
@@ -1273,6 +1519,12 @@ pub struct TranspileUnit {
     /// leo4 mangled symbol name (see `SPEC/mangling.md` §3).
     /// Used as the dispatch-table key.
     pub mangled: String,
+    /// User-defined type declarations (structures /
+    /// inductives) this fn depends on. Emitted ahead of the
+    /// fn body in `emit_lib_rs` so forward references resolve.
+    /// Empty for fns that only use primitives + carriers.
+    #[allow(clippy::struct_field_names)]
+    pub type_decls: Vec<String>,
 }
 
 /// In-memory representation of an emit-time Cargo crate.
@@ -1359,6 +1611,23 @@ pub fn emit_lib_rs(units: &[TranspileUnit], schema_hash: &str) -> String {
     s.push_str("//! Auto-generated by leo4-oxilean-build.\n");
     s.push_str("//! DO NOT EDIT — re-run the build step to regenerate.\n\n");
     s.push_str("#![allow(non_snake_case, clippy::missing_errors_doc)]\n\n");
+
+    // Type decls first — forward references from the fns
+    // need them in scope. Deduplicate verbatim sources so
+    // multiple fns referencing the same struct don't duplicate
+    // the decl block.
+    let mut seen_type_blocks: HashSet<String> = HashSet::new();
+    for u in units {
+        for td in &u.type_decls {
+            if seen_type_blocks.insert(td.clone()) {
+                s.push_str(td);
+                if !td.ends_with('\n') {
+                    s.push('\n');
+                }
+                s.push('\n');
+            }
+        }
+    }
 
     for u in units {
         s.push_str(&u.fn_src);
@@ -2193,6 +2462,180 @@ mod tests {
         }
     }
 
+    // ─── OX2: SurfaceExpr lifter + user-type aware marshalling tests ──
+
+    /// Parse a Lean expression in type position (using
+    /// `parse_decl` on a wrapper `def`, then yanking the type
+    /// annotation back out). Keeps the lifter tests anchored
+    /// to the *real* parser, not a hand-built AST.
+    fn parse_type_expr(src: &str) -> Located<SurfaceExpr> {
+        let full = format!("def __probe : {src} := unsafeCast 0");
+        let normalised = lean4_normalize(&full);
+        let mut lexer = Lexer::new(&normalised);
+        let tokens = lexer.tokenize();
+        let mut parser = Parser::new(tokens);
+        let decl = parser.parse_decl().expect("parse_decl");
+        match &decl.value {
+            Decl::Definition { ty: Some(ty), .. } => ty.clone(),
+            other => panic!("expected Definition with annotated type, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lifter_handles_primitive_names() {
+        let users = HashSet::new();
+        for (lean, expected) in [
+            ("Nat", RustType::U64),
+            ("Int", RustType::I64),
+            ("UInt8", RustType::U8),
+            ("UInt32", RustType::U32),
+            ("UInt64", RustType::U64),
+            ("Int32", RustType::I32),
+            ("Float", RustType::F64),
+            ("Float32", RustType::F32),
+            ("Bool", RustType::Bool),
+            ("Char", RustType::Char),
+            ("String", RustType::RustString),
+            ("Unit", RustType::Unit),
+        ] {
+            let ty = parse_type_expr(lean);
+            let r = surface_to_rust_type(&ty, &users)
+                .unwrap_or_else(|e| panic!("{lean}: {}", e.message));
+            assert_eq!(r, expected, "{lean} mismatch");
+        }
+    }
+
+    #[test]
+    fn lifter_handles_carrier_names() {
+        let users = HashSet::new();
+        for lean in ["BigNat", "BigInt", "LeanRat", "LeanComplexF64x2"] {
+            let ty = parse_type_expr(lean);
+            let r = surface_to_rust_type(&ty, &users)
+                .unwrap_or_else(|e| panic!("{lean}: {}", e.message));
+            // Carrier types come back as Custom — render_marshallable_type
+            // resolves them to leo4_abi paths downstream.
+            assert!(matches!(r, RustType::Custom(_)));
+        }
+    }
+
+    #[test]
+    fn lifter_handles_user_types_via_registry() {
+        let mut users = HashSet::new();
+        users.insert("Point".to_string());
+        let ty = parse_type_expr("Point");
+        let r = surface_to_rust_type(&ty, &users).expect("Point known");
+        assert_eq!(r, RustType::Custom("Point".to_string()));
+    }
+
+    #[test]
+    fn lifter_rejects_unknown_name() {
+        let users = HashSet::new();
+        let ty = parse_type_expr("MysteryType");
+        let err = surface_to_rust_type(&ty, &users).expect_err("unknown rejects");
+        assert_eq!(err.code, leo4_abi::error::error_codes::DECODE_ERROR);
+        assert!(err.message.contains("MysteryType"));
+    }
+
+    #[test]
+    fn lifter_handles_generic_app() {
+        let users = HashSet::new();
+        // `Vec Nat` → Vec<U64>
+        let ty = parse_type_expr("Vec Nat");
+        let r = surface_to_rust_type(&ty, &users).expect("Vec Nat");
+        assert_eq!(r, RustType::Vec(Box::new(RustType::U64)));
+    }
+
+    #[test]
+    fn lifter_handles_nested_generic_app() {
+        let users = HashSet::new();
+        // `Vec (Option Nat)` → Vec<Option<U64>>
+        let ty = parse_type_expr("Vec (Option Nat)");
+        let r = surface_to_rust_type(&ty, &users).expect("Vec Option Nat");
+        assert_eq!(
+            r,
+            RustType::Vec(Box::new(RustType::Option(Box::new(RustType::U64))))
+        );
+    }
+
+    #[test]
+    fn lifter_lifts_carrier_inside_generic() {
+        let users = HashSet::new();
+        let ty = parse_type_expr("Vec BigNat");
+        let r = surface_to_rust_type(&ty, &users).expect("Vec BigNat");
+        match r {
+            RustType::Vec(inner) => assert!(matches!(*inner, RustType::Custom(_))),
+            other => panic!("expected Vec<Custom>, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn render_with_users_accepts_registered_struct() {
+        let mut users = HashSet::new();
+        users.insert("Point".to_string());
+        let r = render_marshallable_type_with_users(
+            &RustType::Custom("Point".to_string()),
+            &users,
+        )
+        .expect("Point registered");
+        assert_eq!(r, "Point");
+    }
+
+    #[test]
+    fn render_without_users_rejects_unknown_struct() {
+        let users = HashSet::new();
+        let err = render_marshallable_type_with_users(
+            &RustType::Custom("Point".to_string()),
+            &users,
+        )
+        .expect_err("Point unregistered");
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+    }
+
+    #[test]
+    fn wrapper_with_users_accepts_user_param() {
+        let users: HashSet<String> = ["Point".to_string()].into_iter().collect();
+        let f = rfn(
+            "shift",
+            vec![("p", RustType::Custom("Point".to_string()))],
+            Some(RustType::Custom("Point".to_string())),
+        );
+        let out = synthesize_canonical_wrapper_with_users(&f, &users)
+            .expect("user-type param marshals");
+        // Bare name lands in the decode + encode positions.
+        assert!(out.contains("<Point as ::leo4_abi::LeanMarshal>::canonical_decode"));
+        assert!(out.contains("encode_to_vec(&__ret)"));
+    }
+
+    #[test]
+    fn registry_user_type_round_trip() {
+        let mut reg = Leo4ExportRegistry::new();
+        assert!(reg.user_type_names().is_empty());
+        reg.register_user_type("Point");
+        reg.register_user_type("Color");
+        reg.register_user_type("Point"); // dup is fine
+        let names = reg.user_type_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"Point".to_string()));
+        assert!(names.contains(&"Color".to_string()));
+    }
+
+    #[test]
+    fn struct_with_users_references_other_struct_field() {
+        let users: HashSet<String> = ["Point".to_string()].into_iter().collect();
+        let out = synthesize_struct_type_with_users(
+            "Edge",
+            &[
+                field("from", RustType::Custom("Point".to_string())),
+                field("to", RustType::Custom("Point".to_string())),
+            ],
+            &users,
+        )
+        .expect("Edge { from: Point, to: Point } must synth");
+        assert!(out.contains("pub from: Point,"));
+        assert!(out.contains("pub to: Point,"));
+        assert!(out.contains("<Point as ::leo4_abi::LeanMarshal>"));
+    }
+
     // ─── OX2 user-record synthesis tests ──────────────────────────────
 
     fn field(name: &str, ty: RustType) -> StructField {
@@ -2344,6 +2787,7 @@ mod tests {
         );
         let wrapper = synthesize_canonical_wrapper(&f).expect("wrapper synth must succeed");
         TranspileUnit {
+            type_decls: Vec::new(),
             fn_src: f.emit(),
             wrapper_src: wrapper,
             fn_name: fn_name.to_string(),
