@@ -17,6 +17,7 @@ members = [
     "examples/01-hello",
     "examples/02-roundtrip",
     "examples/04-mutual-ast",
+    "examples/05-rust-export",
 ]
 
 [workspace.package]

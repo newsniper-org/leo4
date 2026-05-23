@@ -185,6 +185,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "leo4-example-05-rust-export"
+version = "0.1.0"
+dependencies = [
+ "leo4",
+]
+
+[[package]]
 name = "leo4-idl"
 version = "0.1.0"
 dependencies = [

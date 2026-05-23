@@ -7,6 +7,59 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-7: `examples/05-rust-export/` end-to-end demo (2026-05-23)
+
+Eighth code landing on the Phase 9 ladder. The first example
+where every layer of the reverse-direction pipeline executes
+end-to-end: Rust cdylib → `leo4-rust-emit` → Lean wrapper →
+glue shim → dispatcher (`libleo4_rust_bridge.a`) → POSIX
+worker (`leo4-rust-worker`) → cdylib's wrapper symbol → Rust
+function → response all the way back.
+
+- `examples/05-rust-export/` (new workspace member, cdylib +
+  rlib crate). Four `#[leo4::export]` functions hitting the
+  v9-5 Lean-wrapper mapping table:
+  - `is_prime(u64) -> bool`               (scalar / scalar)
+  - `next_prime(u64) -> u64`              (long-running loop)
+  - `count_primes_below(u64) -> u64`      (compute-heavy)
+  - `factor_smallest(u64) -> Option<u64>` (`Option<T>` return)
+- Rust-side unit tests pin every function's behaviour (4
+  tests, all passing as part of `cargo test --workspace`).
+- `examples/05-rust-export/lean/` carries the Lean driver:
+  `lakefile.lean` (NOT a workspace member of `lake/Leo4/`;
+  it's a standalone Lake project that references the runtime
+  library via a relative `require`), `lean-toolchain` pinned
+  to `v4.29.1` to match the rest of the repo, and `Main.lean`
+  that imports `Leo4ExampleMiniSolverRust.Rust` and prints
+  each function's answer for a representative input set.
+- `examples/05-rust-export/README.md` documents the 4-step
+  manual build + run workflow (`cargo build` → `leo4-rust-emit
+  --emit-lean` → `leanc -c shim/leo4_rust_bridge_lean.c` →
+  `lake build` + manual `leanc -o`), with the env-var matrix
+  (`LEO4_RUST_CDYLIB`, `LEO4_RUST_WORKER_BIN`,
+  `LEO4_RUST_HANDSHAKE_PKG`, `LEO4_RUST_HANDSHAKE_IFACE`)
+  the worker needs to recompute the schema_hash to match.
+
+Pipeline smoke verified: `cargo run -p leo4-rust-emit --
+--cdylib …/libleo4_example_05_rust_export.so --out-dir …
+--emit-lean --lean-module Leo4ExampleMiniSolverRust.Rust`
+emits all three artefacts with schema_hash `ozln3adaktdow`,
+the Lean wrapper carries `def is_prime : IO Bool`,
+`def factor_smallest : IO Option UInt64`, etc, and the
+handshake JSON lists the four expected mangled symbols
+(`leo4_rust__is_prime__u64`, …).
+
+The end-to-end *runtime* (Lake-built Lean executable
+actually calling the cdylib through the dispatcher + worker)
+needs the four-step manual workflow today; the README walks
+through every command. Lake-plugin auto-discovery of the glue
+shim source + the bridge static archive is a 9-6 / 9-7
+follow-up — until it lands, this demo is the
+load-bearing reference for "what does the user actually
+type to make this work?".
+
+Workspace test count 134 → 138; all green.
+
 ### Added — Phase 9-6: Lean-side glue shim (`shim/leo4_rust_bridge_lean.c`) (2026-05-23)
 
 Seventh code landing on the Phase 9 ladder. Resolves the

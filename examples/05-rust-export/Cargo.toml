@@ -1,0 +1,18 @@
+[package]
+name        = "leo4-example-05-rust-export"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+description = "Phase 9-7 e2e demo — a tiny Rust 'mini-solver' cdylib called from Lean through the reverse-direction pipeline (9-1 .. 9-6). See README.md."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leo4 = { workspace = true, features = ["rust-exports"] }
+
+[lints]
+workspace = true
