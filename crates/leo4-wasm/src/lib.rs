@@ -251,14 +251,24 @@ mod tests {
     }
 
     #[test]
-    fn backend_default_open_returns_dlsym_failed_stub() {
+    fn backend_default_open_rejects_empty_bytes() {
+        // Empty input is not a valid wasm component; the wasmtime
+        // backend's `Component::from_binary` rejects it with a
+        // parse error (mapped to DECODE_ERROR). The wasmi backend
+        // (when wired) is expected to do the same. Either way,
+        // open_component must NOT return Ok on `&[]`.
         use crate::runtime::WasmRuntime as _;
-        let rt = crate::backend::Default::new();
+        let rt = crate::backend::Default::default();
         let err = match rt.open_component(&[]) {
-            Ok(_) => panic!("stub backend must not return Ok"),
+            Ok(_) => panic!("backend must reject empty bytes"),
             Err(e) => e,
         };
-        assert_eq!(err.code, 0x0002_0005);
+        // wasmtime: DECODE_ERROR; wasmi stub: 0x0002_0005.
+        assert!(
+            err.code == error_codes::DECODE_ERROR || err.code == 0x0002_0005,
+            "unexpected error code: {:#010x}",
+            err.code
+        );
     }
 
     #[test]

@@ -2,16 +2,33 @@
 //! feature (opt-in).
 //!
 //! `wasmi` itself is a pure-Rust interpreter without native
-//! Component Model support; the C4.x.x impl will pair it with
-//! `wasm_component_layer` (which exposes `wasmi` as a CM backend
-//! through `wasmi_runtime_layer`). Choosing this backend trades
-//! wasmtime's JIT/AOT performance for a much smaller binary +
-//! easier portability (no Cranelift / LLVM dep, no
-//! mmap-of-executable-pages requirement on the host).
+//! Component Model support. The plan was to pair it with
+//! `wasm_component_layer` + `wasmi_runtime_layer` to get CM on
+//! top of wasmi's core engine; that path is **stalled
+//! upstream** as of 2026-05-21:
 //!
-//! Phase 10-C4.x scaffolding (2026-05-21): trait impls return
-//! `LEO4_ERR_RUST_DLSYM_FAILED` until the real impls land in
-//! C4.x.x alongside `SPEC/wit/leo4-host.wit`.
+//! - `wasm_component_layer` (the layer that provides CM on
+//!   arbitrary core-wasm engines) has had no commits since
+//!   2025-03-03 — over a year.
+//! - It pins `wasmtime-environ ^18` as a dep; wasmtime is on
+//!   v45 today. Resolving the version conflict isn't a small
+//!   patch — it's a serious internal refactor.
+//! - The `waclay` fork (`crates.io/crates/waclay`) appears to
+//!   be a more-recent attempt but is unproven for production.
+//!
+//! Until wasmi adds **native** Component Model support OR
+//! `wasm_component_layer` resumes upstream maintenance OR
+//! `waclay` proves itself, this backend stays a stub. The
+//! feature flag stays in place so:
+//!
+//! 1. `backend::Default` resolution works under
+//!    `--no-default-features --features backend-wasmi`.
+//! 2. The mutex guard in `lib.rs` continues to enforce
+//!    "exactly one backend".
+//! 3. The day this gap closes, the wiring is one PR away
+//!    (Cargo.toml dep + body of the three trait impls below).
+//!
+//! Phase 10-C4.x.x (2026-05-21): explicit deferral documented.
 
 use crate::runtime::{WasmComponent, WasmInstance, WasmRuntime};
 use crate::LeanError;

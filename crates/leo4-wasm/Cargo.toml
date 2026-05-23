@@ -13,16 +13,24 @@ description = "wasm host runtime for leo4. Public API surface mirrors `leo4-nati
 # `--no-default-features --features backend-wasmi` swaps. Enabling
 # both at once is rejected by a `compile_error!` in `lib.rs`.
 default          = ["backend-wasmtime"]
-backend-wasmtime = []
-backend-wasmi    = []
+backend-wasmtime = ["dep:wasmtime"]
+backend-wasmi    = []  # See `backend/wasmi.rs` — implementation
+                       # blocked on wasmi's lack of native CM
+                       # support; the `wasm_component_layer` /
+                       # `wasmi_runtime_layer` route is stalled
+                       # upstream (last commit 2025-03-03, pinned
+                       # to wasmtime-environ ^18). Feature flag
+                       # exists for future wiring; backend stays
+                       # a stub.
 
 [dependencies]
 leo4-abi   = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
-# wasmtime / wasmi / wasm_component_layer deps NOT pulled in
-# until C4.x.x — the current backend modules are stubs whose
-# real impls require `wit-bindgen` against SPEC/wit/leo4-host.wit.
+# Host-side wasm runtime. `wasmtime::component::bindgen!` reads
+# SPEC/wit/leo4-host.wit at compile time and materialises the
+# typed host-side traits / structs the backend wraps.
+wasmtime   = { version = "45", optional = true, default-features = false, features = ["cranelift", "component-model", "runtime", "std"] }
 
 [lints]
 workspace = true

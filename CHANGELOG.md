@@ -7,6 +7,90 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-C4.x.x step 1: real wasmtime Component Model dispatch (2026-05-21)
+
+Replaces the wasmtime backend stub with a working
+Component-Model loader + dispatcher.
+
+`crates/leo4-wasm/src/backend/wasmtime.rs` now:
+
+* Pulls in `wasmtime = { version = "45", optional = true,
+  default-features = false, features = ["cranelift",
+  "component-model", "runtime", "std"] }` (gated on
+  `backend-wasmtime`, default-on).
+* `WasmtimeRuntime::new()` initialises a `wasmtime::Engine`
+  with `Config::wasm_component_model(true)`.
+* `open_component(bytes)` calls
+  `wasmtime::component::Component::from_binary` and wraps the
+  result in a local `WasmtimeComponent`.
+* `WasmtimeComponent::instantiate()` builds a `Linker<()>`,
+  registers a stderr-printing `log: func(level: u32, msg:
+  string)` impl on the `leo4:host/host-imports@0.1.0`
+  interface (the one host-side import the WIT currently
+  defines), then `instantiate()`s.
+* `WasmtimeInstance::call(mangled, args)`:
+  1. Resolves the `leo4:host/exports@0.1.0` / `call` Func
+     index via wasmtime 45's `get_export_index` chain.
+  2. Materialises args as `[Val::String(mangled),
+     Val::List(args_as_u8_vals)]`.
+  3. Invokes `Func::call`.
+  4. Decodes the `result<list<u8>, lean-error>` shape,
+     surfacing the inner record `{code, message}` on `Err`
+     and the inner `list<u8>` payload on `Ok`.
+
+Error mapping:
+* Component-bytes parse failure → `LEO4_ERR_DECODE_ERROR`
+  (0x01).
+* Instantiation failure / missing exports interface →
+  `LEO4_ERR_RUST_DLSYM_FAILED` (0x00020005).
+* Component trap during `call` → `LEO4_ERR_RUST_PANIC`
+  (0x00020001).
+
+Bindgen choice: **untyped `Val`-based API**, not
+`wasmtime::component::bindgen!`. Rationale: leo4 only ever
+calls one exported function (`exports.call(mangled, args)`)
+whose shape is fixed at the WIT level. Bindgen would buy
+nothing vs. one `Val::List(…)` build + result decode, and
+would force a `bindgen!` invocation in `build.rs` (slower
+compile, more brittle WIT-version coupling). The WIT pin
+itself is unchanged.
+
+`wasmtime 45` API drift caught + handled: `Instance::exports`
+was replaced by `get_export_index` chain; `Func::post_return`
+is deprecated and no longer needed for the dynamic API.
+
+### Deferred indefinitely — wasmi backend + Lean→wasm pipeline (2026-05-21)
+
+Of the four C4.x.x items the previous landing listed:
+
+1. ✅ `wasmtime` dep + real impl — landed above.
+2. ✅ host-side WIT bindings via wasmtime's untyped Val API —
+   landed above (chose this over `wit-bindgen` for the reasons
+   in the previous entry).
+3. ❌ wasmi backend stays a stub. The `wasm_component_layer`
+   crate (the path that would give wasmi a Component-Model
+   surface) has been **stale upstream since 2025-03-03** and
+   pins `wasmtime-environ ^18`; wasmtime is on v45 today.
+   `backend/wasmi.rs` documents the deferral explicitly. The
+   feature flag stays in place so the mutex guard continues
+   to enforce exactly-one-backend, and so any future re-wire
+   is a one-PR change.
+4. ❌ `leanc --target=wasm32-wasip2` is **not currently
+   feasible**: Lean 4 produces native cdylibs through gcc /
+   clang via the C backend, and `leanc` has no wasm target.
+   Cross-compiling the Lean runtime to wasm + wiring WASIp2 /
+   p3 imports is a substantial undertaking that belongs in a
+   dedicated Phase (or in the `sibling/leo4-wasip3/` project
+   that already exists for the guest-side of this story).
+   `leo4-wasm` can still load arbitrary CM-compliant wasm
+   components today; the gap is "where does the Lean
+   component come from".
+
+Together: the wasmtime backend is **end-to-end functional for
+hand-written or wit-bindgen-Rust-built leo4 components**. The
+"hand it a Lean module" workflow stays on the deferred ladder
+until the Lean→wasm pipeline question gets its own phase.
+
 ### Added — Phase 10-C4.x: `WasmRuntime` trait + dual-backend feature gate + leo4-host.wit pin (2026-05-21)
 
 Builds on the C4 scaffolding (`Lean::open` parses handshake)
