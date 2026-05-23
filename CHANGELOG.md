@@ -7,6 +7,78 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-6 follow-up commit 2/3: `leo4RustBridgeLean` extern_lib (leanc + ar + logicutils gate) (2026-05-23)
+
+Second of three commits. Adds the Lean-side glue shim
+auto-compile path so users no longer need to run
+`leanc -c shim/leo4_rust_bridge_lean.c` manually before
+`lake build`.
+
+Implementation follows SPIKE-1 pattern 4b plus option R2 of
+the logicutils discussion (optional, with fallback to
+unconditional rebuild):
+
+- `extern_lib leo4RustBridgeLean pkg := …` (new in
+  `lake/Leo4Rust/lakefile.lean`).
+- Inputs: `shim/leo4_rust_bridge_lean.c` resolved via
+  `pkg.dir / ".." / ".." / "shim" / …`.
+- Outputs: `leo4_rust_bridge_lean.o` (leanc -c -std=c2x)
+  wrapped via `ar rcs` into
+  `libleo4_rust_bridge_lean.a` under
+  `pkg.buildDir / "leo4rust/"`.
+- Logicutils probe via `freshcheck --protocol-version` in a
+  `try` block — if the binary is absent or the call errors,
+  the body falls through to unconditional rebuild (4b base
+  behaviour). When freshcheck IS available:
+  - `freshcheck --method=hash --store … outAr src` decides
+    whether to rebuild (exit 0 = fresh, non-zero = stale).
+    BLAKE3 content hash by default — robust against
+    timestamp churn from `git checkout` etc.
+  - After a successful rebuild, `stamp record --store … outAr
+    src` records BOTH the target and the dep so the next
+    freshcheck has both baselines. Stamp failure is
+    tolerated (cache bookkeeping, not load-bearing).
+- Pre-`ar` cleanup: existing `.a` is removed before `ar rcs`
+  so the archive doesn't accumulate stale members across
+  rebuilds.
+
+Verified locally:
+- Clean build (`rm -rf .lake/build/leo4rust && lake build
+  leo4RustBridgeLean.static`) produces a valid 15 770-byte
+  `libleo4_rust_bridge_lean.a` + a `.lu-store/` directory
+  populated by logicutils.
+- Real source edit (adding a new `LEAN_EXPORT void
+  leo4_rust_bridge_test_marker_qz(void)` symbol) → next
+  `lake build` produces a different archive hash, confirming
+  the rebuild fired.
+- Comment-only edits leave the `.o` byte-identical
+  (C compiler discards comments before codegen), so the
+  resulting `.a` stays the same — desired behaviour.
+- `which freshcheck` available locally
+  (`pacman -Qi logicutils` reports v0.2.0); the fallback
+  branch is exercised by stubbing freshcheck out of PATH
+  (manual verification only).
+
+logicutils install hint (added to install.md follow-up;
+README/AGENTS bumped in commit 3/3):
+
+- Arch / Manjaro: `pacman -S logicutils`
+- Other platforms: `cargo install --git https://github.com/newsniper-org/logicutils logicutils`
+- Or omit and accept the per-build leanc + ar invocation
+  (still functional, just no skip on unchanged source).
+
+Cache layering note: Lake's own outer cache covers the
+"output file already exists with matching trace" case. The
+inner freshcheck guard only fires when Lake calls our body
+in the first place. Both layers compose naturally — Lake
+governs whether the body runs; freshcheck governs whether
+the body's leanc/ar invocations run inside the body.
+
+Next: 3/3 wires `examples/05-rust-export/lean/lakefile.lean`
+through `require Leo4Rust` + drops the manual `leanc -o`
+step from the example's README and the `just
+rust-export-05-build` recipe.
+
 ### Added — Phase 9-6 follow-up commit 1/3: `Leo4Rust` Lake package + `leo4RustBridge` extern_lib (2026-05-23)
 
 First of three commits collapsing the reverse-direction

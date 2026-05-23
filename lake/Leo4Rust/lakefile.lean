@@ -74,3 +74,97 @@ extern_lib leo4RustBridge pkg := do
       listed ++
       "\nRun `cargo build --release -p leo4-rust-bridge` " ++
       "in the leo4 repo first, or set LEO4_RUST_BRIDGE_AR to an absolute path."
+
+/-! ## 4b: leo4RustBridgeLean — leanc-compiled glue shim wrapped in `.a`
+
+    `shim/leo4_rust_bridge_lean.c` is the one place leo4 includes
+    `<lean/lean.h>` (SPEC/reverse-direction.md §3, Phase 9-6).
+    Lake links it as a static archive, which means the `.o` from
+    `leanc -c` must be wrapped via `ar rcs` first.
+
+    Logicutils integration (option R2, optional with fallback):
+    when `freshcheck` is available on `$PATH` the body uses it as
+    a content-hash gate around the leanc / ar invocation; absent,
+    it falls through to unconditional rebuild (4b base). The
+    freshcheck path uses BLAKE3 by default (per logicutils'
+    `--method=hash`) — robust against `git checkout` timestamp
+    churn that a Lake-native cache would mis-handle.
+
+    See SPIKE-1 §4b + the logicutils discussion. README install
+    note: `pacman -S logicutils` on Arch / Manjaro;
+    `cargo install --git https://github.com/newsniper-org/logicutils logicutils`
+    elsewhere; or omit and accept the per-build leanc/ar
+    invocation.
+-/
+extern_lib leo4RustBridgeLean pkg := do
+  let workDir : System.FilePath := pkg.buildDir / "leo4rust"
+  IO.FS.createDirAll workDir
+  let leo4Repo : System.FilePath := pkg.dir / ".." / ".."
+  let src    := leo4Repo / "shim" / "leo4_rust_bridge_lean.c"
+  let outObj := workDir / "leo4_rust_bridge_lean.o"
+  let outAr  := workDir / "libleo4_rust_bridge_lean.a"
+  let store  := workDir / ".lu-store"
+
+  if !(← src.pathExists) then
+    error s!"Leo4Rust: missing source {src}"
+
+  -- Probe `freshcheck` availability. Logicutils' CLI protocol
+  -- exposes `--protocol-version` on every binary; we use it as
+  -- a cheap "is the tool installed?" probe.
+  let freshcheckAvailable : Bool ←
+    try
+      let _ ← IO.Process.output {
+        cmd := "freshcheck", args := #["--protocol-version"]
+      }
+      pure true
+    catch _ =>
+      pure false
+
+  -- Decide rebuild.
+  let mustRebuild ← if freshcheckAvailable && (← outAr.pathExists) then do
+    let r ← IO.Process.output {
+      cmd  := "freshcheck",
+      args := #["--method=hash", "--store", store.toString,
+                outAr.toString, src.toString],
+    }
+    pure (r.exitCode != 0)
+  else
+    pure true
+
+  if mustRebuild then
+    -- leanc -c -std=c2x src -o outObj
+    let r1 ← IO.Process.output {
+      cmd  := "leanc",
+      args := #["-c", "-std=c2x", src.toString, "-o", outObj.toString],
+    }
+    if r1.exitCode != 0 then
+      error s!"Leo4Rust: leanc failed compiling {src} (exit {r1.exitCode}):\n{r1.stderr}"
+
+    -- ar rcs outAr outObj  (replace any existing archive contents)
+    -- Remove the archive first so `ar rcs` doesn't accumulate
+    -- objects across rebuilds.
+    if (← outAr.pathExists) then
+      IO.FS.removeFile outAr
+    let r2 ← IO.Process.output {
+      cmd  := "ar",
+      args := #["rcs", outAr.toString, outObj.toString],
+    }
+    if r2.exitCode != 0 then
+      error s!"Leo4Rust: ar failed wrapping {outObj} -> {outAr} (exit {r2.exitCode}):\n{r2.stderr}"
+
+    -- Stamp BOTH the source and the rebuilt archive — freshcheck
+    -- compares the stored hashes to the current ones, so it needs
+    -- a recorded baseline for every dep + target. Tolerate stamp
+    -- failure (cache bookkeeping; the rebuild itself was the
+    -- load-bearing step).
+    if freshcheckAvailable then
+      let _ ← try
+        IO.Process.output {
+          cmd  := "stamp",
+          args := #["record", "--store", store.toString,
+                    outAr.toString, src.toString],
+        }
+      catch _ => pure { exitCode := 0, stdout := "", stderr := "" }
+      pure ()
+
+  return (Pure.pure outAr)
