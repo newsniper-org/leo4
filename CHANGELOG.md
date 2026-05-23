@@ -7,6 +7,65 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-6 follow-up: Lake automation for the reverse-direction pipeline (2026-05-23)
+
+Collapses the 4-step manual workflow from
+`SPEC/reverse-direction.md` §7 into named `just` recipes +
+reusable `Leo4.Build.RustBridge` helpers a user lakefile can
+call directly. The end-to-end demo (`examples/05-rust-export/`)
+now builds via a single `just rust-export-05-build`.
+
+**`justfile` additions**:
+
+- `rust-bridge-build` — builds the three Cargo artefacts the
+  reverse direction needs in one shot (`leo4-rust-bridge` static
+  archive, `leo4-rust-worker` binary, `leo4-rust-emit` CLI).
+- `rust-emit CDYLIB OUT_DIR MODULE` — variable-parameterised
+  wrapper around `cargo run -p leo4-rust-emit --emit-lean`. Any
+  user cdylib can be wired through one command.
+- `glue-shim-build OUT_OBJ` — `leanc -c -std=c2x
+  shim/leo4_rust_bridge_lean.c -o $OUT_OBJ` (the one place
+  `lean.h` legitimately enters the build).
+- `rust-export-05-build` — end-to-end recipe for
+  `examples/05-rust-export/`. Builds the cdylib + bridge +
+  worker, runs `leo4-rust-emit --emit-lean`, moves the Lean
+  wrapper to `lean/Leo4ExampleMiniSolverRust/Rust.lean` so
+  Lake picks it up under the expected module path, compiles
+  the glue shim, and runs `lake build`. The final
+  `leanc -o` link is still manual (Lake's `lean_exe` DSL
+  doesn't take dynamic link args yet) — the README documents
+  the one-line link command.
+- `rust-export-05-clean` — drops the emitted artefacts.
+
+**`lake/Leo4/Leo4/Build.lean` additions**:
+
+`Leo4.Build.RustBridge` namespace with three IO helpers a
+user lakefile can call from a `script` block or a
+`def main`-style helper:
+
+- `compileGlueShim leo4Root outObj : IO FilePath` — invokes
+  `leanc -c -std=c2x` on `shim/leo4_rust_bridge_lean.c`. Throws
+  `IO.userError` (forwarding stderr) on non-zero exit.
+- `discoverBridgeArchive leo4Root : IO FilePath` — locates
+  `libleo4_rust_bridge.a` via env `LEO4_RUST_BRIDGE_AR` first,
+  then `target/release/`, then `target/debug/`. Mirrors the
+  `LEO4_SHIM_SO` search chain in `leo4-build::wire`.
+- `linkArgs leo4Root glueObj : IO (Array String)` — returns
+  `#[glueObj, bridgeArchive]` for caller-side splicing into
+  `weakLinkArgs` or a manual leanc invocation.
+
+These don't yet plug into Lake's `lean_exe` DSL — Lake's
+`weakLinkArgs` is currently a static-Array field and there is
+no first-class hook for "build the user's executable after a
+dynamic IO action computes link args". When that hook lands,
+the helpers are ready.
+
+**`examples/05-rust-export/README.md` updated** with the
+fast path (`just rust-export-05-build`) at the top + the
+manual 4-step kept as a reference / debugging fallback.
+
+No code-test changes; workspace count stays at 138/0.
+
 ### Added — `AGENTS.md` cookbook for Claude Code sessions (2026-05-23)
 
 Companion to `CLAUDE.md`. CLAUDE.md is the working agreement

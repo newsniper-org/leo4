@@ -314,3 +314,78 @@ where
     IO.println s!"ok  {sofile} carries {cfg.mangledBodies.size * 2} expected symbols"
 
 end Leo4.Build
+
+/-! ## Reverse-direction (Phase 9-6 follow-up) — Rust bridge helpers
+
+Helpers a user lakefile may call to compile the Lean-side glue
+shim (`shim/leo4_rust_bridge_lean.c`) and discover
+`libleo4_rust_bridge.a` for the leanc link step. Real Lake DSL
+integration (so `lean_exe`'s `weakLinkArgs` can pull them in
+declaratively) lands when Lake exposes a stable hook; until
+then a user can invoke these from a `script` block or a
+`def main`-style helper.
+-/
+
+namespace Leo4.Build.RustBridge
+
+/-- Compile `<leo4Root>/shim/leo4_rust_bridge_lean.c` into the
+    object at `outObj`. Uses `leanc -c -std=c2x` matching the
+    Phase 9-6 build line.
+
+    Returns `outObj` on success; throws an `IO.userError` if
+    leanc exits non-zero (stderr forwarded). -/
+def compileGlueShim (leo4Root : System.FilePath) (outObj : System.FilePath) :
+    IO System.FilePath := do
+  let src := leo4Root / "shim" / "leo4_rust_bridge_lean.c"
+  if !(← src.pathExists) then
+    throw <| IO.userError s!"Leo4.Build.RustBridge.compileGlueShim: missing source {src}"
+  let res ← IO.Process.output {
+    cmd  := "leanc",
+    args := #["-c", "-std=c2x", src.toString, "-o", outObj.toString],
+  }
+  if res.exitCode != 0 then
+    throw <| IO.userError <|
+      s!"leanc failed compiling {src} (exit {res.exitCode}):\n{res.stderr}"
+  return outObj
+
+/-- Resolve the `libleo4_rust_bridge.a` static archive.
+
+    Search order (mirrors `LEO4_SHIM_SO`'s chain in
+    `leo4-build::wire`):
+      1. env `LEO4_RUST_BRIDGE_AR`              — explicit override
+      2. `<leo4Root>/target/release/libleo4_rust_bridge.a`
+      3. `<leo4Root>/target/debug/libleo4_rust_bridge.a`
+
+    Caller is responsible for ensuring the archive has been
+    built (`cargo build -p leo4-rust-bridge`); this function
+    only locates it, it does NOT invoke cargo. -/
+def discoverBridgeArchive (leo4Root : System.FilePath) : IO System.FilePath := do
+  match ← IO.getEnv "LEO4_RUST_BRIDGE_AR" with
+  | some p =>
+    let fp : System.FilePath := p
+    if ← fp.pathExists then return fp
+    throw <| IO.userError s!"LEO4_RUST_BRIDGE_AR points at non-existent path: {p}"
+  | none =>
+    let release := leo4Root / "target" / "release" / "libleo4_rust_bridge.a"
+    if ← release.pathExists then return release
+    let debug := leo4Root / "target" / "debug" / "libleo4_rust_bridge.a"
+    if ← debug.pathExists then return debug
+    throw <| IO.userError <|
+      s!"libleo4_rust_bridge.a not found. Searched:\n" ++
+      s!"  $LEO4_RUST_BRIDGE_AR (unset)\n" ++
+      s!"  {release}\n" ++
+      s!"  {debug}\n" ++
+      "Run `cargo build --release -p leo4-rust-bridge` first."
+
+/-- Linker args a `lean_exe` needs to consume reverse-direction
+    Lean wrapper modules (one entry per `#[leo4::export]` group).
+
+    Returns `#[<glueShimObj>, <bridgeArchive>]` so the caller can
+    splice them into `weakLinkArgs` or pass them to a manual
+    `leanc` invocation. -/
+def linkArgs (leo4Root : System.FilePath) (glueObj : System.FilePath) :
+    IO (Array String) := do
+  let ar ← discoverBridgeArchive leo4Root
+  return #[glueObj.toString, ar.toString]
+
+end Leo4.Build.RustBridge

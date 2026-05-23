@@ -107,6 +107,65 @@ schema-hash: smoke-plugin
 mathlib-bridge-test:
     cd sibling/mathlib-bridge-test && lake build
 
+# ─── Phase 9 reverse-direction (Rust → Lean) automation ─────────────────
+#
+# The full pipeline from user cdylib to executable Lean wrapper is a
+# 4-step manual sequence today (`SPEC/reverse-direction.md` §7). These
+# recipes collapse it into named, repeatable commands.
+
+# Build all three Cargo artefacts the reverse direction needs:
+#   * `libleo4_rust_bridge.a`  — the dispatcher static archive (9-4a/b).
+#   * `leo4-rust-worker`       — the IPC worker binary (9-3).
+#   * `leo4-rust-emit`         — the metadata + Lean wrapper emit CLI (9-2/9-5).
+rust-bridge-build:
+    cargo build --release -p leo4-rust-bridge
+    cargo build --release -p leo4-rust-worker
+    cargo build --release -p leo4-rust-emit
+
+# Emit IDL + handshake + Lean wrapper for one user cdylib.
+#
+# Usage: just rust-emit /abs/path/lib.so out_dir/ MyApp.Rust
+rust-emit CDYLIB OUT_DIR MODULE:
+    mkdir -p {{OUT_DIR}}
+    cargo run --release --quiet -p leo4-rust-emit -- \
+      --cdylib {{CDYLIB}} \
+      --out-dir {{OUT_DIR}} \
+      --emit-lean \
+      --lean-module {{MODULE}}
+
+# Compile `shim/leo4_rust_bridge_lean.c` (the one Lean-aware shim
+# that bridges lean_object* <-> the dispatcher's byte ABI) into a
+# `.o` file at OUT_OBJ. Reruns leanc whenever the C source changes.
+glue-shim-build OUT_OBJ:
+    leanc -c -std=c2x shim/leo4_rust_bridge_lean.c -o {{OUT_OBJ}}
+
+# End-to-end pipeline wrapper for examples/05-rust-export. Does what
+# the README's 4-step manual workflow does, in one command.
+rust-export-05-build: rust-bridge-build
+    @echo "[1/4] Building example cdylib..."
+    cargo build --release -p leo4-example-05-rust-export
+    @echo "[2/4] Emitting handshake / IDL / Lean wrapper..."
+    rm -rf examples/05-rust-export/lean/Leo4ExampleMiniSolverRust
+    mkdir -p examples/05-rust-export/lean/.leo4-emit
+    mkdir -p examples/05-rust-export/lean/Leo4ExampleMiniSolverRust
+    just rust-emit \
+      `realpath target/release/libleo4_example_05_rust_export.so` \
+      examples/05-rust-export/lean/.leo4-emit \
+      Leo4ExampleMiniSolverRust.Rust
+    mv examples/05-rust-export/lean/.leo4-emit/leo4_example_05_rust_export.leo4-rust-imports.lean \
+       examples/05-rust-export/lean/Leo4ExampleMiniSolverRust/Rust.lean
+    @echo "[3/4] Compiling leo4_rust_bridge_lean.c..."
+    just glue-shim-build examples/05-rust-export/lean/.leo4-emit/leo4_rust_bridge_lean.o
+    @echo "[4/4] Lake build (link step still manual; see README §run)."
+    cd examples/05-rust-export/lean && lake build || true
+    @echo "Done. See examples/05-rust-export/README.md for the leanc -o link line + LEO4_RUST_* env vars to run."
+
+# Drop emitted reverse-direction artefacts for examples/05.
+rust-export-05-clean:
+    rm -rf examples/05-rust-export/lean/.leo4-emit \
+           examples/05-rust-export/lean/Leo4ExampleMiniSolverRust \
+           examples/05-rust-export/lean/.lake
+
 # ─── Multi-version Lean matrix (Phase 5 prep) ───────────────────────────
 
 # Run `just test` in a hermetic container across the Lean version matrix

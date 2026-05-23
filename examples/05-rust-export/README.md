@@ -19,11 +19,68 @@ exposes four `#[leo4::export]` functions:
 These together cover the v9-5 Lean-wrapper mapping table
 (scalar in/out, `Option<T>` return).
 
-## Build + run (4-step manual workflow)
+## Build + run
 
-Until Lake-plugin auto-discovery of the glue shim lands (9-6
-follow-up), the user runs each step explicitly. Each command
-is invocable from the repo root unless noted otherwise.
+The fast path is `just rust-export-05-build`, which collapses
+the 4 manual steps into one command:
+
+```sh
+just rust-export-05-build
+```
+
+Behind the scenes that recipe (`justfile` near the bottom):
+
+1. Builds the Cargo artefacts —
+   `leo4-example-05-rust-export` cdylib,
+   `libleo4_rust_bridge.a` static archive,
+   `leo4-rust-worker` binary.
+2. Runs `leo4-rust-emit --emit-lean` against the cdylib,
+   producing `<pkg>.leo4-rust-{exports.idl,handshake,imports.lean}`
+   inside `examples/05-rust-export/lean/.leo4-emit/` and moving
+   the `.lean` wrapper to
+   `lean/Leo4ExampleMiniSolverRust/Rust.lean` so Lake picks it up
+   under the `Leo4ExampleMiniSolverRust.Rust` module name.
+3. Compiles `shim/leo4_rust_bridge_lean.c` with `leanc -c -std=c2x`.
+4. `cd examples/05-rust-export/lean && lake build`.
+
+The `leanc -o` final link of the executable is still manual
+(Lake's `lean_exe` doesn't yet take dynamic `weakLinkArgs`
+from leo4's helpers — that's the next Lake-side integration
+step). The manual recipe is documented in the next section
+("Manual workflow") for reference; in practice you only need
+it if `just rust-export-05-build` doesn't fit.
+
+After `just rust-export-05-build` succeeds, link + run:
+
+```sh
+CDYLIB=$(realpath target/release/libleo4_example_05_rust_export.so)
+BRIDGE=$(realpath target/release/libleo4_rust_bridge.a)
+WORKER=$(realpath target/release/leo4-rust-worker)
+GLUE=$(realpath examples/05-rust-export/lean/.leo4-emit/leo4_rust_bridge_lean.o)
+
+cd examples/05-rust-export/lean
+leanc \
+  .lake/build/lib/Main.olean.o \
+  .lake/build/lib/Leo4ExampleMiniSolverRust/Rust.olean.o \
+  ../../../lake/Leo4/.lake/build/lib/Leo4.olean.o \
+  "$GLUE" "$BRIDGE" \
+  -o leo4Example05
+
+LEO4_RUST_CDYLIB="$CDYLIB" \
+LEO4_RUST_WORKER_BIN="$WORKER" \
+LEO4_RUST_HANDSHAKE_PKG=leo4_example_05_rust_export \
+LEO4_RUST_HANDSHAKE_IFACE=Leo4ExampleMiniSolverRust \
+  ./leo4Example05
+```
+
+To start clean: `just rust-export-05-clean`.
+
+## Manual workflow (reference)
+
+If you need to step through each phase by hand — typically
+while debugging emit-time / link-time mismatches — the
+underlying 4-step sequence is below. Each step is also
+exposed as its own `just` recipe so you can mix and match.
 
 ```sh
 # 1. Build the user cdylib + the leo4-rust-bridge static archive.
