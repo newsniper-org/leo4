@@ -287,10 +287,67 @@ structure Config where
   guaranteed to exist; users who want `<pkg>.wit` must already have
   built leo4c. -/
   withLower    : Bool := false
+  /-- OX1 step b — when `some lean_file_path`, after writing the
+  canonical artefacts, write a `leo4-oxilean-build` manifest covering
+  every `@[leo4_export]` in this build and shell out to the
+  `leo4-oxilean-build` CLI to emit a transpiled Cargo crate
+  (`SPEC/rust-native-lean.md` §9). The path argument is the
+  *single* `.lean` source containing the exports; multi-file
+  support is a future enhancement (today the manifest registers
+  one `source=<file>` line with `bind=` per export). Opt-in for
+  the same reason as `--with-lower`: lake build precedes Cargo
+  build, so `leo4-oxilean-build` may not exist on the PATH yet.
+  Users who want the transpile output must already have built /
+  installed it. -/
+  transpileSource     : Option System.FilePath := none
+  /-- Where to write the emitted Cargo crate. Default
+  `<outDir>/transpiled/`. Only consulted when `transpileSource`
+  is `some`. -/
+  transpileOutDir     : Option System.FilePath := none
+  /-- The emitted Cargo crate's `[package].name`. Default is
+  `pkg` with non-identifier chars replaced by `_`. -/
+  transpileCrateName  : Option String := none
+  /-- The `leo4-abi` dep spec injected into the emitted crate's
+  `Cargo.toml`. Default `"0.1"` (registry version). Users with a
+  local path or git checkout can override, e.g.
+  `{ path = "../leo4-abi" }`. -/
+  transpileAbiDep     : Option String := none
+
+/-- Consume `--flag <value>` pairs from a positional arg list,
+returning the value associated with `flag` (if any) and the
+remaining args. -/
+private def takeFlagWithValue (args : List String) (flag : String) :
+    Option String × List String := Id.run do
+  let mut rest : List String := []
+  let mut found : Option String := none
+  let mut it := args
+  while !it.isEmpty do
+    match it with
+    | a :: b :: tail =>
+      if a == flag then
+        found := some b
+        it := tail
+      else
+        rest := rest ++ [a]
+        it := b :: tail
+    | a :: tail =>
+      rest := rest ++ [a]
+      it := tail
+    | [] => break
+  return (found, rest)
 
 def parseArgs (args : List String) : Config := Id.run do
   let withLower := args.contains "--with-lower"
-  let pos := args.filter (· != "--with-lower")
+  let mut rest := args.filter (· != "--with-lower")
+  let (transpileSource, rest1)    := takeFlagWithValue rest "--transpile"
+  rest := rest1
+  let (transpileOutDir, rest2)    := takeFlagWithValue rest "--transpile-out-dir"
+  rest := rest2
+  let (transpileCrateName, rest3) := takeFlagWithValue rest "--transpile-crate-name"
+  rest := rest3
+  let (transpileAbiDep, rest4)    := takeFlagWithValue rest "--transpile-abi-dep"
+  rest := rest4
+  let pos := rest
   let target := match pos with
     | []     => `Sample
     | a :: _ => a.toName
@@ -303,7 +360,13 @@ def parseArgs (args : List String) : Config := Id.run do
   let iface := match pos with
     | _ :: _ :: _ :: d :: _ => d
     | _ => target.toString
-  return { target, outDir, pkg, iface, withLower }
+  return {
+    target, outDir, pkg, iface, withLower,
+    transpileSource    := transpileSource.map System.FilePath.mk,
+    transpileOutDir    := transpileOutDir.map System.FilePath.mk,
+    transpileCrateName := transpileCrateName,
+    transpileAbiDep    := transpileAbiDep,
+  }
 
 /-- Collect every user-defined nominal type referenced (directly) by an
 analysis's resolved param/return types. Returns the deduplicated FQN
@@ -2297,6 +2360,48 @@ def runPlugin (cfg : Config) (env : Environment) : IO Unit := do
       catch e =>
         IO.eprintln s!"  ⚠  --with-lower: leo4c invocation failed for {sp}: {e}"
         IO.eprintln "      ensure `cargo build -p leo4c` (or release) and `leo4c` is on PATH"
+
+  -- OX1 step b — optionally drive `leo4-oxilean-build` to emit a
+  -- transpiled Cargo crate covering every `@[leo4_export]` of this
+  -- build. Same shell-out pattern as `--with-lower`: opt-in,
+  -- preserves Lake-then-Cargo build order.
+  match cfg.transpileSource with
+  | none => pure ()
+  | some leanSrcPath =>
+    let txOutDir   := cfg.transpileOutDir.getD (cfg.outDir / "transpiled")
+    let crateName  := cfg.transpileCrateName.getD (normalizePackageSegment cfg.pkg)
+    let abiDepSpec := cfg.transpileAbiDep.getD "\"0.1\""
+    -- Build the manifest. Multi-decl source form: one
+    -- `source=<file>` line followed by `bind=` per export.
+    let mut manifest : String := ""
+    manifest := manifest ++ s!"crate_name={crateName}\n"
+    manifest := manifest ++ s!"schema_hash={schemaHash.toBase32lc}\n"
+    manifest := manifest ++ s!"leo4_abi_dep={abiDepSpec}\n"
+    manifest := manifest ++ s!"out_dir={txOutDir}\n"
+    manifest := manifest ++ s!"source={leanSrcPath}\n"
+    for entry in manglingEntries do
+      for inst in entry.instantiations do
+        -- The `bind` key uses the Lean ctor's bare name. The
+        -- analysis's `fname` is the leaf identifier; mangled
+        -- name is the instantiation's already-computed value.
+        let declName := (entry.logicalName.splitOn "::").getLast!
+        manifest := manifest ++ s!"bind={declName}={inst.mangled}\n"
+    let manifestPath := cfg.outDir / s!"{normalizePackageSegment cfg.pkg}.leo4-oxilean-manifest"
+    IO.FS.writeFile manifestPath manifest
+    IO.println s!"wrote {manifestPath}"
+    try
+      let out ← IO.Process.run {
+        cmd := "leo4-oxilean-build"
+        args := #["--manifest", manifestPath.toString]
+      }
+      -- CLI writes most info to stderr; relay stdout in case it
+      -- ever emits any.
+      unless out.isEmpty do IO.println out
+      IO.println s!"wrote transpiled crate at {txOutDir}"
+    catch e =>
+      IO.eprintln s!"  ⚠  --transpile: leo4-oxilean-build invocation failed: {e}"
+      IO.eprintln "      ensure `cargo install --path sibling/leo4-oxilean-build` (or"
+      IO.eprintln "      equivalent) and that `leo4-oxilean-build` is on PATH"
 
 def main (args : List String) : IO UInt32 := do
   let cfg := parseArgs args

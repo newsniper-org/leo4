@@ -23,6 +23,9 @@ Cargo.lock.bak
 # `/examples/**/lean/.lake` is each example's local Lake cache.
 /examples/**/lean/.lake
 /examples/**/lean/lake-manifest.json
+# Smoke-test sample package's local Lake cache.
+/tests/sample-lean/.lake
+/tests/sample-lean/lake-manifest.json
 
 # IDE
 /.idea

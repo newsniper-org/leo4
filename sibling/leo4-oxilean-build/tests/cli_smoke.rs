@@ -178,6 +178,108 @@ fn cli_rejects_bogus_manifest_field() {
 }
 
 #[test]
+fn cli_multi_decl_form_with_binds() {
+    let dir = tmp_dir("multi");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("MultiDecl.lean");
+    let manifest = dir.join("manifest.txt");
+
+    // Two type-only decls + one untagged decl. No fn decls
+    // means the binds map can stay empty.
+    write_file(
+        &lean,
+        "@[leo4_export] structure Point where x : UInt32 y : UInt32\n\
+         structure Untagged where z : UInt32\n\
+         @[leo4_export] inductive Color : Type | Red : Color | Green : Color\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=multi_pkg\n\
+             schema_hash=ababababababa\n\
+             leo4_abi_dep=\"0.1\"\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "multi-decl form must succeed; stderr={stderr}"
+    );
+    let lib = std::fs::read_to_string(out_dir.join("src").join("lib.rs"))
+        .expect("read lib.rs");
+    // Both tagged decls land in the emitted crate.
+    assert!(lib.contains("pub struct Point {"), "lib.rs missing Point");
+    assert!(lib.contains("pub enum Color {"), "lib.rs missing Color");
+    // Untagged decl is NOT emitted.
+    assert!(
+        !lib.contains("pub struct Untagged"),
+        "Untagged should be skipped"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_bind_before_source_rejected() {
+    let dir = tmp_dir("badbind");
+    let manifest = dir.join("manifest.txt");
+    write_file(
+        &manifest,
+        "crate_name=x\n\
+         schema_hash=000\n\
+         leo4_abi_dep=\"0.1\"\n\
+         out_dir=/tmp/x\n\
+         bind=f=mangled\n",
+    );
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("before any `source=`"),
+        "expected explanatory error; got:\n{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_bind_after_single_source_rejected() {
+    let dir = tmp_dir("mixform");
+    let manifest = dir.join("manifest.txt");
+    write_file(
+        &manifest,
+        "crate_name=x\n\
+         schema_hash=000\n\
+         leo4_abi_dep=\"0.1\"\n\
+         out_dir=/tmp/x\n\
+         source=/tmp/foo.lean abc_a\n\
+         bind=f=def_a\n",
+    );
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("single-decl"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cli_reports_transpile_error_with_nonzero_exit() {
     // Empty env can't resolve `Nat` — elab fails. CLI must
     // surface this as exit code 1 (transpile failure), not 2

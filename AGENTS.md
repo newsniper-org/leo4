@@ -613,29 +613,36 @@ would be expensive to relitigate:
   acceptable; IDL-vocabulary plug-ins are not, per this
   decision.
 
-- **2026-05-22 — OX1 + OX2 locked as v1.0 RC blockers**.
-  Two items must land before v1.0 RC, no exceptions:
-  - **OX1**: `leo4-rust-emit` (workspace) OR the lake plugin
-    (Lean side) auto-invokes `sibling/leo4-oxilean-build` when
-    a user package builds with `--impl rust-transpile`. The
-    user can't be expected to hand-drive `emit_crate` /
-    `write_to_dir`. Because leo4-oxilean-build is a standalone
-    Cargo workspace (sibling/, not main), the wiring crosses a
-    workspace boundary — likely a subprocess invocation of a
-    `leo4-oxilean-build` binary (lake-side requires this
-    anyway since Lean can't import Rust crates).
-  - **OX2**: extend `synthesize_canonical_wrapper`'s
-    marshallable-type matrix from primitives-only (u8..u128,
-    i8..i128, f32, f64, bool, char, String, unit) to include
-    the carrier types whose `LeanMarshal` impls already exist
-    in `crates/leo4-abi/` — `BigNat`, `BigInt`, `LeanRat`,
-    `LeanComplexF32x2`, `LeanComplexF64x2`, + the nightly
-    half-precision / complex variants behind a cargo feature.
-    User-defined records / inductives are a separate sub-
-    problem (RustTargetBackend v0.1.2 emits only
-    `RustItem::Fn`); decision deferred to first real-fixture
-    pass. Both pinned in ROADMAP.md "Deferred to the v1.0 RC
-    pre-release window".
+- **2026-05-22 — OX1 + OX2 + OX3 v1.0 RC blockers**.
+  - **OX1 (CLOSED 2026-05-22)**: lake plugin auto-invokes
+    `sibling/leo4-oxilean-build` CLI via subprocess
+    (`lake exe leo4plugin … --transpile <lean-file>`).
+    Step a: CLI binary + manifest format. Step b: lake
+    plugin `transpileSource`-driven branch +
+    multi-decl manifest with `source=<file>` +
+    `bind=<decl_name>=<mangled>` lines. E2E smoke verified
+    against `tests/sample-lean/Sample.lean`.
+  - **OX2 (CLOSED 2026-05-22)**: marshallable-type matrix
+    covers primitives + carriers (BigNat/BigInt/LeanRat/
+    complex) + generic containers (Vec/Option/Result/Box/
+    tuples 2..=5) + user-defined records (Lean `structure`
+    → Rust struct + inline LeanMarshal impl) + user-defined
+    inductives (Lean `inductive` → Rust enum + LeanMarshal
+    impl). Rust-keyword field / variant names raw-ident-
+    escaped. Wire form byte-compatible with
+    `#[derive(LeanMarshal)]`.
+  - **OX3 (NEW v1.0 RC blocker, locked 2026-05-22)**:
+    Lean 4 header-binder syntax. OxiLean's parser only
+    accepts `def f : T → R := fun x → body` (body-lambda
+    form), not the Lean 4 standard `def f (x : T) : R :=
+    body`. `oxilean-elab::lean4_compat` v0.1.2 is textual
+    only — it doesn't lift header binders. Discovered
+    during OX1 step b's e2e smoke; v1.0 RC needs an
+    AST-level adapter ABOVE the parser (pre-rewrite header
+    binders into body lambdas before tokenising, or
+    fork the parser to accept the surface form natively).
+    Real Lean code uses header binders constantly so this
+    is non-optional. Pinned in ROADMAP.md as OX3.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

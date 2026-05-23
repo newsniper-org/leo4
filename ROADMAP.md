@@ -694,21 +694,33 @@ all wait for the v1.0 RC window or later.
   exercise help / missing-arg / skip-path / stdin-input /
   bogus-field / transpile-error.
 
-  **Step b (pending v1.0 RC)** — Either `leo4-rust-emit`
-  (workspace member) OR the lake plugin (Lean side) must
-  auto-invoke the CLI when a user package builds with
-  `--impl rust-transpile`. The orchestration:
-  1. Walk the user package's `.lean` sources for
-     `@[leo4_export]` decls.
-  2. Compute the mangled name per `SPEC/mangling.md` §3
-     for each export.
-  3. Build the manifest + spawn the CLI subprocess.
-  4. Land the generated Cargo crate where the consumer's
-     `build.rs` (via `leo4_build::wire`) can `path`-dep it.
+  **Step b (DONE 2026-05-22)** — lake plugin
+  (`lake/Leo4Plugin/Leo4Plugin/Main.lean`) gained four new
+  flags (`--transpile <lean-file>`, `--transpile-out-dir <p>`,
+  `--transpile-crate-name <n>`, `--transpile-abi-dep <s>`)
+  and a `transpileSource`-driven branch that, after writing
+  the canonical artefacts, builds a multi-decl
+  `leo4-oxilean-build` manifest (one `source=<file>` line +
+  per-export `bind=<decl_name>=<mangled>` lines) and shells
+  out to `leo4-oxilean-build --manifest <path>`. The CLI
+  produces the emitted Cargo crate at the configured
+  out-dir.
 
-  Crossing the sibling/main-workspace boundary is handled
-  by subprocess (the CLI is the abstraction barrier), not
-  path-deps across workspaces.
+  Wiring infrastructure is complete + tested end-to-end on
+  the `tests/sample-lean/Sample.lean` fixture (manifest is
+  produced with all 60+ instantiation mangled names).
+
+  **OX3 (NEW v1.0 RC blocker)** — Lean 4 header-binder
+  syntax. `oxilean-elab::lean4_compat` v0.1.2 is textual
+  only; OxiLean's parser rejects
+  `def f (x : T) : R := body` (header binders) and only
+  accepts the body-lambda form `def f : T → R := fun x → body`.
+  Real-world Lean code uses header binders constantly, so
+  v1.0 RC needs an AST-level adapter ABOVE the parser:
+  either pre-rewrite header binders into body lambdas
+  before tokenising, or fork the parser to accept the
+  header-binder form natively. Discovered during the OX1
+  step b e2e smoke against `tests/sample-lean/Sample.lean`.
 - **OX2** Marshallable matrix expansion (locked 2026-05-22,
   carrier-types layer landed 2026-05-22).
   Built-ins now covered by `synthesize_canonical_wrapper`:

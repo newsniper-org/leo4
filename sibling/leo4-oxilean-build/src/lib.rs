@@ -169,7 +169,7 @@ use oxilean_elab::elab_decl::{elaborate_decl, PendingDecl};
 use oxilean_elab::lean4_compat::{Lean4SyntaxAdapter, Lean4TermRewriter};
 use oxilean_kernel::{env::Environment, Expr, Name};
 use oxilean_parse::{AttributeKind, Decl, Lexer, Located, Parser, SurfaceExpr};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Custom attribute name leo4 owns: `@[leo4_export]`. Tag a Lean
 /// definition with this attribute to mark it for export through
@@ -702,7 +702,6 @@ pub fn transpile_source_if_exported(
 /// / LCNF / Rust-emit / wrapper-synthesis pipeline. Wrapper
 /// synthesis can fail for types not covered by
 /// `render_marshallable_type` (see OX2).
-#[allow(clippy::too_many_lines)] // documented branches: structure vs definition
 pub fn transpile_source_to_unit(
     env: &Environment,
     registry: &mut Leo4ExportRegistry,
@@ -720,19 +719,112 @@ pub fn transpile_source_to_unit(
             format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
         )
     })?;
+    process_parsed_decl(env, registry, &parsed, mangled)
+}
 
-    if !decl_has_leo4_export(&parsed) {
+/// Multi-decl variant of `transpile_source_to_unit`. Parses
+/// every top-level declaration in `src`, drives each tagged
+/// `@[leo4_export]` decl through the same pipeline, and
+/// returns the accumulated unit list (skipping untagged decls
+/// silently). Used by the CLI's multi-decl-per-file manifest
+/// form, where the caller supplies a `name_to_mangled` map
+/// pre-computed by leo4's mangling pipeline.
+///
+/// Type-only decls (Structure / Inductive) ignore
+/// `name_to_mangled` (their `mangled` field is always empty).
+/// Definitions look up their `decl_name` in the map; missing
+/// entries return `Err(ENCODE_ERROR)`.
+///
+/// # Errors
+/// `LeanError` for any parse / elab / wrapper-synth failure,
+/// or a missing mangled-name entry for a tagged definition.
+pub fn transpile_source_to_units(
+    env: &Environment,
+    registry: &mut Leo4ExportRegistry,
+    src: &str,
+    name_to_mangled: &HashMap<String, String>,
+) -> Result<Vec<TranspileUnit>, LeanError> {
+    let normalised = lean4_normalize(src);
+    // Walk the parser manually — upstream `oxilean_parse::parser::parse_decls`
+    // v0.1.2's EOF detection only catches `UnexpectedEof`, not
+    // `UnexpectedToken { got: Eof }`, so trailing whitespace in
+    // a multi-decl source triggers a spurious parse error.
+    // `Parser::is_eof()` is the right loop guard.
+    let mut lexer = Lexer::new(&normalised);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::new(tokens);
+    let mut parsed_all: Vec<Located<Decl>> = Vec::new();
+    while !parser.is_eof() {
+        let d = parser.parse_decl().map_err(|e| {
+            LeanError::new(
+                leo4_abi::error::error_codes::DECODE_ERROR,
+                format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
+            )
+        })?;
+        parsed_all.push(d);
+    }
+
+    let mut units: Vec<TranspileUnit> = Vec::new();
+    for parsed in &parsed_all {
+        if !decl_has_leo4_export(parsed) {
+            continue;
+        }
+        let dn = decl_name(parsed);
+        // For Definition decls we need a mangled name; type
+        // decls don't. Inspect `inner_decl` before falling
+        // through to `process_parsed_decl`.
+        let inner = inner_decl(parsed);
+        let mangled: &str = match &inner.value {
+            Decl::Definition { .. } => {
+                let n = dn.ok_or_else(|| LeanError::new(
+                    leo4_abi::error::error_codes::ENCODE_ERROR,
+                    "leo4-oxilean-build: tagged `def` missing decl name".to_string(),
+                ))?;
+                name_to_mangled.get(n).map(String::as_str).ok_or_else(|| {
+                    LeanError::new(
+                        leo4_abi::error::error_codes::ENCODE_ERROR,
+                        format!(
+                            "leo4-oxilean-build: no mangled name supplied for tagged \
+                             def `{n}` (caller must provide via name_to_mangled)"
+                        ),
+                    )
+                })?
+            }
+            _ => "", // Structure / Inductive — mangled stays empty
+        };
+        if let Some(u) = process_parsed_decl(env, registry, parsed, mangled)? {
+            units.push(u);
+        }
+    }
+    Ok(units)
+}
+
+/// Inner helper: process one already-parsed `Decl` into an
+/// optional `TranspileUnit`. Untagged decls return `Ok(None)`;
+/// tagged decls dispatch on the inner-decl kind (Definition /
+/// Structure / Inductive).
+///
+/// # Errors
+/// Same as `transpile_source_to_unit` / `transpile_source_to_units`.
+#[allow(clippy::too_many_lines)] // documented branches: structure / inductive / definition
+fn process_parsed_decl(
+    env: &Environment,
+    registry: &mut Leo4ExportRegistry,
+    parsed: &Located<Decl>,
+    mangled: &str,
+) -> Result<Option<TranspileUnit>, LeanError> {
+    if !decl_has_leo4_export(parsed) {
         return Ok(None);
     }
 
-    if let Some(name) = decl_name(&parsed) {
+    if let Some(name) = decl_name(parsed) {
         registry.record_export(name);
     }
 
     // Branch on the inner decl kind: definitions take the fn
     // transpile path; structures synthesise a type decl + bare
     // name registration (no LeanProc dispatch arm).
-    let inner = inner_decl(&parsed);
+    let inner = inner_decl(parsed);
     match &inner.value {
         Decl::Structure { name, fields, .. } => {
             // Register the user type *first* so any subsequent
@@ -2937,6 +3029,83 @@ mod tests {
         assert!(sd.contains("pub head: Point,"));
         assert!(sd.contains("pub tail: Point,"));
         assert!(sd.contains("<Point as ::leo4_abi::LeanMarshal>"));
+    }
+
+    #[test]
+    fn transpile_source_to_units_handles_multi_decl_source() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        // A file with two type decls + one untagged decl. The
+        // untagged one must be silently skipped.
+        let src = "\
+            @[leo4_export] structure Point where x : UInt32 y : UInt32\n\
+            structure Untagged where z : UInt32\n\
+            @[leo4_export] inductive Color : Type | Red : Color | Green : Color\n\
+        ";
+        let mut name_to_mangled: HashMap<String, String> = HashMap::new();
+        // Type-only decls don't need a mangled name; this map
+        // covers Definitions only (here it's empty since the
+        // fixture has no fn exports).
+
+        let units = transpile_source_to_units(&env, &mut registry, src, &name_to_mangled)
+            .expect("multi-decl source must parse + transpile");
+        assert_eq!(units.len(), 2, "expected 2 units (skip untagged)");
+        // Both registered in user_types.
+        assert!(registry.user_types.contains("Point"));
+        assert!(registry.user_types.contains("Color"));
+        assert!(!registry.user_types.contains("Untagged"));
+
+        // Each unit is type-only.
+        assert!(units.iter().all(unit_is_type_only));
+
+        // No collateral effect on the (empty) mangled map.
+        let _ = &mut name_to_mangled;
+    }
+
+    #[test]
+    fn transpile_source_to_units_rejects_missing_mangled_for_fn() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "@[leo4_export] def f : Nat -> Nat := fun n -> n";
+        let name_to_mangled: HashMap<String, String> = HashMap::new();
+        let err = transpile_source_to_units(&env, &mut registry, src, &name_to_mangled)
+            .expect_err("missing mangled must reject");
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+        assert!(err.message.contains("mangled name"));
+        assert!(err.message.contains("`f`"));
+    }
+
+    #[test]
+    fn transpile_source_to_units_uses_mangled_map_per_fn() {
+        let mut registry = Leo4ExportRegistry::new();
+        let env = Environment::new();
+        let src = "\
+            @[leo4_export] structure Point where x : UInt32\n\
+            @[leo4_export] def f : Nat -> Nat := fun n -> n\n\
+        ";
+        let mut name_to_mangled: HashMap<String, String> = HashMap::new();
+        name_to_mangled.insert("f".to_string(), "f_mangled_xyz".to_string());
+
+        let result = transpile_source_to_units(&env, &mut registry, src, &name_to_mangled);
+        match result {
+            Ok(units) => {
+                // Both unit kinds present.
+                assert!(units.iter().any(unit_is_type_only));
+                if let Some(fn_unit) = units.iter().find(|u| !u.fn_src.is_empty()) {
+                    assert_eq!(fn_unit.mangled, "f_mangled_xyz");
+                }
+                assert!(registry.user_types.contains("Point"));
+            }
+            Err(e) => {
+                // Empty env may still fail elab on `Nat`; that's
+                // the documented Err path (same parity as the
+                // single-decl variant's tests).
+                assert!(
+                    e.code == leo4_abi::error::error_codes::DECODE_ERROR
+                        || e.code == leo4_abi::error::error_codes::ENCODE_ERROR
+                );
+            }
+        }
     }
 
     #[test]

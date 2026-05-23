@@ -7,6 +7,94 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX1 step b: lake plugin auto-invocation of `leo4-oxilean-build` (2026-05-22)
+
+OX1 step b — wiring lake plugin to drive
+`leo4-oxilean-build` CLI subprocess so a user's `lake exe
+leo4plugin` build can emit a transpiled Cargo crate
+automatically (mirroring the `--with-lower` pattern that
+already exists for `leo4c`).
+
+**Plugin side changes** (`lake/Leo4Plugin/Leo4Plugin/Main.lean`):
+
+- `Config` extended with four optional fields:
+  `transpileSource : Option System.FilePath`,
+  `transpileOutDir : Option System.FilePath`,
+  `transpileCrateName : Option String`,
+  `transpileAbiDep : Option String`.
+- `parseArgs` gains a `takeFlagWithValue` helper to peel
+  `--flag <value>` pairs out of the positional arg list.
+  New flags:
+  `--transpile <lean-file>` (turns the feature on),
+  `--transpile-out-dir <dir>` (default `<outDir>/transpiled`),
+  `--transpile-crate-name <name>` (default = normalised `pkg`),
+  `--transpile-abi-dep <toml-frag>` (default `"0.1"`).
+- `runPlugin` end gains a `transpileSource`-driven branch
+  that builds a multi-decl manifest:
+
+  ```text
+  crate_name=<crateName>
+  schema_hash=<schemaHash.toBase32lc>
+  leo4_abi_dep=<abiDepSpec>
+  out_dir=<txOutDir>
+  source=<leanSrcPath>
+  bind=<decl_name>=<mangled>   (one per instantiation)
+  …
+  ```
+
+  then `IO.Process.run { cmd := "leo4-oxilean-build", args
+  := ["--manifest", path] }`. Failures are caught + logged
+  with the same opt-in helper text as `--with-lower`.
+
+**CLI side changes** (`sibling/leo4-oxilean-build/`):
+
+- Manifest format gains a multi-decl source-line form.
+  Single-decl `source=<file> <mangled>` stays supported
+  (backwards compatible); multi-decl form is just
+  `source=<file>` followed by `bind=<decl_name>=<mangled>`
+  lines until the next `source=`. CLI rejects `bind=`
+  before any `source=` or after a single-decl `source=`
+  with explanatory errors.
+- New library API
+  `transpile_source_to_units(env, registry, src,
+  name_to_mangled: &HashMap<String, String>) -> Result<Vec<TranspileUnit>, LeanError>`
+  — parses every top-level decl in `src`, drives each
+  tagged `@[leo4_export]` through the existing
+  per-decl pipeline (definition / structure / inductive),
+  looks up `Definition` mangled names in the map.
+- Old `transpile_source_to_unit` refactored to delegate to
+  a new internal `process_parsed_decl` helper so both
+  entry points share the same per-decl logic.
+- Upstream `oxilean_parse::parser::parse_decls` has an EOF-
+  detection bug (catches only `UnexpectedEof`, not
+  `UnexpectedToken { got: Eof }`), so we walk the parser
+  manually using the public `Parser::is_eof()` method.
+- CLI manifest parser tracks the "current source" entry so
+  subsequent `bind=` lines attach to it.
+
+Tests 80 → 86 lib (+3 multi-decl tests:
+`transpile_source_to_units_handles_multi_decl_source`,
+`transpile_source_to_units_rejects_missing_mangled_for_fn`,
+`transpile_source_to_units_uses_mangled_map_per_fn`) +
+6 → 9 CLI integration tests (`cli_multi_decl_form_with_binds`,
+`cli_bind_before_source_rejected`,
+`cli_bind_after_single_source_rejected`).
+
+**E2E smoke** verified against `tests/sample-lean/Sample.lean`:
+plugin produces a 60+ -line manifest with every
+instantiation's mangled name, subprocess invocation
+launches correctly, CLI reads + processes the manifest.
+clippy --all-targets -D warnings clean.
+
+**OX1 wiring infrastructure complete**. The remaining
+issue surfaced by the e2e smoke: OxiLean's parser rejects
+Lean 4's header-binder `def f (x : T) : R := body` form
+(only `def f : T → R := fun x → body` parses).
+`oxilean-elab::lean4_compat` v0.1.2 is textual only — it
+doesn't lift header binders. Tracked as the new v1.0 RC
+**OX3 blocker** (AST-level header-binder adapter) in
+ROADMAP.
+
 ### Added — `leo4-oxilean-build`: OX2 user records complete — `Decl::Inductive` integration (2026-05-22)
 
 OX2 user-records sub-blocker **fully closed**. The previous

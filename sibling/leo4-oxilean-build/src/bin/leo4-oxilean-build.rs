@@ -16,20 +16,40 @@
 //! ## Manifest format
 //!
 //! Line-oriented, `key=value`. `#` and blank lines ignored.
-//! Multiple `source=` lines accumulate.
+//! Two source-line forms are accepted:
+//!
+//! - **Single-decl form** (legacy):
+//!   `source=<lean_file_path> <mangled_name>` — file MUST
+//!   contain exactly one top-level decl; the mangled is
+//!   bound to that decl.
+//!
+//! - **Multi-decl form** (OX1 step b):
+//!   `source=<lean_file_path>` (no mangled on the source line)
+//!   followed by zero or more `bind=<decl_name>=<mangled>`
+//!   lines until the next `source=`. The file is parsed
+//!   multi-decl; each `@[leo4_export]` `def` looks up its
+//!   mangled by name in the binds preceding it. Type-only
+//!   decls (`structure` / `inductive`) ignore the binds.
+//!
+//! Examples:
 //!
 //! ```text
 //! crate_name=my_transpiled
 //! schema_hash=0123456789abc
 //! leo4_abi_dep={ path = "../leo4-abi" }
 //! out_dir=/tmp/transpiled
+//!
+//! # single-decl form
 //! source=lean/Foo.lean abc12345_a
-//! source=lean/Bar.lean def67890_a
+//!
+//! # multi-decl form
+//! source=lean/Pkg.lean
+//! bind=addOne=def67890_a
+//! bind=square=fed09876_b
 //! ```
 //!
-//! Each `source` line is `<lean_file_path> <mangled_name>` —
-//! the caller (lake plugin / leo4-rust-emit) precomputes the
-//! mangled name per `SPEC/mangling.md` §3.
+//! The lake plugin / leo4-rust-emit precomputes each mangled
+//! per `SPEC/mangling.md` §3.
 //!
 //! Exit codes:
 //!
@@ -41,19 +61,34 @@
 //!   IO error reading manifest / source / out_dir).
 
 use leo4_oxilean_build::{
-    emit_crate, transpile_source_to_unit, Leo4ExportRegistry,
+    emit_crate, transpile_source_to_unit, transpile_source_to_units,
+    Leo4ExportRegistry,
 };
 use oxilean_kernel::env::Environment;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+/// One source-file entry in the manifest. Single-decl form
+/// pairs `(path, Some(mangled))`; multi-decl form pairs
+/// `(path, None)` + a non-empty `binds` map.
+struct SourceEntry {
+    path: PathBuf,
+    /// `Some(mangled)` → single-decl source line. The whole
+    /// file is treated as one decl; the bind map is ignored.
+    /// `None` → multi-decl source line; the bind map's
+    /// `decl_name → mangled` entries supply the dispatch keys.
+    single_mangled: Option<String>,
+    binds: HashMap<String, String>,
+}
 
 struct Manifest {
     crate_name: String,
     schema_hash: String,
     leo4_abi_dep: String,
     out_dir: PathBuf,
-    sources: Vec<(PathBuf, String)>,
+    sources: Vec<SourceEntry>,
 }
 
 fn die(msg: impl AsRef<str>) -> ! {
@@ -75,7 +110,9 @@ fn print_help() {
          \x20 schema_hash=<13-char>     required\n\
          \x20 leo4_abi_dep=<toml-frag>  required, e.g. `{{ path = \"../leo4-abi\" }}`\n\
          \x20 out_dir=<path>            required\n\
-         \x20 source=<lean> <mangled>   one or more\n\
+         \x20 source=<lean> <mangled>   single-decl source (file = 1 decl)\n\
+         \x20 source=<lean>             multi-decl source (binds follow)\n\
+         \x20 bind=<name>=<mangled>     per-decl mangled (multi-decl form only)\n\
          \n\
          Exit codes: 0 = success, 1 = transpile failure, 2 = usage / IO error\n"
     );
@@ -86,7 +123,7 @@ fn parse_manifest(text: &str) -> Result<Manifest, String> {
     let mut schema_hash: Option<String> = None;
     let mut leo4_abi_dep: Option<String> = None;
     let mut out_dir: Option<PathBuf> = None;
-    let mut sources: Vec<(PathBuf, String)> = Vec::new();
+    let mut sources: Vec<SourceEntry> = Vec::new();
 
     for (i, raw_line) in text.lines().enumerate() {
         let line = raw_line.trim();
@@ -107,11 +144,37 @@ fn parse_manifest(text: &str) -> Result<Manifest, String> {
                 let mut parts = val.splitn(2, char::is_whitespace);
                 let path = parts
                     .next()
-                    .ok_or_else(|| format!("line {}: `source` missing path", i + 1))?;
-                let mangled = parts.next().ok_or_else(|| {
-                    format!("line {}: `source` missing mangled name", i + 1)
+                    .ok_or_else(|| format!("line {}: `source` missing path", i + 1))?
+                    .trim();
+                let single_mangled = parts.next().map(|s| s.trim().to_string());
+                sources.push(SourceEntry {
+                    path: PathBuf::from(path),
+                    single_mangled,
+                    binds: HashMap::new(),
+                });
+            }
+            "bind" => {
+                let (decl_name, mangled) = val.split_once('=').ok_or_else(|| {
+                    format!(
+                        "line {}: `bind` value must be `<decl_name>=<mangled>`",
+                        i + 1
+                    )
                 })?;
-                sources.push((PathBuf::from(path.trim()), mangled.trim().to_string()));
+                let last = sources.last_mut().ok_or_else(|| {
+                    format!(
+                        "line {}: `bind` appears before any `source=` line",
+                        i + 1
+                    )
+                })?;
+                if last.single_mangled.is_some() {
+                    return Err(format!(
+                        "line {}: `bind` follows a single-decl `source=<path> <mangled>` \
+                         line — drop the mangled from the source line to use multi-decl form",
+                        i + 1
+                    ));
+                }
+                last.binds
+                    .insert(decl_name.trim().to_string(), mangled.trim().to_string());
             }
             other => return Err(format!("line {}: unknown key '{}'", i + 1, other)),
         }
@@ -127,6 +190,7 @@ fn parse_manifest(text: &str) -> Result<Manifest, String> {
     })
 }
 
+#[allow(clippy::too_many_lines)] // documented: arg parse + manifest + transpile loop + emit
 fn main() -> ExitCode {
     let mut manifest_arg: Option<String> = None;
     let args: Vec<String> = std::env::args().collect();
@@ -167,26 +231,53 @@ fn main() -> ExitCode {
     let mut skipped = 0usize;
     let mut errors = 0usize;
 
-    for (path, mangled) in &manifest.sources {
-        let src = std::fs::read_to_string(path)
-            .unwrap_or_else(|e| die(format!("reading source `{}`: {e}", path.display())));
-        match transpile_source_to_unit(&env, &mut registry, &src, mangled) {
-            Ok(Some(unit)) => units.push(unit),
-            Ok(None) => {
-                skipped += 1;
-                eprintln!(
-                    "leo4-oxilean-build: skip (no @[leo4_export]): {}",
-                    path.display()
-                );
+    for entry in &manifest.sources {
+        let src = std::fs::read_to_string(&entry.path).unwrap_or_else(|e| {
+            die(format!("reading source `{}`: {e}", entry.path.display()))
+        });
+        if let Some(single_mangled) = &entry.single_mangled {
+            // Single-decl form.
+            match transpile_source_to_unit(&env, &mut registry, &src, single_mangled) {
+                Ok(Some(unit)) => units.push(unit),
+                Ok(None) => {
+                    skipped += 1;
+                    eprintln!(
+                        "leo4-oxilean-build: skip (no @[leo4_export]): {}",
+                        entry.path.display()
+                    );
+                }
+                Err(e) => {
+                    errors += 1;
+                    eprintln!(
+                        "leo4-oxilean-build: ERROR `{}`: 0x{:08x} {}",
+                        entry.path.display(),
+                        e.code,
+                        e.message
+                    );
+                }
             }
-            Err(e) => {
-                errors += 1;
-                eprintln!(
-                    "leo4-oxilean-build: ERROR `{}`: 0x{:08x} {}",
-                    path.display(),
-                    e.code,
-                    e.message
-                );
+        } else {
+            // Multi-decl form.
+            match transpile_source_to_units(&env, &mut registry, &src, &entry.binds) {
+                Ok(us) => {
+                    if us.is_empty() {
+                        skipped += 1;
+                        eprintln!(
+                            "leo4-oxilean-build: skip (no @[leo4_export]s): {}",
+                            entry.path.display()
+                        );
+                    }
+                    units.extend(us);
+                }
+                Err(e) => {
+                    errors += 1;
+                    eprintln!(
+                        "leo4-oxilean-build: ERROR `{}`: 0x{:08x} {}",
+                        entry.path.display(),
+                        e.code,
+                        e.message
+                    );
+                }
             }
         }
     }
