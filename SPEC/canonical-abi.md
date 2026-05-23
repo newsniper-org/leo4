@@ -121,7 +121,11 @@ If a field's type is `Self` (see `SPEC/idl-grammar.ebnf`), encode/decode
 recurses into the same record/variant definition. Encoders MUST tolerate
 arbitrary recursion depth; decoders MAY enforce a depth cap configured
 through `leo4.toml` (`max_decode_depth`, default 256) and return error
-code `0x0000_0008` (decode-depth-exceeded) on overflow.
+code `0x0000_0008` (decode-depth-exceeded) on overflow. `leo4-abi`
+exposes the default cap as `MAX_DECODE_DEPTH` together with a
+`check_decode_depth(depth) -> Result<usize, LeanError>` helper that
+self-recursive decoders MUST call on every recursive site (Phase
+10-F1).
 
 `Self` carries no type information of its own on the wire — its layout
 is identical to the enclosing record/variant's. Hence `Self` does **not**
@@ -168,6 +172,12 @@ handle:u64
 - On native: pointer reinterpreted as `u64`. Zero-extend on 32-bit systems
   (unsupported but specified for completeness).
 - On wasm: Component Model resource handle, already a `u64`.
+- `handle == 0` is the **reserved null sentinel** (the
+  `INVALID_RESOURCE_HANDLE` constant in `leo4-abi`). Encoders MUST
+  reject this value with `LEO4_ERR_ENCODE_ERROR` (`0x02`); decoders
+  MUST reject it with `LEO4_ERR_INVALID_HANDLE` (`0x03`). The
+  reservation gives `leo4-abi` a deterministic trigger path for both
+  codes (Phase 10-F1, 2026-05-21).
 
 ### Ownership semantics
 

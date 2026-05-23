@@ -26,6 +26,49 @@ impl LeanError {
             backtrace: None,
         }
     }
+
+    /// `0x02 ENCODE_ERROR` — value out of domain at encode time.
+    #[must_use]
+    pub fn encode_error(reason: impl Into<String>) -> Self {
+        Self::new(error_codes::ENCODE_ERROR, reason)
+    }
+
+    /// `0x03 INVALID_HANDLE` — a `LeanResource` handle is `0` or has
+    /// otherwise been rejected by the Lean side.
+    #[must_use]
+    pub fn invalid_handle(reason: impl Into<String>) -> Self {
+        Self::new(error_codes::INVALID_HANDLE, reason)
+    }
+
+    /// `0x04 OOM` — the allocator refused a buffer that the
+    /// canonical-ABI path needed. Typically wraps a
+    /// [`std::collections::TryReserveError`].
+    #[must_use]
+    pub fn oom(reason: impl Into<String>) -> Self {
+        Self::new(error_codes::OOM, reason)
+    }
+
+    /// `0x06 UNKNOWN_FUNCTION` — the dispatch layer could not find a
+    /// shim entry for the given mangled name (e.g. `dlsym` miss, or
+    /// a static lookup table miss).
+    #[must_use]
+    pub fn unknown_function(mangled: impl Into<String>) -> Self {
+        Self::new(
+            error_codes::UNKNOWN_FUNCTION,
+            format!("unknown function: {}", mangled.into()),
+        )
+    }
+
+    /// `0x08 DECODE_DEPTH_EXCEEDED` — a `Self`-recursive decode hit
+    /// the configured depth cap. Helper paired with
+    /// [`crate::marshal::check_decode_depth`].
+    #[must_use]
+    pub fn decode_depth_exceeded(depth: usize, cap: usize) -> Self {
+        Self::new(
+            error_codes::DECODE_DEPTH_EXCEEDED,
+            format!("decode depth {depth} exceeds cap {cap}"),
+        )
+    }
 }
 
 impl std::fmt::Display for LeanError {

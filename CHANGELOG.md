@@ -7,6 +7,55 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Fixed — Phase 10-F1: reserved LeanError code fixtures (2026-05-21)
+
+Phase 4's "every reserved `LeanError` code has at least one
+test that *triggers* it" exit criterion shipped with stubs
+for 0x02 / 0x03 / 0x04 / 0x06 / 0x08 (codes whose natural
+trigger paths weren't yet available in leo4-abi). Phase
+10-F1 replaces those stubs with real code-path triggers,
+using helpers now exposed by leo4-abi:
+
+- **`MAX_DECODE_DEPTH: usize = 256`** + **`check_decode_depth(depth)`**:
+  paired helpers for `Self`-recursive decoders. The cap
+  matches `SPEC/canonical-abi.md` §8.1's documented default;
+  the test sends a unary-counter wire of 257 levels and
+  asserts `DECODE_DEPTH_EXCEEDED` (0x08).
+- **`INVALID_RESOURCE_HANDLE: u64 = 0`**: reserved null
+  sentinel for `LeanResource`. Encoders refuse it with
+  `ENCODE_ERROR` (0x02); decoders refuse it with
+  `INVALID_HANDLE` (0x03). Reservation now documented in
+  SPEC §12.
+- **`encode_resource_handle` / `decode_resource_handle`**:
+  the production encode/decode helpers that surface 0x02 /
+  0x03 against the sentinel.
+- **`LeanError::{encode_error, invalid_handle, oom,
+  unknown_function, decode_depth_exceeded}`**: convenience
+  constructors mirroring the SPEC codes, pinning the
+  expected codes from one place.
+
+Triggers in `crates/leo4-abi/tests/error_codes.rs`:
+
+| Code | Trigger |
+|---|---|
+| 0x01 | invalid `bool` byte (unchanged from Phase 4) |
+| 0x02 | `encode_resource_handle(0, …)` |
+| 0x03 | `decode_resource_handle(&[0u8; 8], 0)` |
+| 0x04 | `Vec::try_reserve(isize::MAX as usize)` → map to `LeanError::oom` |
+| 0x05 | `check_schema_hash` mismatch (unchanged from Phase 4) |
+| 0x06 | `HashMap<&str, fn>` lookup miss → `LeanError::unknown_function` |
+| 0x07 | `encode_to_fixed` into tiny buf (unchanged from Phase 4) |
+| 0x08 | unary-counter decoder going past `MAX_DECODE_DEPTH` |
+
+`SPEC/canonical-abi.md` §8.1 + §12 extended with the new
+helper references and sentinel reservation. End-to-end
+shim-level triggers (libloading `dlsym` miss, allocator
+OOM under a real workload) remain a leo4-native concern;
+those layers can lift the new constructors directly
+instead of building their own `code: u32` literals.
+
+12/12 `error_codes` tests pass. Workspace total: 147 → 150.
+
 ### Added — Phase 10-D1: `leo4 run` CLI (2026-05-21)
 
 `leo4 run` collapses every forward / reverse build +
