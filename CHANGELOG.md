@@ -7,6 +7,84 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: §6 Cargo crate emit + `LeanProc` dispatch table (2026-05-22)
+
+End of the activation plan. The transpile pipeline now
+produces a complete Cargo crate the consumer can `path`-dep:
+
+- `Cargo.toml` — `[package]` block + `leo4-abi` dep with the
+  consumer-supplied spec (path / version / git).
+- `src/lib.rs` — every transpile unit's plain Rust fn + the
+  §5 `_call` wrapper, followed by a `Leo4OxileanProc: LeanProc`
+  impl whose `call(mangled, args)` body is a `match mangled
+  { … }` dispatch table mapping every export's mangled name to
+  its `<fn>_call` wrapper. Unknown names return
+  `LeanError::unknown_function(mangled)` (canonical
+  `0x06 UNKNOWN_FUNCTION`).
+
+New public API:
+
+- `TranspileUnit { fn_src, wrapper_src, fn_name, mangled }`
+  — one emit-ready unit. `mangled` is the leo4 mangled
+  symbol (per `SPEC/mangling.md` §3); the build tool
+  (eg. `leo4-rust-emit` / lake plugin) supplies it.
+- `GeneratedCrate { crate_name, manifest, lib_rs }` +
+  `write_to_dir(&Path) -> io::Result<usize>` — in-memory
+  pair of files, with filesystem write helper.
+- `emit_cargo_toml(crate_name, leo4_abi_dep_spec) -> String`
+  — manifest emission.
+- `emit_lib_rs(units, schema_hash) -> String` — `src/lib.rs`
+  emission including the dispatcher.
+- `emit_crate(crate_name, units, leo4_abi_dep_spec, schema_hash)
+  -> GeneratedCrate` — combined entry.
+
+Sample dispatcher (from `examples/dump_crate.rs` output):
+
+```rust
+pub struct Leo4OxileanProc;
+
+impl Leo4OxileanProc {
+    #[must_use]
+    pub fn new() -> Self { Self }
+}
+
+impl ::leo4_abi::rust_native::LeanProc for Leo4OxileanProc {
+    fn schema_hash(&self) -> &str { "0123456789abc" }
+    fn abi_version(&self) -> u32 { 1 }
+    fn call(&self, mangled: &str, args: &[u8])
+        -> ::core::result::Result<::std::vec::Vec<u8>, ::leo4_abi::LeanError>
+    {
+        match mangled {
+            "abc12345_ab_a" => Sample_addOne_call(args),
+            "def67890_ab_a" => Sample_double_call(args),
+            _ => Err(::leo4_abi::LeanError::unknown_function(mangled)),
+        }
+    }
+}
+```
+
+Tests 25 → 31 (+6 §6 tests):
+
+  + `emit_cargo_toml_includes_required_fields`
+  + `emit_lib_rs_concatenates_fn_and_wrapper_per_unit`
+  + `emit_lib_rs_emits_leanproc_dispatcher`
+  + `emit_lib_rs_empty_units_still_emits_dispatcher`
+  + `emit_crate_pairs_manifest_and_lib`
+  + `write_to_dir_creates_manifest_and_lib_rs` (uses
+    `CARGO_TARGET_TMPDIR` so cleanup is hermetic)
+
+`examples/dump_crate.rs` — prints the full emitted manifest
++ lib.rs for a two-export fixture. `cargo run --example
+dump_crate`.
+
+clippy --all-targets -D warnings clean. Workspace unaffected.
+
+Activation plan complete (§1 → §6). The transpile path from
+SPEC/rust-native-lean.md §9 is now end-to-end implemented:
+Lean source → lean4_compat normalisation → parse → Hook 3
+`@[leo4_export]` discovery → elab → LCNF → Rust source +
+canonical-ABI wrappers → Cargo crate with `LeanProc` impl.
+
 ### Added — `leo4-oxilean-build`: §5 canonical-ABI wrapper synthesis (2026-05-22)
 
 Each transpiled fn now lands together with a sibling

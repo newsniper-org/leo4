@@ -529,14 +529,20 @@ forever, this path doesn't need them.
         │     decode-each-arg → call → encode-return
         ▼
 [Pair of Rust source strings per export]
-        │ leo4-oxilean-build helper crate orchestrates:
-        │   * Cargo.toml setup with leo4-abi dep
-        │   * LeanProc impl emitting a mangled-name → _call
-        │     dispatch table (§6 — next)
+        │ leo4_oxilean_build::{TranspileUnit, emit_crate}
+        │   * Cargo.toml: [package] + leo4-abi dep
+        │   * src/lib.rs: every fn + wrapper + a
+        │     `Leo4OxileanProc: LeanProc` impl whose
+        │     `call(mangled, args)` is a `match mangled { … }`
+        │     dispatch table.
         ▼
-[A user-facing crate that exposes the original Lean exports
- as ordinary Rust pub fns + their canonical-ABI shims, ready
- to import + call directly OR plug into a `LeanProc` host.]
+[GeneratedCrate { manifest, lib_rs }]
+        │ GeneratedCrate::write_to_dir(target_dir)
+        ▼
+[A user-facing Cargo crate that exposes the original Lean
+ exports as ordinary Rust pub fns + their canonical-ABI shims,
+ ready to import + call directly OR plug into a `LeanProc`
+ host.]
 ```
 
 The result is *not* a `LeanProc`-style dispatcher — it's a
