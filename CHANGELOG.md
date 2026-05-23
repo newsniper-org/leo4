@@ -7,6 +7,53 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 10-C4: leo4-wasm scaffolding (2026-05-21)
+
+Promotes `crates/leo4-wasm` from an empty placeholder (the
+v0.1.0 cut shipped just `#![allow(dead_code)]`) to a real
+scaffold whose public API surface mirrors `leo4-native`.
+Cfg-gated downstream code can now `use leo4_wasm::{Lean,
+LeanError}` / `use leo4_native::{Lean, LeanError}`
+interchangeably; structurally wasm-vs-native user code
+compiles cleanly on both.
+
+What's in:
+
+* `Lean::open(handshake_path)` parses + validates the
+  handshake JSON shared with the native pipeline
+  (`schema_hash` + `target_module` + `abi_version`). Returns
+  `Err(LeanError { code: HANDSHAKE_MISMATCH, … })` for
+  unsupported abi_versions, `DECODE_ERROR` for parse / IO
+  failures.
+* `Lean::{schema_hash, target_module, abi_version}` getters.
+* `Lean::call(mangled, args)` stub returning
+  `LEO4_ERR_RUST_DLSYM_FAILED` (0x0002_0005) — semantic
+  match for "dispatch layer can't resolve this symbol yet".
+
+What's **explicitly deferred to C4.x**:
+
+* Adding `wasmtime` as a dependency and instantiating a
+  Component-Model loader. A ~200 MB build dep; not pulled in
+  for users who don't need wasm.
+* Designing and pinning `SPEC/wit/leo4-host.wit` — the
+  interface describing the canonical-ABI bridge between a
+  Lean-as-wasm component and the host. The actual dispatch
+  shape depends on this.
+* `wit-bindgen` invocation in `build.rs` to materialise
+  typed bindings.
+* Replacing `Lean::call`'s stub with real per-callsite
+  dispatch.
+
+Cargo: leo4-wasm now depends on `leo4-abi`, `serde`,
+`serde_json` (all workspace). No new external deps in the
+workspace.
+
+Tests (`cargo test -p leo4-wasm`): 4 — open round-trip,
+wrong abi_version rejection, missing-file error path,
+call stub returns expected code.
+
+Workspace test count: 156 → 160.
+
 ### Added — Phase 10-A4 + A5: time-based recycle + WORKER_RESTARTED side-channel (2026-05-21)
 
 Two reverse-direction dispatcher knobs that were reserved in

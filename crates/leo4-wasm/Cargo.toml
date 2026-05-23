@@ -6,9 +6,12 @@ rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
-description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
+description = "wasm host runtime for leo4 — Phase 10-C4 scaffolding (2026-05-21). Mirrors `leo4-native`'s public API surface (`Lean`, `LeanError`, `LeanMarshal`) so cfg-gated user code compiles cleanly on both wasm and native. The actual wasmtime / Component-Model dispatch loader lands in C4.x after `SPEC/wit/leo4-host.wit` is pinned."
 
 [dependencies]
+leo4-abi   = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
