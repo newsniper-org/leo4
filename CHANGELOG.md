@@ -7,6 +7,69 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `sibling/leo4-oxilean-build/` + `SPEC/rust-native-lean.md` §9 transpile path (2026-05-21)
+
+Second route to `leo4-rust-native`'s in-process direct
+Rust call endpoint. Instead of waiting on OxiLean
+evaluator hooks (Hooks 1 + 2 from §7.1, both absent in
+v0.1.2), this route bypasses the evaluator entirely by
+**transpiling** Lean source to a plain Rust crate at build
+time.
+
+Discovered while inspecting `oxilean-codegen` v0.1.2's
+~50 backends. Only `rust_target_backend` produces plain
+Rust source (`c_backend` targets oxilean-runtime ABI;
+`native_backend` is machine-IR; LLVM/Cranelift backends
+need third-party deps). The relevant API:
+
+  use oxilean_codegen::rust_target_backend::*;
+  let mut backend = RustTargetBackend::new();
+  let module = backend.emit_module("name", &decls);   // LcnfFunDecl → RustModule
+  let src = rust_fn.emit();                            // RustFn → Rust source string
+
+**Critical**: `RustTargetBackend::lcnf_to_rust_type` maps to
+*pure Rust* types — `Nat → U64`, `LcnfString → RustString`,
+`Object → Box<dyn std::any::Any>`. No `lean_*` C symbol in
+the output. The generated crate has zero `<lean/lean.h>`
+dependency.
+
+`SPEC/rust-native-lean.md` §9 (new, ~150 lines) documents:
+  • §9.1 — codegen pipeline + `lcnf_to_rust_type` mapping
+  • §9.2 — what the path bypasses (Hooks 1 + 2 of §7.1)
+  • §9.3 — full architecture diagram (Lean source → Cargo
+    crate)
+  • §9.4 — two complementary adapter crates table
+    (`leo4-oxilean` runtime-dispatch vs `leo4-oxilean-build`
+    transpile)
+  • §9.5 — other backends inspected + why each is unsuitable
+  • §9.6 — open questions for the transpile path
+
+`sibling/leo4-oxilean-build/` (new standalone crate):
+  • `Cargo.toml` — deps on `oxilean-parse`, `oxilean-elab`,
+    `oxilean-kernel`, `oxilean-codegen`; **no
+    oxilean-runtime** (transpile bypasses the evaluator).
+  • `src/lib.rs` — scaffold exposing:
+    - `transpile_decls(module_name, &[LcnfFunDecl]) ->
+      Result<String, LeanError>` — drives
+      `RustTargetBackend::emit_module` + per-fn
+      `RustFn::emit()`.
+    - `type_mapper_is_lean_h_free() -> bool` — build-time
+      invariant probe that catches a future OxiLean release
+      flipping the mapper to emit `lean_box`-style symbols.
+  • 4 tests pass: type_mapper_emits_pure_rust,
+    nat_maps_to_u64, string_maps_to_rust_string,
+    transpile_empty_decls_returns_header_only.
+
+The crate is **scaffold** — what's NOT yet wired is the
+parse → elab pipeline that produces `LcnfFunDecl[]` from a
+real Lean source tree. Documented as next-commit work in
+the crate's `src/lib.rs` "Activation plan".
+
+The companion `sibling/leo4-oxilean/` runtime-dispatch
+crate stays unchanged — both adapters serve different use
+cases (dynamic dispatch vs compile-time-frozen exports).
+`SPEC/rust-native-lean.md` §9.4 makes the split explicit.
+
 ### Changed — `rust-version = "1.95"` unified across all 4 workspaces (2026-05-21)
 
 Bumps MSRV from `1.85` to `1.95` (current stable as of

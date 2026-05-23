@@ -423,6 +423,160 @@ Until all three happen, this SPEC is forward-looking
 documentation. The three-paths comparison table in §6 stays
 relevant the moment any rust-native impl maturity bar is met.
 
+## 9. Transpile path — `oxilean-codegen::rust_target_backend` (2026-05-21)
+
+A **second route** to the same in-process-direct-Rust-call
+endpoint, discovered while inspecting OxiLean v0.1.2's codegen
+suite. Instead of waiting on the three "evaluator hooks" from
+§7.1 (callback storage / by-name dispatch / etc.), this route
+bypasses OxiLean's evaluator entirely by **transpiling** the
+Lean source into a plain Rust crate at build time, then
+calling its `pub fn`s as ordinary in-process Rust functions.
+
+### 9.1 The codegen pipeline
+
+`oxilean-codegen` ships ~50 backends including
+`rust_target_backend`. The relevant public API:
+
+```rust
+use oxilean_codegen::rust_target_backend::{RustTargetBackend, RustModule, RustFn, RustType};
+use oxilean_codegen::lcnf::{LcnfFunDecl, LcnfModule, LcnfType};
+
+let mut backend = RustTargetBackend::new();
+// `decls` comes from oxilean-elab's LCNF lowering of the
+// user package's Lean source.
+let rust_mod: RustModule = backend.emit_module("user_pkg", &decls);
+
+// Per-fn lowering also exposed:
+let rust_fn: RustFn = backend.compile_decl(&decl)?;
+println!("{}", rust_fn);   // → real Rust source via Display
+```
+
+The critical mapping (`RustTargetBackend::lcnf_to_rust_type`):
+
+```rust
+LcnfType::Nat        → RustType::U64           // not lean_box_uint64!
+LcnfType::LcnfString → RustType::RustString    // not lean_string_cstr!
+LcnfType::Unit       → RustType::Unit
+LcnfType::Object     → RustType::Custom("Box<dyn std::any::Any>")
+LcnfType::Fun(p, r)  → RustType::Fn(p, r)      // first-class function type
+LcnfType::Ctor(n, a) → RustType::Custom(n) | Generic(n, a)
+```
+
+**No `lean_*` C symbol appears anywhere in the output.** The
+generated Rust crate has zero dependency on `<lean/lean.h>` or
+on OxiLean's own runtime — it's just a normal Rust crate that
+happens to have been emitted from Lean source.
+
+`RustFn::emit() -> String` serialises one function to actual
+Rust source code; `impl fmt::Display for RustFn` makes it
+`format!`-friendly. `RustModule` collects multiple `RustItem`s
+and serialises end-to-end.
+
+### 9.2 What this path bypasses
+
+Compared to §7.1's three OxiLean evaluator hooks (1 present,
+2 absent), the transpile path **bypasses all three**:
+
+| Evaluator hook (§7.1) | Why irrelevant for transpile |
+|---|---|
+| (1) Callback storage in ExternRegistry | Lean fn is already a Rust fn after transpile — call directly. |
+| (2) `Env::call_by_mangled_name` high-level entry | Rust fn is `pub`-imported, no name dispatch needed. |
+| (3) Attribute / deriving registration (PRESENT) | Still useful — same plugin discovers `@[leo4_export]`s and tells the transpiler which fns to emit + how. |
+
+So **transpile becomes the more practical leo4-rust-native
+activation path today** — Hooks 1 + 2 stay deferred upstream
+forever, this path doesn't need them.
+
+### 9.3 Architecture under transpile
+
+```
+[Lean source: lake/Leo4/Leo4/* + user package's @[leo4_export]s]
+        │ oxilean-parse + oxilean-elab (parses, elaborates,
+        │                                runs `@[leo4_export]` /
+        │                                `deriving LeanMarshal`
+        │                                handlers via Hook 3)
+        ▼
+[OxiLean Env + LcnfModule]
+        │ oxilean-codegen::lcnf normalisation
+        ▼
+[LcnfFunDecl[]]
+        │ RustTargetBackend::emit_module(name, decls)
+        ▼
+[RustModule (Rust AST)]
+        │ RustFn::emit() / RustModule::emit() → String
+        ▼
+[Generated .rs source files written to a Cargo crate dir]
+        │ leo4-oxilean-build helper crate orchestrates:
+        │   * Cargo.toml setup with leo4-abi dep
+        │   * Per-#[leo4::export]-style wrapper that delegates
+        │     to the transpiled fn + does canonical-ABI
+        │     encode/decode at the boundary
+        ▼
+[A user-facing crate that exposes the original Lean exports
+ as ordinary Rust pub fns, ready to import + call directly.]
+```
+
+The result is *not* a `LeanProc`-style dispatcher — it's a
+normal Rust library. The `LeanProc` / `LeanProcInvoker` traits
+defined in §2 + §3 remain the *runtime-dispatch* model for
+when an evaluator-based impl materialises; the **transpile
+model is its zero-runtime sibling**, achieving the same
+in-process-direct-Rust-call goal through a different
+mechanism.
+
+### 9.4 Adapter layout — two complementary crates
+
+Per the model split:
+
+| Crate | Path | Responsibility | OxiLean deps |
+|---|---|---|---|
+| `leo4-oxilean` | `sibling/leo4-oxilean/` | Runtime-dispatch adapter implementing `LeanProc` / `LeanProcInvoker`. Blocked on Hooks 1 + 2 today. | `oxilean-kernel`, `oxilean-runtime` |
+| **`leo4-oxilean-build`** | **`sibling/leo4-oxilean-build/`** | **Build-time transpiler.** Reads a Lean source tree, walks `@[leo4_export]`s, emits a Cargo crate via `RustTargetBackend`. Unblocked today. | `oxilean-parse`, `oxilean-elab`, `oxilean-codegen` |
+
+The two are parallel — a user picks one depending on whether
+they need dynamic dispatch (evolving Lean code at runtime; not
+common) or compile-time-frozen exports (the SMT-solver-style
+adsmt use case). leo4 IDL + canonical-ABI marshalling +
+schema_hash check apply equally to both.
+
+### 9.5 Other backends inspected, NOT viable for this path
+
+| Backend | Why not |
+|---|---|
+| `native_backend` | Emits machine-level IR (`NativeInst`, `Register`, `BasicBlock`) — register-allocated post-instruction-selection layer. Not Rust source. Would need a `NativeBackend → cargo`-equivalent that doesn't exist. |
+| `c_backend` | Emits C source against `oxilean-runtime`'s ABI shape (which has overlap with `lean.h` but isn't identical) — see also `marshal_type` in `oxilean-codegen::ffi_bridge/functions.rs` that emits `lean_box`/`lean_unbox`/etc. against a "lean.h-shaped" ABI. Closer to leo4-mslean4 than to leo4-rust-native — different transport, not in-process direct call. |
+| `llvm_backend` / `cranelift_backend` | Third-party IR with their own toolchain deps. Out of scope for a minimal adapter. |
+| `lean4_backend` | Round-trip back to Lean 4 source — useless for this purpose. |
+| `wasm_backend` (if any) | Routes through `leo4-wasm` transport, not this one. |
+
+Confirmed via direct grep into `oxilean-codegen` v0.1.2: ~50
+backends total, **only `rust_target_backend` produces plain
+Rust source**.
+
+### 9.6 Open questions for the transpile path
+
+- [ ] **Does `oxilean-elab` parse arbitrary Lean 4 source
+      reliably?** Mathlib4's 99.7% parse-rate claim is a good
+      sign; the leo4 runtime library (`lake/Leo4/Leo4/*.lean`)
+      is small enough to be a useful litmus test.
+- [ ] **Does the LCNF lowering preserve attribute metadata
+      (specifically `@[leo4_export]` tags)?** Hook 3 is
+      present at the elaborator level but its propagation to
+      LCNF / codegen needs verification.
+- [ ] **How does the transpiled Rust handle Lean
+      `Nat`-vs-`UInt64` distinction?** `lcnf_to_rust_type`
+      maps both to `u64`; that's fine for leo4's IDL surface
+      (we never expose unbounded Nat at the boundary —
+      `bignat` goes through `LeanMarshal`'s byte serialisation
+      anyway).
+- [ ] **Cross-impl conformance**: does the transpiled output
+      produce byte-identical canonical-ABI encoding to
+      reference Lean's `leo4-mslean4` path on the same IDL?
+      The answer should be yes — both sides use
+      `leo4-abi`'s `LeanMarshal` impls — but it's worth a
+      conformance fixture once the pipeline is end-to-end.
+
 ## 9. Cross-references
 
 - `SPEC/lean-runtime-compat.md` — the surface for C-ABI / Lake
