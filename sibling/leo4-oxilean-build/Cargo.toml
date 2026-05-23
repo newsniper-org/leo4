@@ -11,6 +11,15 @@ authors     = ["윤병익 <yeun0908@gmail.com>"]
 repository  = "https://github.com/Honey-Be/leo4"
 description = "Build-time transpiler from OxiLean Lean source → Rust crate, via `oxilean-codegen::rust_target_backend`. Sibling adapter to `leo4-oxilean` (runtime-dispatch); this one is the zero-runtime transpile path per `SPEC/rust-native-lean.md` §9. Scaffold — see `README.md` §Status."
 
+[features]
+default = []
+# Forward leo4-abi's `nightly-floats` feature so the wrapper
+# synthesiser can recognise the half-precision / complex
+# carrier types (LeanF16, LeanBF16, LeanF128, LeanComplexF16x2,
+# LeanComplexBF16x2, LeanComplexF128x2). Requires a nightly
+# toolchain — see `crates/leo4-abi/src/floats_nightly.rs`.
+nightly-floats = ["leo4-abi/nightly-floats"]
+
 [dependencies]
 # leo4 IDL + canonical-ABI + LeanProc/LeanProcInvoker contract.
 leo4-abi = { path = "../../crates/leo4-abi" }

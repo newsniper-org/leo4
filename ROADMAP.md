@@ -694,20 +694,31 @@ all wait for the v1.0 RC window or later.
      leo4-oxilean-build stays a standalone Cargo workspace,
      so the wiring goes via subprocess or registry dep, not
      a path-dep across workspaces.
-- **OX2** Marshallable matrix expansion (locked 2026-05-22).
-  `synthesize_canonical_wrapper`'s v0 matrix covers only
-  primitives (u8..u128, i8..i128, f32, f64, bool, char,
-  String, unit). v1.0 RC must add the carrier types whose
-  `LeanMarshal` impls already exist in `crates/leo4-abi/`:
-  `BigNat`, `BigInt`, `LeanRat`, `LeanComplexF32x2`,
-  `LeanComplexF64x2` (and the nightly-feature complex /
-  half-precision variants behind a cargo feature). Also
-  needs a story for user-defined records / inductives —
-  blocked on upstream `RustTargetBackend` v0.1.2 emitting
-  only `RustItem::Fn`; struct + impl emission either lands
-  upstream OR leo4-oxilean-build synthesises the shapes from
-  the elaborated `Decl::Inductive` / `Decl::Structure`
-  themselves. Decision deferred to first real-fixture pass.
+- **OX2** Marshallable matrix expansion (locked 2026-05-22,
+  carrier-types layer landed 2026-05-22).
+  Built-ins now covered by `synthesize_canonical_wrapper`:
+  - Primitives: u8..u128, i8..i128, f32, f64, bool, char,
+    String, unit.
+  - Carrier types (via `carrier_path_for`): `BigNat`,
+    `BigInt`, `LeanRat`, `LeanComplexF32x2`,
+    `LeanComplexF64x2`. Nightly variants (`LeanF16`,
+    `LeanBF16`, `LeanF128`, `LeanComplexF16x2`,
+    `LeanComplexBF16x2`, `LeanComplexF128x2`) behind a
+    `nightly-floats` cargo feature forwarded to leo4-abi.
+  - Generic containers (recursive): `Vec<T>`, `Option<T>`,
+    `Result<T, E>`, `Box<T>`, tuples arity 2..=5.
+  - Both `RustType::Vec/Option/Result` dedicated variants
+    AND `RustType::Generic("Vec"|"Option"|"Result"|"Box", _)`
+    forms are recognised — upstream may lower to either.
+
+  Still pending for v1.0 RC: **user-defined records /
+  inductives**. Blocked on upstream `RustTargetBackend`
+  v0.1.2 emitting only `RustItem::Fn` — no struct / impl
+  shapes. Decision (wait for upstream vs. synthesise from
+  elaborated `Decl::Inductive` / `Decl::Structure` in
+  leo4-oxilean-build) deferred to the first real-fixture
+  pass with a non-trivial Lean export. Tracked as the
+  OX2-user-records sub-blocker.
 
 **Deferred to ≥ v1.x** (all of P10.4 minus C4 above):
 

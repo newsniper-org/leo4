@@ -7,6 +7,63 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4-oxilean-build`: OX2 — carrier types + generics in wrapper marshalling matrix (2026-05-22)
+
+v1.0 RC blocker OX2 (carrier-types layer). The §5 wrapper
+synthesiser's `render_marshallable_type` matrix extended from
+primitives-only to cover everything leo4-abi already
+provides `LeanMarshal` impls for:
+
+**Carrier types** (via new `carrier_path_for` helper):
+
+- `BigNat` / `Leo4_BigNat` → `::leo4_abi::BigNat`
+- `BigInt` / `Leo4_BigInt` → `::leo4_abi::BigInt`
+- `LeanRat` / `Rat` / `Leo4_LeanRat` → `::leo4_abi::LeanRat`
+- `LeanComplexF32x2` → `::leo4_abi::LeanComplexF32x2`
+- `LeanComplexF64x2` → `::leo4_abi::LeanComplexF64x2`
+
+OxiLean mangles `.` → `_` in qualified names, so both bare
+(`BigNat`) and mangled (`Leo4_BigNat`) spellings are
+accepted — the carrier-name matcher is robust to where in
+the user's Lean source the type lives.
+
+**Generic containers** (recursive on inner types):
+
+- `Vec<T>` → `::std::vec::Vec<T>`
+- `Option<T>` → `::core::option::Option<T>`
+- `Result<T, E>` → `::core::result::Result<T, E>`
+- `Box<T>` → `::std::boxed::Box<T>` (Generic-form only)
+- Tuples arity 2..=5 → `(T1, T2, ...)`
+
+Both the dedicated `RustType::Vec/Option/Result` variants
+*and* the `RustType::Generic("Vec"|"Option"|"Result"|"Box", _)`
+forms are recognised — upstream may emit either.
+
+**Nightly carrier types** (behind `nightly-floats` cargo
+feature forwarded to leo4-abi):
+
+- `LeanF16` / `LeanBF16` / `LeanF128`
+- `LeanComplexF16x2` / `LeanComplexBF16x2` / `LeanComplexF128x2`
+
+Tests 31 → 44 (+13 OX2 tests): BigNat / BigInt / LeanRat /
+complex / Vec<u64> / Option<String> / Result return /
+nested generics `Vec<Option<u64>>` / 2-tuple / Generic-form
+Vec / unknown-Custom rejection / `BigNat<...>` rejection /
+tuple-with-unsupported-inner cascading rejection. The old
+`wrapper_rejects_unsupported_param_type` (which used
+`Vec<u64>` as the "unsupported" sample) was updated to use
+a user-defined record name instead — `Vec<u64>` is now
+*supported*.
+
+What's **still pending for OX2** before v1.0 RC: user-defined
+records / inductives. Blocked on upstream
+`RustTargetBackend` v0.1.2 emitting only `RustItem::Fn` —
+no struct / impl shapes. Tracked as the OX2-user-records
+sub-blocker in ROADMAP.
+
+clippy --all-targets -D warnings clean. Workspace
+unaffected.
+
 ### Added — `leo4-oxilean-build`: §6 Cargo crate emit + `LeanProc` dispatch table (2026-05-22)
 
 End of the activation plan. The transpile pipeline now

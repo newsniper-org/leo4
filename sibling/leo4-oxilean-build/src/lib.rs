@@ -149,12 +149,11 @@
 //!    types + user records pending the upstream backend
 //!    emitting struct / impl shapes.)**
 //! 6. **Cargo crate emit** — `Cargo.toml` + `lib.rs` written
-//!    to a target dir; consumer's main project just
-//!    `path`-deps it. **(Done 2026-05-22 — `TranspileUnit`
-//!    + `GeneratedCrate` + `emit_crate` + `write_to_dir`. The
+//!    to a target dir via `emit_crate` + `write_to_dir`. The
 //!    emitted `lib.rs` includes a `Leo4OxileanProc: LeanProc`
 //!    impl with a `match mangled { … }` dispatch table.
-//!    Activation plan complete.)**
+//!    **(Done 2026-05-22 — `TranspileUnit` + `GeneratedCrate`
+//!    + `emit_crate` + `write_to_dir`. Activation plan complete.)**
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -683,37 +682,174 @@ pub fn transpile_source_if_exported(
 
 use oxilean_codegen::rust_target_backend::{RustFn, RustType};
 
+/// Map an OxiLean `Custom("…")` type name to a leo4-abi carrier
+/// type's fully-qualified path, or `None` if the name doesn't
+/// match a known carrier. Recognises both bare names (e.g.
+/// `BigNat`) and OxiLean-mangled forms (`.` → `_`, e.g.
+/// `Leo4_BigNat`) so the matcher is robust to where the user's
+/// Lean source put the type.
+///
+/// Nightly half-precision / complex variants live behind the
+/// `nightly-floats` cargo feature.
+fn carrier_path_for(name: &str) -> Option<&'static str> {
+    match name {
+        // Big integers
+        "BigNat" | "Leo4_BigNat" | "leo4_abi_BigNat" => Some("::leo4_abi::BigNat"),
+        "BigInt" | "Leo4_BigInt" | "leo4_abi_BigInt" => Some("::leo4_abi::BigInt"),
+        // Rational
+        "LeanRat" | "Rat" | "Leo4_Rat" | "Leo4_LeanRat" => {
+            Some("::leo4_abi::LeanRat")
+        }
+        // Stable complex (F32 / F64)
+        "LeanComplexF32x2" | "Leo4_LeanComplexF32x2" => {
+            Some("::leo4_abi::LeanComplexF32x2")
+        }
+        "LeanComplexF64x2" | "Leo4_LeanComplexF64x2" => {
+            Some("::leo4_abi::LeanComplexF64x2")
+        }
+        // Nightly half-precision floats + complex variants.
+        #[cfg(feature = "nightly-floats")]
+        "LeanF16" | "Leo4_LeanF16" => Some("::leo4_abi::f16"),
+        #[cfg(feature = "nightly-floats")]
+        "LeanBF16" | "Leo4_LeanBF16" => Some("::leo4_abi::LeanBF16"),
+        #[cfg(feature = "nightly-floats")]
+        "LeanF128" | "Leo4_LeanF128" => Some("::leo4_abi::f128"),
+        #[cfg(feature = "nightly-floats")]
+        "LeanComplexF16x2" | "Leo4_LeanComplexF16x2" => {
+            Some("::leo4_abi::LeanComplexF16x2")
+        }
+        #[cfg(feature = "nightly-floats")]
+        "LeanComplexBF16x2" | "Leo4_LeanComplexBF16x2" => {
+            Some("::leo4_abi::LeanComplexBF16x2")
+        }
+        #[cfg(feature = "nightly-floats")]
+        "LeanComplexF128x2" | "Leo4_LeanComplexF128x2" => {
+            Some("::leo4_abi::LeanComplexF128x2")
+        }
+        _ => None,
+    }
+}
+
 /// Map a `RustType` to a Rust source string naming a type for
 /// which leo4-abi provides a `LeanMarshal` impl. Returns `Err`
-/// for types not yet covered by the v0 wrapper synthesis.
-fn render_marshallable_type(ty: &RustType) -> Result<&'static str, LeanError> {
+/// for types not covered by the wrapper synthesis matrix.
+///
+/// Coverage matrix (OX2, v1.0 RC target):
+/// - Primitives: u8..u128, i8..i128, f32, f64, bool, char
+/// - `String`
+/// - Carrier types via `carrier_path_for`: `BigNat`, `BigInt`,
+///   `LeanRat`, `LeanComplexF{32,64}x2` (+ nightly variants)
+/// - Generic containers (recursive on inner types):
+///   `Vec<T>`, `Option<T>`, `Result<T, E>`, `Box<T>`, tuples
+///   up to 5 elements (matching `leo4_abi::tuple_impl`)
+///
+/// Type-erased shapes (`Box<dyn Any>`, free vars, unresolved
+/// inductives) and user-defined records remain unsupported —
+/// the latter is a separate OX2 sub-problem (deferred to first
+/// real-fixture pass per ROADMAP).
+fn render_marshallable_type(ty: &RustType) -> Result<String, LeanError> {
+    let unsupported = |label: &str| -> LeanError {
+        LeanError::new(
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            format!(
+                "leo4-oxilean-build: type `{label}` has no leo4-abi \
+                 LeanMarshal impl wired in OX2 wrapper synthesis"
+            ),
+        )
+    };
+
     match ty {
-        RustType::U8 => Ok("u8"),
-        RustType::U16 => Ok("u16"),
-        RustType::U32 => Ok("u32"),
-        RustType::U64 => Ok("u64"),
-        RustType::U128 => Ok("u128"),
-        RustType::I8 => Ok("i8"),
-        RustType::I16 => Ok("i16"),
-        RustType::I32 => Ok("i32"),
-        RustType::I64 => Ok("i64"),
-        RustType::I128 => Ok("i128"),
-        RustType::F32 => Ok("f32"),
-        RustType::F64 => Ok("f64"),
-        RustType::Bool => Ok("bool"),
-        RustType::Char => Ok("char"),
-        RustType::RustString => Ok("::std::string::String"),
-        // Bool/Unit return is special-cased at the call site.
-        other => {
-            let msg = format!(
-                "leo4-oxilean-build: RustType `{other:?}` has no leo4-abi \
-                 LeanMarshal impl wired in §5 wrapper synthesis"
-            );
-            Err(LeanError::new(
-                leo4_abi::error::error_codes::ENCODE_ERROR,
-                msg,
-            ))
+        RustType::U8 => Ok("u8".into()),
+        RustType::U16 => Ok("u16".into()),
+        RustType::U32 => Ok("u32".into()),
+        RustType::U64 => Ok("u64".into()),
+        RustType::U128 => Ok("u128".into()),
+        RustType::I8 => Ok("i8".into()),
+        RustType::I16 => Ok("i16".into()),
+        RustType::I32 => Ok("i32".into()),
+        RustType::I64 => Ok("i64".into()),
+        RustType::I128 => Ok("i128".into()),
+        RustType::F32 => Ok("f32".into()),
+        RustType::F64 => Ok("f64".into()),
+        RustType::Bool => Ok("bool".into()),
+        RustType::Char => Ok("char".into()),
+        RustType::RustString => Ok("::std::string::String".into()),
+
+        // Recursive container types — leo4-abi has generic
+        // `LeanMarshal` impls for all of these.
+        RustType::Vec(inner) => {
+            let i = render_marshallable_type(inner)?;
+            Ok(format!("::std::vec::Vec<{i}>"))
         }
+        RustType::Option(inner) => {
+            let i = render_marshallable_type(inner)?;
+            Ok(format!("::core::option::Option<{i}>"))
+        }
+        RustType::Result(t, e) => {
+            let t_str = render_marshallable_type(t)?;
+            let e_str = render_marshallable_type(e)?;
+            Ok(format!("::core::result::Result<{t_str}, {e_str}>"))
+        }
+        RustType::Tuple(items) => {
+            // leo4-abi provides tuple impls for arities 2..=5.
+            // 0-arity is `()` (Unit); 1-arity isn't a Rust
+            // tuple in canonical syntax (it'd need `(T,)`).
+            // For now reject arities outside [2..=5] explicitly.
+            match items.len() {
+                0 => Ok("()".into()),
+                1 => Err(unsupported("(T,) single-element tuple")),
+                n if (2..=5).contains(&n) => {
+                    let parts: Vec<String> = items
+                        .iter()
+                        .map(render_marshallable_type)
+                        .collect::<Result<_, _>>()?;
+                    Ok(format!("({})", parts.join(", ")))
+                }
+                _ => Err(unsupported("tuple with arity > 5")),
+            }
+        }
+
+        // Named single-name carrier — match against the leo4-abi
+        // carrier set.
+        RustType::Custom(name) => match carrier_path_for(name) {
+            Some(path) => Ok(path.into()),
+            None => Err(unsupported(name)),
+        },
+
+        // Generic types where the head is a Vec / Option / Result
+        // expressed as Generic("Vec", [T]) etc. (upstream
+        // sometimes emits these via `RustType::Generic` instead
+        // of the dedicated variants).
+        RustType::Generic(head, args) => match (head.as_str(), args.as_slice()) {
+            ("Vec", [t]) => {
+                let inner = render_marshallable_type(t)?;
+                Ok(format!("::std::vec::Vec<{inner}>"))
+            }
+            ("Option", [t]) => {
+                let inner = render_marshallable_type(t)?;
+                Ok(format!("::core::option::Option<{inner}>"))
+            }
+            ("Result", [t, e]) => {
+                let t_str = render_marshallable_type(t)?;
+                let e_str = render_marshallable_type(e)?;
+                Ok(format!("::core::result::Result<{t_str}, {e_str}>"))
+            }
+            ("Box", [t]) => {
+                let inner = render_marshallable_type(t)?;
+                Ok(format!("::std::boxed::Box<{inner}>"))
+            }
+            (name, _) if carrier_path_for(name).is_some() => {
+                // A carrier name appearing with generic args
+                // (e.g. `BigNat<...>`) is meaningless today —
+                // the carrier types are non-generic. Reject
+                // rather than silently dropping args.
+                Err(unsupported(&format!("{name}<...> (carrier types are not generic)")))
+            }
+            (name, _) => Err(unsupported(&format!("generic `{name}<...>`"))),
+        },
+
+        // Type-erased / unsupported shapes.
+        other => Err(unsupported(&format!("{other:?}"))),
     }
 }
 
@@ -1450,6 +1586,188 @@ mod tests {
         assert!(out.contains("combine(a, b, c)"));
     }
 
+    // ─── OX2 carrier-type + generics tests ────────────────────────────
+
+    #[test]
+    fn wrapper_accepts_bignat_carrier() {
+        let f = rfn(
+            "addBig",
+            vec![("n", RustType::Custom("BigNat".to_string()))],
+            Some(RustType::Custom("BigNat".to_string())),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("BigNat must marshal");
+        assert!(
+            out.contains("<::leo4_abi::BigNat as ::leo4_abi::LeanMarshal>::canonical_decode"),
+            "expected BigNat decode path; got:\n{out}"
+        );
+        // The transpiled fn is called with the decoded arg.
+        assert!(out.contains("addBig(n)"));
+    }
+
+    #[test]
+    fn wrapper_accepts_carrier_under_oxilean_mangled_form() {
+        // OxiLean mangles `.` → `_`, so `Leo4.BigInt` would
+        // surface as `Leo4_BigInt` in `RustType::Custom`.
+        let f = rfn(
+            "negate",
+            vec![("n", RustType::Custom("Leo4_BigInt".to_string()))],
+            Some(RustType::Custom("Leo4_BigInt".to_string())),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("Leo4_BigInt must marshal");
+        assert!(out.contains("::leo4_abi::BigInt"));
+    }
+
+    #[test]
+    fn wrapper_accepts_lean_rat() {
+        let f = rfn(
+            "halve",
+            vec![("q", RustType::Custom("LeanRat".to_string()))],
+            Some(RustType::Custom("Rat".to_string())),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("Rat carriers must marshal");
+        assert!(out.contains("::leo4_abi::LeanRat"));
+    }
+
+    #[test]
+    fn wrapper_accepts_complex_f64() {
+        let f = rfn(
+            "rotate",
+            vec![("z", RustType::Custom("LeanComplexF64x2".to_string()))],
+            Some(RustType::Custom("LeanComplexF64x2".to_string())),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("complex must marshal");
+        assert!(out.contains("::leo4_abi::LeanComplexF64x2"));
+    }
+
+    #[test]
+    fn wrapper_accepts_vec_u64() {
+        let f = rfn(
+            "sum_list",
+            vec![("xs", RustType::Vec(Box::new(RustType::U64)))],
+            Some(RustType::U64),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("Vec<u64> must marshal");
+        assert!(out.contains("::std::vec::Vec<u64>"));
+    }
+
+    #[test]
+    fn wrapper_accepts_option_string() {
+        let f = rfn(
+            "maybe_str",
+            vec![("name", RustType::Option(Box::new(RustType::RustString)))],
+            Some(RustType::Bool),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("Option<String> must marshal");
+        assert!(out.contains("::core::option::Option<::std::string::String>"));
+    }
+
+    #[test]
+    fn wrapper_accepts_result_in_return() {
+        let f = rfn(
+            "may_fail",
+            vec![("n", RustType::U64)],
+            Some(RustType::Result(
+                Box::new(RustType::U64),
+                Box::new(RustType::RustString),
+            )),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("Result return must marshal");
+        assert!(out.contains("encode_to_vec(&__ret)"));
+        // The Result type doesn't appear in the wrapper body
+        // (we just encode_to_vec the typed return), but the
+        // marshallable check still has to pass for it — that's
+        // what this test asserts.
+    }
+
+    #[test]
+    fn wrapper_accepts_nested_generics() {
+        // Vec<Option<u64>> — recursive type lifting.
+        let f = rfn(
+            "filter_some",
+            vec![("xs", RustType::Vec(Box::new(RustType::Option(Box::new(RustType::U64)))))],
+            Some(RustType::Vec(Box::new(RustType::U64))),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("nested generics must marshal");
+        assert!(out.contains("::std::vec::Vec<::core::option::Option<u64>>"));
+    }
+
+    #[test]
+    fn wrapper_accepts_tuple_arity_2() {
+        let f = rfn(
+            "pair",
+            vec![("p", RustType::Tuple(vec![RustType::U64, RustType::Bool]))],
+            Some(RustType::Tuple(vec![RustType::Bool, RustType::U64])),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("2-tuple must marshal");
+        assert!(out.contains("(u64, bool)"));
+    }
+
+    #[test]
+    fn wrapper_accepts_generic_form_vec() {
+        // Upstream sometimes lowers via `Generic("Vec", [T])`
+        // instead of the dedicated `RustType::Vec` variant.
+        let f = rfn(
+            "alt_form",
+            vec![(
+                "xs",
+                RustType::Generic("Vec".to_string(), vec![RustType::U64]),
+            )],
+            Some(RustType::U64),
+        );
+        let out = synthesize_canonical_wrapper(&f).expect("Generic Vec form must marshal");
+        assert!(out.contains("::std::vec::Vec<u64>"));
+    }
+
+    #[test]
+    fn wrapper_rejects_unknown_custom() {
+        let f = rfn(
+            "user_record",
+            vec![("r", RustType::Custom("MyStruct".to_string()))],
+            Some(RustType::U64),
+        );
+        let err = synthesize_canonical_wrapper(&f)
+            .expect_err("unknown carrier must fail");
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+        assert!(err.message.contains("MyStruct"));
+    }
+
+    #[test]
+    fn wrapper_rejects_carrier_with_generic_args() {
+        // `BigNat<...>` makes no sense — carrier types are
+        // non-generic. Reject loudly so a malformed lowering
+        // surfaces.
+        let f = rfn(
+            "bad",
+            vec![(
+                "x",
+                RustType::Generic("BigNat".to_string(), vec![RustType::U64]),
+            )],
+            Some(RustType::U64),
+        );
+        let err = synthesize_canonical_wrapper(&f).expect_err("BigNat<u64> must fail");
+        assert!(err.message.contains("BigNat<...>"));
+    }
+
+    #[test]
+    fn wrapper_rejects_tuple_with_unsupported_inner() {
+        // The tuple variant rejects the unsupported inner type
+        // — the outer Tuple's marshallability cascades through
+        // its elements.
+        let f = rfn(
+            "bad_tuple",
+            vec![(
+                "p",
+                RustType::Tuple(vec![
+                    RustType::U64,
+                    RustType::Custom("MyStruct".to_string()),
+                ]),
+            )],
+            Some(RustType::U64),
+        );
+        let err = synthesize_canonical_wrapper(&f).expect_err("unsupported inner must cascade");
+        assert!(err.message.contains("MyStruct"));
+    }
+
     #[test]
     fn wrapper_rejects_box_dyn_any_return() {
         let f = rfn(
@@ -1471,15 +1789,19 @@ mod tests {
 
     #[test]
     fn wrapper_rejects_unsupported_param_type() {
-        // Vec<u64> isn't in the v0 marshalling matrix yet.
+        // User-defined record types are not yet covered (the
+        // backend doesn't emit struct shapes; deferred per
+        // ROADMAP OX2 sub-problem). Verifies the failure mode
+        // is loud rather than silent.
         let f = rfn(
-            "list_in",
-            vec![("xs", RustType::Vec(Box::new(RustType::U64)))],
+            "user_in",
+            vec![("r", RustType::Custom("UserDefinedRecord".to_string()))],
             Some(RustType::U64),
         );
         let err = synthesize_canonical_wrapper(&f)
-            .expect_err("Vec param must fail wrapper synthesis");
+            .expect_err("user record param must fail wrapper synthesis");
         assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+        assert!(err.message.contains("UserDefinedRecord"));
     }
 
     #[test]
