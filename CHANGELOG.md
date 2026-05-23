@@ -7,6 +7,78 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9-5: Lean wrapper module emission (`leo4-rust-emit --emit-lean`) (2026-05-23)
+
+Sixth code landing on the Phase 9 ladder. `leo4-rust-emit`
+grows an `--emit-lean` flag that, alongside the existing
+`.leo4-rust-exports.idl` + `.leo4-rust-handshake` pair,
+generates `<pkg>.leo4-rust-imports.lean` — a Lean wrapper
+module exposing one typed `IO α` action per
+`#[leo4::export]`.
+
+Generated module anatomy:
+
+```lean
+import Leo4
+namespace <module>           -- defaults to `<iface>.Rust`
+
+def schemaHash : String := "<13-char base32lc>"
+
+@[extern "leo4_rust_call_lean"]
+private opaque leo4RustCallRaw
+    (mangled : @& String) (args : @& ByteArray)
+    : BaseIO (UInt32 × ByteArray)
+
+def add (a0 : UInt64) (a1 : UInt64) : IO UInt64 := do
+  let mut args := ByteArray.empty
+  args := Leo4.LeanMarshal.canonicalEncode a0 args
+  args := Leo4.LeanMarshal.canonicalEncode a1 args
+  let (status, ret) ← leo4RustCallRaw "leo4_rust__add__u64_u64" args
+  if status ≠ 0 then throw (IO.userError s!"…")
+  match Leo4.LeanMarshal.canonicalDecode (T := UInt64) ret 0 with
+  | .ok (v, _) => return v
+  | .error e   => throw (IO.userError s!"… {e.detail}")
+
+end <module>
+```
+
+Implementation in `crates/leo4-rust-emit/`:
+
+- CLI gains `--emit-lean` (bool) and `--lean-module <name>`
+  (defaults to `<iface>.Rust`).
+- `render_lean_wrapper` emits the file header, schema-hash
+  pin, single `@[extern]` raw entry, and one typed wrapper
+  per export.
+- `render_one_export` walks parameter / return mangles via
+  `lean_type_of_mangle`. v9-5 scope: scalars (u8..u64, i8..i64,
+  f32/f64, bool, char), `String`, `Nat` / `Int` (bignat /
+  bigint), `Option<T>` of mapped inner, and the
+  `list<u8>` → `ByteArray` / `list<T>` → `Array T` shapes.
+  Composite payloads (records / variants / resources) are
+  deferred — an export whose signature contains an unmapped
+  mangle still gets a wrapper definition emitted, but its
+  body is a Lean `panic!` so the user sees a clear runtime
+  diagnostic rather than a silent ABI mismatch.
+- `lean_safe_ident` guards a small keyword list (`def`,
+  `match`, `end`, …); other identifiers pass through.
+- 7 new unit tests cover the mangle-to-Lean-type table, list
+  / option / ByteArray dispatch, keyword renaming, and
+  end-to-end module rendering.
+
+Smoke verified outside the workspace: a fixture cdylib with
+four exports (`add`/`echo`/`negate`/`list_sum`) round-trips
+through `leo4-rust-emit --emit-lean` into a clean Lean module
+with `UInt64`, `Int32`, `String`, and `Array UInt32`
+signatures in the right places, plus the cdylib's
+schema_hash baked into `schemaHash`.
+
+The `leo4_rust_call_lean` extern symbol the wrapper refers to
+lives in a small leanc-compiled Lean-side glue shim Phase 9-6
+will land. Until then user code compiling against the
+generated `.lean` will fail at *link* time, not at emit time.
+
+Workspace test count 127 → 134; all green.
+
 ### Added — Phase 9-4b: POSIX backend (`posix_spawn` + socketpair + waitpid) (2026-05-21)
 
 Fifth code landing on the Phase 9 ladder. Fills the
