@@ -7,6 +7,84 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `sibling/leo4-oxilean/` adapter scaffold (2026-05-21)
+
+First concrete `leo4-rust-native` adapter. Bridges leo4's
+trait surface (`leo4_abi::{LeanProc, LeanProcInvoker}`) to
+[OxiLean](https://github.com/cool-japan/oxilean)'s FFI
+infrastructure (`oxilean_kernel::ffi::{ExternRegistry,
+ExternDecl, FfiSignature, FfiType, FfiSafety,
+CallingConvention}`).
+
+Location: `sibling/leo4-oxilean/`. Standalone Cargo
+workspace per `SPEC/rust-native-lean.md` §2.2 ("adapter
+crate lives outside the main leo4 workspace; leo4 itself
+stays runtime-agnostic"). Same pattern as
+`sibling/leo4-wasip3/`.
+
+Deps: `leo4-abi` (path), `oxilean-kernel =0.1.2`,
+`oxilean-runtime =0.1.2`. OxiLean elaborator + build crates
+deferred (heavier deps, only needed for source-file loading
+which is `leo4-oxilean-build`'s job — out of scope for the
+adapter itself).
+
+**What works (8/8 tests pass)**:
+
+  • `OxiLeanInvoker::new()` constructs an
+    `Arc<Mutex<ExternRegistry>>` wrapper.
+  • `register_export(mangled)` pushes one `ExternDecl` per
+    `#[leo4::export]` into OxiLean's registry under
+    `lib_name = "leo4-rust-bridge"`, `symbol_name =
+    mangled`, signature `(ByteArray) -> ByteArray` (the
+    canonical-ABI shape every leo4 export collapses to).
+  • Duplicate-symbol detection (registry rejects, adapter
+    surfaces `ENCODE_ERROR` 0x02).
+  • `LeanProcInvoker::invoke` distinguishes
+    `UNKNOWN_FUNCTION` (export not registered) from
+    `RUST_DLSYM_FAILED` 0x0002_0005 (registered but no
+    upstream callback hook).
+  • All trait impls are object-safe.
+
+**Architectural finding from the wiring exercise**: OxiLean
+v0.1.2's `ExternRegistry` carries **metadata only** — `(lib,
+symbol)` describes where the actual function lives; runtime
+resolution is `dlsym`-style (matches reference Lean's
+`@[extern "lib" "name"]` semantics). Three upstream hooks
+OxiLean needs to add before this adapter becomes fully
+functional, documented in `sibling/leo4-oxilean/README.md`
+§"OxiLean upstream prerequisite":
+
+  1. **Callback-registration entry point in the OxiLean
+     evaluator**: `ExternRegistry::register_callback(decl,
+     callback)` accepting a
+     `Box<dyn Fn(&[u8]) -> Result<Vec<u8>, _>>` instead of
+     `dlsym`'ing at runtime.
+  2. **By-name `@[leo4_export]` dispatch**:
+     `Env::call_by_mangled_name(name, ffi_args)`. Equivalent
+     to reference Lean's
+     `dlsym(leo4_call_<mangled>)`.
+  3. **`@[leo4_export]` attribute recognition** in
+     `oxilean-elab`'s attribute pipeline (the
+     `registerBuiltinAttribute` analogue).
+
+These are upstream features, not adapter work. The adapter's
+`LeanProc::call` + `LeanProcInvoker::invoke` bodies will
+fill in transparently once they land.
+
+**`SPEC/rust-native-lean.md` §7.1 update implication**: the
+"Phase 10-B1 callback ABI is essentially free with OxiLean"
+claim still holds — OxiLean's `FfiType::Fn(params, ret)` is
+first-class — but the *mechanism* requires the same
+callback-registration hook above. Once that hook lands, B1
+runtime for the rust-native transport becomes a one-PR
+follow-up.
+
+Main repo impact: zero. The adapter sits at
+`sibling/leo4-oxilean/` with its own `[workspace]` marker;
+main `cargo build --workspace` ignores it. Activation cost
+for adopters: `cd sibling/leo4-oxilean && cargo test` (pulls
+OxiLean's two crates, ~6s on this checkout).
+
 ### Added — `leo4_abi::{LeanProc, LeanProcInvoker}` trait surface (2026-05-21)
 
 Lifts `SPEC/rust-native-lean.md` §2 + §3's two-trait contract

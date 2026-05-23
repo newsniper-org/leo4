@@ -1,0 +1,44 @@
+# Standalone (NOT a member of the main leo4 workspace). The
+# empty `[workspace]` table tells Cargo to stop walking up the
+# directory tree looking for a workspace root.
+[workspace]
+
+[package]
+name        = "leo4-oxilean"
+version     = "0.0.0"
+edition     = "2024"
+rust-version = "1.85"
+license     = "MIT OR Apache-2.0"
+authors     = ["윤병익 <yeun0908@gmail.com>"]
+repository  = "https://github.com/Honey-Be/leo4"
+description = "leo4 ↔ OxiLean adapter (sibling project, scaffold). Implements `leo4_abi::LeanProc` + `LeanProcInvoker` against OxiLean's Rust-native Lean 4 runtime (`oxilean-runtime` + `oxilean-kernel::ffi`). Currently a SKELETON — see `README.md` §Status before relying on it."
+
+# NOT a member of the main leo4 workspace per
+# `SPEC/rust-native-lean.md` §2.2: "the adapter crate lives
+# outside the main leo4 workspace; leo4 itself stays runtime-
+# agnostic". This sibling pattern matches `sibling/leo4-wasip3/`.
+
+[dependencies]
+# leo4 trait surface (LeanProc, LeanProcInvoker, LeanError,
+# LeanMarshal). Path-dep into the main leo4 workspace's
+# `crates/leo4-abi`; the adapter never depends on
+# leo4-mslean4 / leo4-wasm / leo4 façade — only the IDL +
+# canonical-ABI primitives shared by every transport.
+leo4-abi = { path = "../../crates/leo4-abi" }
+
+# OxiLean v0.1.2 — first activation. Pinned to exact patch
+# because OxiLean's auto-generated module structures can
+# move between versions.
+oxilean-kernel  = "=0.1.2"   # FfiType / FfiValue / ExternRegistry / FfiSignature
+oxilean-runtime = "=0.1.2"   # Env, Eval state, refcounted closures
+# Deferred for now (heavier deps, only needed for source-file
+# loading paths):
+#   oxilean-elab  = "=0.1.2"   # `lean4_compat/` syntax adapter
+#   oxilean-build = "=0.1.2"   # Rust-driven `oxilean build`
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"  # rust-native impl details vary per OxiLean version
