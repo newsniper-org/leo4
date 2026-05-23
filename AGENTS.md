@@ -402,6 +402,33 @@ would be expensive to relitigate:
   internal are a signal the work belongs in a different
   crate (e.g. `leo4-build` or a leo4-version-aware
   subcrate), not in `leo4-cli`.
+- **2026-05-21 — leo4 has no compile-time plug-in system,
+  and that is intentional**. `schema-idl::IDLType` and
+  `Leo4Plugin.AdmitSet.IDLType` are closed enums/inductives;
+  adding a new IDL primitive or mangling rule requires
+  forking + CLAUDE.md's 8-step boundary-type checklist on
+  both sides. Reason: `SPEC/mangling.md` §3's schema_hash
+  (FNV-1a-64 of normalised IDL bytes) only carries meaning
+  if both implementations produce **byte-identical** IDL
+  for the same input — a plug-in that adds IDLTypes,
+  mangling tokens, or wire-format rules would make
+  schema_hash depend on the active plug-in set, breaking:
+  (a) cross-impl mangling conformance
+  (`tests/mangling/run.sh`), (b) handshake mismatch
+  semantics (LEO4_ERR_HANDSHAKE_MISMATCH 0x05 stops
+  distinguishing "real type drift" from "plug-in set
+  differs"), (c) the `tests/mangling/cases/` golden-file
+  contract. The only naturally safe plug-in slot is
+  **IDL-consumer-side lowering** (e.g. `leo4c lower`
+  emitting WIT today; future emitters to other targets
+  could be plug-ins because they don't redefine the IDL,
+  only re-express it). Anything that touches the
+  IDL/mangling/schema-hash contract is not a plug-in
+  candidate — it's a phase ladder addition that requires
+  schema-hash rotation. If 병익 ever requests a "plug-in
+  system", clarify: consumer-side codegen plug-ins are
+  acceptable; IDL-vocabulary plug-ins are not, per this
+  decision.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from
