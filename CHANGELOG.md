@@ -7,6 +7,48 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Phase 9.X: `#[leo4::export(isolated)]` dispatcher path (2026-05-23)
+
+Per-call fresh worker for `isolated`-tagged exports. The
+attribute itself shipped in 9-1 (parsed by the macro and
+recorded in `ExportEntry.isolated`); 9-5 / 9-6 ignored it. This
+commit wires it through the dispatcher.
+
+Mechanism (minimal wire surface change):
+
+- `leo4-rust-emit`'s Lean wrapper render now prefixes the
+  mangled name with `iso:` for exports tagged
+  `#[leo4::export(isolated)]`. Persistent exports pass the
+  raw mangled name verbatim.
+- `shim/leo4_rust_bridge.c`'s `leo4_rust_call` detects the
+  `iso:` prefix via `memcmp`. When present, it strips the
+  prefix and routes through a new `leo4_dispatch_isolated`
+  helper:
+  1. Allocate a fresh worker via `leo4_worker_ops->spawn`
+     (separate process from the persistent slot).
+  2. Send the request frame.
+  3. Receive the response frame.
+  4. Send a magic=0 graceful-shutdown frame.
+  5. `leo4_worker_ops->reap` the worker.
+- The persistent worker is unaffected — it keeps running
+  across calls, just as before.
+
+Why the prefix trick: no SPEC wire format change, no new
+dispatcher API entry, no Lean wrapper signature change. The
+typed wrapper renders identically except for the literal
+string passed to `leo4RustCallRaw`. Backwards-compatible with
+9-5's wrapper consumers.
+
+Cost: per-call worker spawn (`posix_spawn` ~5-10 ms on Linux).
+Use only for exports whose state contamination would corrupt
+later unrelated calls. Persistent mode remains the default.
+
+`shim/leo4_rust_bridge.c` builds clean under `-std=c23` /
+`-std=c2x` / `-std=c17`. Workspace test count unchanged at
+138/0 (the change adds dispatch-path logic that needs the
+worker harness + cdylib to verify end-to-end; that lives in
+the manual `just rust-export-05-build` workflow).
+
 ### Added — Phase 9-6 follow-up: Lake automation for the reverse-direction pipeline (2026-05-23)
 
 Collapses the 4-step manual workflow from

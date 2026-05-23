@@ -569,9 +569,17 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
             "  args := Leo4.LeanMarshal.canonicalEncode {id} args\n"
         ));
     }
+    // Isolated exports get an `iso:` prefix on the mangled name
+    // so the dispatcher's `leo4_rust_call` routes them through the
+    // per-call fresh worker path (SPEC §4.2). Persistent exports
+    // pass the raw mangled name through verbatim.
+    let dispatched_mangled = if e.isolated {
+        format!("iso:{}", e.mangled)
+    } else {
+        e.mangled.clone()
+    };
     s.push_str(&format!(
-        "  let (status, ret) ← leo4RustCallRaw \"{}\" args\n",
-        e.mangled
+        "  let (status, ret) ← leo4RustCallRaw \"{dispatched_mangled}\" args\n",
     ));
     s.push_str("  if status ≠ 0 then\n");
     s.push_str(&format!(

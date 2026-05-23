@@ -627,6 +627,46 @@ static int leo4_recv_response(leo4_worker_t* w,
 #  define LEO4_RUST_EXPORT
 #endif
 
+/* Spawn a transient (one-shot) worker, send a single request,
+ * collect its response, then graceful-shutdown the worker (magic=0
+ * request) and reap. Used for `#[leo4::export(isolated)]` exports.
+ * See SPEC/reverse-direction.md §4.2.
+ */
+static int32_t leo4_dispatch_isolated(
+    const char* mangled, size_t mangled_len,
+    const uint8_t* args_ptr, size_t args_len,
+    uint8_t* ret_ptr, size_t ret_cap, size_t* ret_len)
+{
+    const char* cdylib = leo4_cdylib_path();
+    char err_buf[256] = {0};
+    leo4_worker_t* w = NULL;
+    int rc = leo4_worker_ops->spawn(cdylib, &w, err_buf, sizeof err_buf);
+    if (rc != LEO4_OK) return rc;
+
+    /* Send the call request. */
+    rc = leo4_send_request(w, mangled, mangled_len, args_ptr, args_len);
+    if (rc != LEO4_OK) {
+        leo4_worker_ops->kill(w);
+        leo4_worker_ops->reap(w, NULL);
+        return rc;
+    }
+    int32_t status = 0;
+    char detail[256] = {0};
+    size_t detail_len = 0;
+    rc = leo4_recv_response(w, &status,
+                            ret_ptr, ret_cap, ret_len,
+                            detail, sizeof detail, &detail_len);
+
+    /* Graceful shutdown: magic=0 request signals the worker to exit
+     * cleanly. We don't read its response (there isn't one). */
+    uint8_t shutdown_header[12] = {0};
+    (void)leo4_write_all(w, shutdown_header, sizeof shutdown_header);
+    leo4_worker_ops->reap(w, NULL);
+
+    if (rc != LEO4_OK) return rc;
+    return status;
+}
+
 LEO4_RUST_EXPORT
 int32_t leo4_rust_call(
     const char* mangled, size_t mangled_len,
@@ -638,17 +678,31 @@ int32_t leo4_rust_call(
     }
     *ret_len = 0;
 
+    /* Detect the `iso:` prefix the Lean wrapper emits for
+     * `#[leo4::export(isolated)]` exports (SPEC §4.2). Strip it
+     * before forwarding the real mangled name to the worker. */
+    static const char ISO_PREFIX[] = "iso:";
+    static const size_t ISO_PREFIX_LEN = sizeof ISO_PREFIX - 1;
+    int isolated = 0;
+    if (mangled_len >= ISO_PREFIX_LEN
+        && memcmp(mangled, ISO_PREFIX, ISO_PREFIX_LEN) == 0) {
+        isolated = 1;
+        mangled     += ISO_PREFIX_LEN;
+        mangled_len -= ISO_PREFIX_LEN;
+    }
+
+    if (isolated) {
+        return leo4_dispatch_isolated(mangled, mangled_len,
+                                      args_ptr, args_len,
+                                      ret_ptr, ret_cap, ret_len);
+    }
+
+    /* Persistent-worker path (default). */
     leo4_worker_t* worker = NULL;
     int rc = leo4_get_or_spawn_persistent(&worker);
     if (rc != LEO4_OK) {
         return rc;
     }
-    /* 9-4b will exchange the handshake frame here on first call
-     * and verify the schema_hash against a compile-time pinned
-     * value (filled by the Lake wrapper, 9-5). For now we just
-     * proceed straight to the request loop — the stub backend's
-     * `spawn` already errored out, so this branch is unreachable
-     * on the 9-4a build. */
 
     rc = leo4_send_request(worker, mangled, mangled_len, args_ptr, args_len);
     if (rc != LEO4_OK) {
