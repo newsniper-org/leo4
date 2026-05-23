@@ -71,6 +71,13 @@ enum Cmd {
         /// to `../leo4` (sibling layout).
         #[arg(long)]
         leo4_root: Option<PathBuf>,
+        /// Lean implementation to target. **Required** — no
+        /// default. `mslean4` = reference Lean 4 via `<lean/lean.h>`
+        /// C ABI shim. `rust-native` (alias: `rust`) = Rust-native
+        /// Lean impl via direct Rust call (currently deferred —
+        /// see `SPEC/rust-native-lean.md`). Exactly one value.
+        #[arg(long, value_parser = parse_impl_kind)]
+        r#impl: ImplKind,
     },
 
     /// Add leo4 integration to an EXISTING Cargo crate (in cwd
@@ -84,11 +91,17 @@ enum Cmd {
         dir: Option<PathBuf>,
         #[arg(long)]
         leo4_root: Option<PathBuf>,
+        /// Lean implementation to target (same semantics as
+        /// `leo4 create --impl`). Required.
+        #[arg(long, value_parser = parse_impl_kind)]
+        r#impl: ImplKind,
     },
 
     /// Build + run the project end-to-end. Detects direction
     /// automatically from `Cargo.toml`'s `[lib] crate-type`
-    /// (`["cdylib"]` ⇒ reverse, else forward).
+    /// (`["cdylib"]` ⇒ reverse, else forward). Reads the target
+    /// implementation from `<dir>/.leo4-impl` (written by
+    /// `leo4 create` / `leo4 init`); override with `--impl`.
     Run {
         /// Override auto-detection of forward vs reverse.
         #[arg(long)]
@@ -107,6 +120,10 @@ enum Cmd {
         /// to cwd.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Override the `<dir>/.leo4-impl` marker. Same accepted
+        /// values as `leo4 create --impl`.
+        #[arg(long, value_parser = parse_impl_kind)]
+        r#impl: Option<ImplKind>,
         /// Extra args forwarded to the final binary.
         #[arg(last = true)]
         args: Vec<String>,
@@ -121,23 +138,92 @@ enum Direction {
     Reverse,
 }
 
+/// Lean implementation the scaffold targets. Determines which
+/// transport (`SPEC/canonical-abi.md` §14 / `SPEC/wit/leo4-host.wit`
+/// / `SPEC/rust-native-lean.md`) the generated project uses.
+///
+/// Not a `clap::ValueEnum` because `rust` is an alias for
+/// `rust-native`. Custom `value_parser` (`parse_impl_kind`) handles
+/// both spellings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ImplKind {
+    /// `crates/leo4-mslean4` path — reference Lean 4 via
+    /// `<lean/lean.h>` C ABI shim.
+    Mslean4,
+    /// `leo4-rust-native` adapter path (out-of-tree) — Rust-native
+    /// Lean impl via direct Rust call. Currently deferred
+    /// (`SPEC/rust-native-lean.md` §8).
+    RustNative,
+}
+
+impl ImplKind {
+    fn marker_str(&self) -> &'static str {
+        match self {
+            ImplKind::Mslean4 => "mslean4",
+            ImplKind::RustNative => "rust-native",
+        }
+    }
+}
+
+fn parse_impl_kind(s: &str) -> Result<ImplKind, String> {
+    match s {
+        "mslean4" => Ok(ImplKind::Mslean4),
+        "rust-native" | "rust" => Ok(ImplKind::RustNative),
+        other => Err(format!(
+            "unknown --impl value `{other}`. Accepted: `mslean4`, `rust-native` (or `rust` as alias)."
+        )),
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let res = match cli.cmd {
-        Cmd::Create { direction, dir, name, leo4_root } => {
-            run_create(direction, dir, name, leo4_root)
+        Cmd::Create { direction, dir, name, leo4_root, r#impl } => {
+            run_create(direction, dir, name, leo4_root, r#impl)
         }
-        Cmd::Init { direction, dir, leo4_root } => {
-            run_init(direction, dir, leo4_root)
+        Cmd::Init { direction, dir, leo4_root, r#impl } => {
+            run_init(direction, dir, leo4_root, r#impl)
         }
-        Cmd::Run { direction, iface, leo4_root, dir, args } => {
-            run_run(direction, iface, leo4_root, dir, args)
+        Cmd::Run { direction, iface, leo4_root, dir, r#impl, args } => {
+            run_run(direction, iface, leo4_root, dir, r#impl, args)
         }
     };
     if let Err(e) = res {
         eprintln!("leo4: {e}");
         std::process::exit(1);
     }
+}
+
+/// Reject scaffolding under a not-yet-supported impl with a clear
+/// pointer at the SPEC. Returns `Ok(())` for supported impls.
+fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
+    match kind {
+        ImplKind::Mslean4 => Ok(()),
+        ImplKind::RustNative => Err(
+            "--impl rust-native is currently deferred. The integration \
+             contract is pinned at `SPEC/rust-native-lean.md` §2, but \
+             no in-tree scaffolding ships yet — you'd need an external \
+             adapter crate (`leo4-<impl>`, e.g. `leo4-oxilean`).\n\n\
+             See `SPEC/rust-native-lean.md` §8 for the activation plan, \
+             or use `--impl mslean4` for the reference Lean 4 path that \
+             ships today.".into()
+        ),
+    }
+}
+
+/// Write the `<dir>/.leo4-impl` marker file. One line, no trailing
+/// newline-strip needed because `leo4 run` trims whitespace on read.
+fn write_impl_marker(dir: &Path, kind: &ImplKind) -> Result<(), String> {
+    let p = dir.join(".leo4-impl");
+    fs::write(&p, format!("{}\n", kind.marker_str()))
+        .map_err(|e| format!("write {p:?}: {e}"))
+}
+
+/// Read the `<dir>/.leo4-impl` marker if present.
+fn read_impl_marker(dir: &Path) -> Option<ImplKind> {
+    let p = dir.join(".leo4-impl");
+    let raw = fs::read_to_string(&p).ok()?;
+    parse_impl_kind(raw.trim()).ok()
 }
 
 // ─── `leo4 create` (new directory) ──────────────────────────────────
@@ -147,7 +233,9 @@ fn run_create(
     dir: PathBuf,
     name: Option<String>,
     leo4_root: Option<PathBuf>,
+    impl_kind: ImplKind,
 ) -> Result<(), String> {
+    check_impl_supported(&impl_kind)?;
     let dir = abs(&dir)?;
     if dir.exists() {
         let empty = fs::read_dir(&dir)
@@ -171,7 +259,11 @@ fn run_create(
         Direction::Forward => scaffold_forward_full(&dir, &project_name, &leo4_root_str)?,
         Direction::Reverse => scaffold_reverse_full(&dir, &project_name, &leo4_root_str)?,
     }
-    println!("leo4 create: {project_name} ({direction:?}) → {dir:?}");
+    write_impl_marker(&dir, &impl_kind)?;
+    println!(
+        "leo4 create: {project_name} ({direction:?}, impl={}) → {dir:?}",
+        impl_kind.marker_str()
+    );
     println!("  next: cat {}/README.md", dir.display());
     Ok(())
 }
@@ -182,7 +274,9 @@ fn run_init(
     direction: Direction,
     dir: Option<PathBuf>,
     leo4_root: Option<PathBuf>,
+    impl_kind: ImplKind,
 ) -> Result<(), String> {
+    check_impl_supported(&impl_kind)?;
     let dir = match dir {
         Some(d) => abs(&d)?,
         None => std::env::current_dir()
@@ -195,6 +289,19 @@ fn run_init(
         ));
     }
 
+    // If a marker already exists, require it to match — switching
+    // impls mid-project is not a workflow we support.
+    if let Some(existing) = read_impl_marker(&dir) {
+        if existing != impl_kind {
+            return Err(format!(
+                "init: {dir:?} already carries `.leo4-impl = {}` but you passed `--impl {}`. \
+                 Switching impls is not supported; remove `.leo4-impl` manually to override.",
+                existing.marker_str(),
+                impl_kind.marker_str(),
+            ));
+        }
+    }
+
     let pkg_name = read_cargo_pkg_name(&cargo_toml)
         .unwrap_or_else(|| dir_basename(&dir));
     let leo4_root_str = resolve_leo4_root(leo4_root);
@@ -203,7 +310,11 @@ fn run_init(
         Direction::Forward => integrate_forward(&dir, &pkg_name, &leo4_root_str)?,
         Direction::Reverse => integrate_reverse(&dir, &pkg_name, &leo4_root_str)?,
     }
-    println!("leo4 init: integrated {direction:?} scaffold into {dir:?}");
+    write_impl_marker(&dir, &impl_kind)?;
+    println!(
+        "leo4 init: integrated {direction:?} scaffold (impl={}) into {dir:?}",
+        impl_kind.marker_str()
+    );
     println!("  Cargo.toml extended; lean/ + (forward) build.rs created if absent.");
     Ok(())
 }
@@ -259,6 +370,7 @@ fn run_run(
     iface_arg: Option<String>,
     leo4_root: Option<PathBuf>,
     dir: Option<PathBuf>,
+    impl_arg: Option<ImplKind>,
     args: Vec<String>,
 ) -> Result<(), String> {
     let dir = match dir {
@@ -272,6 +384,20 @@ fn run_run(
             "run: no Cargo.toml at {dir:?}. Run from inside a leo4 project."
         ));
     }
+
+    // Resolve --impl: explicit override > .leo4-impl marker > error.
+    let impl_kind = match impl_arg {
+        Some(k) => k,
+        None => read_impl_marker(&dir).ok_or_else(|| {
+            format!(
+                "run: no `.leo4-impl` marker at {dir:?}. \
+                 Either re-run `leo4 init --impl <mslean4|rust-native>` to write one, \
+                 or pass `--impl <…>` explicitly to this command."
+            )
+        })?,
+    };
+    check_impl_supported(&impl_kind)?;
+
     let pkg_name = read_cargo_pkg_name(&cargo_toml)
         .ok_or_else(|| format!("run: cannot read package name from {cargo_toml:?}"))?;
     let crate_name = pkg_name.replace('-', "_");
@@ -899,6 +1025,52 @@ mod tests {
         assert_eq!(camel_case("solver_lib"), "SolverLib");
         assert_eq!(camel_case("App"), "App");
         assert_eq!(camel_case(""), "App");
+    }
+
+    #[test]
+    fn parse_impl_kind_accepts_canonical_names() {
+        assert_eq!(parse_impl_kind("mslean4").unwrap(), ImplKind::Mslean4);
+        assert_eq!(parse_impl_kind("rust-native").unwrap(), ImplKind::RustNative);
+    }
+
+    #[test]
+    fn parse_impl_kind_accepts_rust_alias() {
+        assert_eq!(parse_impl_kind("rust").unwrap(), ImplKind::RustNative);
+    }
+
+    #[test]
+    fn parse_impl_kind_rejects_unknown() {
+        let err = parse_impl_kind("oxilean").unwrap_err();
+        assert!(err.contains("mslean4"), "{err}");
+        assert!(err.contains("rust-native"), "{err}");
+    }
+
+    #[test]
+    fn check_impl_supported_passes_mslean4() {
+        assert!(check_impl_supported(&ImplKind::Mslean4).is_ok());
+    }
+
+    #[test]
+    fn check_impl_supported_rejects_rust_native_with_pointer_to_spec() {
+        let err = check_impl_supported(&ImplKind::RustNative).unwrap_err();
+        assert!(err.contains("rust-native"), "{err}");
+        assert!(err.contains("rust-native-lean.md"), "{err}");
+    }
+
+    #[test]
+    fn impl_marker_round_trip() {
+        let dir = tempdir();
+        write_impl_marker(&dir, &ImplKind::Mslean4).unwrap();
+        assert_eq!(read_impl_marker(&dir), Some(ImplKind::Mslean4));
+        // Overwrite with the other value.
+        write_impl_marker(&dir, &ImplKind::RustNative).unwrap();
+        assert_eq!(read_impl_marker(&dir), Some(ImplKind::RustNative));
+    }
+
+    #[test]
+    fn read_impl_marker_absent_returns_none() {
+        let dir = tempdir();
+        assert_eq!(read_impl_marker(&dir), None);
     }
 
     #[test]

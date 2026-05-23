@@ -7,6 +7,86 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — `leo4 create`/`init`/`run --impl <…>` option (2026-05-21)
+
+Surfaces the three-transport landscape (mslean4 / wasm /
+rust-native) at the CLI: every project explicitly declares
+which Lean implementation it targets. Required by 병익's
+review of the post-rename design — "default" choice was
+ambiguous, so make it explicit.
+
+CLI surface:
+
+  • `--impl mslean4`  — reference Lean 4 (`crates/leo4-mslean4`
+    path, `<lean/lean.h>` C ABI shim). The only path that
+    ships today.
+  • `--impl rust-native`  — `leo4-rust-native` adapter path,
+    out-of-tree adapter crate per `SPEC/rust-native-lean.md`.
+    **Currently deferred** — accepting the flag value but
+    erroring with a SPEC pointer.
+  • `--impl rust`  — alias for `rust-native`.
+  • **No default** — `--impl` is required on `leo4 create` /
+    `leo4 init`. clap rejects invocations missing it with a
+    helpful usage message.
+  • **Exactly one value**, by virtue of `--impl` being a
+    single-valued option.
+
+Persistence: `leo4 create` / `leo4 init` write a one-line
+`.leo4-impl` marker file at the project root recording the
+chosen impl. `leo4 run` reads it back (override with
+`--impl`); without it, `leo4 run` errors with a pointer to
+`leo4 init --impl …`.
+
+Mid-project impl switching: `leo4 init` refuses if the
+existing `.leo4-impl` disagrees with the passed `--impl`.
+The user must remove the marker manually if they really
+want to swap. Reason: scaffold differences between impls
+(Cargo.toml deps, lakefile structure) aren't safe to
+mix.
+
+Internals (`crates/leo4-cli/src/main.rs`):
+
+  • New `enum ImplKind { Mslean4, RustNative }`. Not a
+    `clap::ValueEnum` because the `rust` alias needs a
+    custom parser; `parse_impl_kind` handles both
+    spellings.
+  • `check_impl_supported(&kind)`: returns `Err` with a
+    SPEC pointer for `RustNative`, `Ok` for `Mslean4`. Run
+    early in every entry point so the user sees the
+    deferral before any files get written.
+  • `write_impl_marker(dir, kind)` + `read_impl_marker(dir)`:
+    persist the choice across CLI invocations.
+
+Tests (`cargo test -p leo4-cli`): 9 → 16 (+7 new).
+  • parse_impl_kind: canonical names, `rust` alias,
+    unknown rejection with both valid spellings mentioned
+    in error.
+  • check_impl_supported: passes mslean4, rejects
+    rust-native with SPEC pointer.
+  • impl_marker round-trip: write → read → overwrite.
+  • read_impl_marker on absent → None.
+
+Workspace test count: 162 → 169.
+
+End-to-end smoke (manual):
+
+```
+$ leo4 create forward /tmp/x
+error: the following required arguments were not provided:
+  --impl <IMPL>
+
+$ leo4 create forward /tmp/x --impl rust
+leo4: --impl rust-native is currently deferred. The
+integration contract is pinned at `SPEC/rust-native-lean.md`
+§2, but no in-tree scaffolding ships yet — …
+
+$ leo4 create forward /tmp/x --impl mslean4
+leo4 create: x (Forward, impl=mslean4) → "/tmp/x"
+  next: cat /tmp/x/README.md
+$ cat /tmp/x/.leo4-impl
+mslean4
+```
+
 ### Changed — `leo4-native` → `leo4-mslean4` rename (2026-05-21)
 
 Mechanical workspace-wide rename of the "reference Lean 4
