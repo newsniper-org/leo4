@@ -7,6 +7,37 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11o: pattern guards `| pat if cond => …` (2026-05-24)
+
+`MatchArm` gained an `Option<Expr> guard` field; the
+match-arm rule now optionally captures an `if EXPR`
+clause between the pattern and the `=>` arrow:
+
+```lean
+match n with
+| x if x > 0 => "positive"
+| 0 => "zero"
+| n => "negative"
+```
+
+Guard text is captured raw between the `if` keyword
+and `=>` arrow (so the guard's own internal `if … then
+… else` cannot collide with the term-level `if_expr`
+rule), then sub-parsed via `parse_expr_text`. Arms
+without a guard land as `guard: None`.
+
+**Breaking** for direct `MatchArm` constructors — the
+single construction site in the parser updated. Field
+*reads* (`arm.pattern`, `arm.body`) keep working;
+downstream consumers may need to add `_, guard, _` in
+exhaustive destructurings.
+
+Tests 260 → 263 (+3): match_arm_with_guard,
+match_arm_unguarded_has_none_guard,
+match_arm_guard_on_ctor.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11n: `match h : e with` scrutinee binding (2026-05-24)
 
 `Expr::MatchBind { binding, scrutinee, arms }` parses
