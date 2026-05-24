@@ -283,24 +283,61 @@ their blockers.
 ## 6a. C5 musl smoke matrix (separate from Windows)
 
 Run inside an Alpine container (musl-native) or on a
-local distro that ships the musl C toolchain. Verified
-2026-05-24:
+local distro that ships the musl C toolchain.
 
-- **Archlinux**: `pacman -S musl clang` provides
-  `musl-gcc` + `musl-clang` (clang wrapper).
-- **Debian / Ubuntu**: `apt-get install musl-tools
-  clang` for the same pair.
-- **Other distros (Fedora / RHEL / openSUSE / NixOS /
-  Gentoo …)**: not yet verified — open audit item.
-- **Alpine**: musl is the native libc; the toolchain
-  question doesn't apply.
+**Project preference**: `musl-clang` (matches the
+Windows gnullvm single-LLVM-stack policy). `cc-rs`
+picks the compiler via `CC_x86_64_unknown_linux_musl`
+env var.
 
-`cc-rs` picks either compiler via
-`CC_x86_64_unknown_linux_musl` env var; set it
-explicitly when both wrappers are installed and a
-particular one is intended (Project preference:
-`musl-clang`, matching the gnullvm Windows
-single-LLVM-stack policy).
+**Distro setup matrix (verified 2026-05-24)**:
+
+| Distro family | Setup |
+|---|---|
+| Archlinux | `pacman -S musl clang` → `musl-gcc` + `musl-clang` |
+| Debian / Ubuntu | `apt-get install musl-tools clang` → same pair |
+| Alpine | native musl libc — nothing to install |
+| OpenWRT | musl is the default libc since ~2015 — same |
+| Musl-LFS | musl-native LFS — same |
+| openSUSE / SLE | `musl-devel` + `musl-clang` from the `devel:languages:go` OBS repo |
+| Fedora / RHEL | `musl-filesystem` + `musl-devel` + `musl-libc` + `musl-libc-static` + `musl-clang`. **RHEL-family must `dnf install epel-release` first.** |
+| NixOS | not packaged directly — `nix-shell -p pkgsStatic.clangStdenv` ad-hoc, or a `shell.nix`/flake (samples below) |
+| Gentoo | follow the official Gentoo musl handbook |
+| standard LFS (non-Musl-LFS) | manual setup |
+| Mageia / OpenMandriva | **no official support** |
+| Slackware | **no official support** |
+
+**NixOS — `shell.nix` snippet** (one-shot dev shell):
+
+```nix
+{ pkgs ? import <nixpkgs> {} }:
+
+let
+    muslPkgs = pkgs.pkgsStatic;
+in
+muslPkgs.mkShell {
+    nativeBuildInputs = [ muslPkgs.clang ];
+}
+```
+
+**NixOS — flake snippet** (reproducible across machines):
+
+```nix
+{
+    inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    outputs = { self, nixpkgs }: let
+        system = "x86_64-linux";
+        pkgs = import nixpkgs { inherit system; };
+    in {
+        devShells.${system}.default = pkgs.pkgsStatic.mkShell {
+            nativeBuildInputs = [
+                pkgs.pkgsStatic.llvmPackages_20.clang
+            ];
+        };
+    };
+}
+```
 
 ```bash
 rustup target add x86_64-unknown-linux-musl

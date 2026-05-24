@@ -34,22 +34,30 @@ A per-*path* (not per-crate) tier policy split, locked
   (lake is glibc-only).
   Host C toolchain: `musl-clang` (preferred — single
   LLVM stack end-to-end, matches the Windows gnullvm
-  policy in §1) or `musl-gcc`. Verified available
-  2026-05-24 on Debian/Ubuntu (the `musl-tools`
-  package family + `clang` for the LLVM stack) and
-  on Archlinux (the `musl` package + `clang`).
-  Other distros (Fedora / RHEL / openSUSE / NixOS /
-  Gentoo, etc.) are **not yet verified**; the package
-  names + availability are an open audit item for the
-  C1 prep pass. Alpine itself ships musl as its
-  native libc, so the question is moot there.
-  `cc-rs` picks either wrapper via
-  `CC_x86_64_unknown_linux_musl` (or the broader
-  `CC` env var). Two crates depend on this toolchain
-  being installed (`leo4-rust-bridge` via cc-rs C
-  glue, `leo4-wasm` via wasmtime's build.rs); the
-  other 14 musl-supported crates have no
+  policy in §1) or `musl-gcc`. `cc-rs` picks either
+  wrapper via `CC_x86_64_unknown_linux_musl` (or the
+  broader `CC` env var). Two crates depend on this
+  toolchain being installed (`leo4-rust-bridge` via
+  cc-rs C glue, `leo4-wasm` via wasmtime's build.rs);
+  the other 14 musl-supported crates have no
   C-toolchain requirement at all.
+
+  **Distro availability (audited 2026-05-24)**:
+
+  | Distro family | Path |
+  |---|---|
+  | Archlinux | `pacman -S musl clang` (provides `musl-gcc` + `musl-clang`) |
+  | Debian / Ubuntu | `apt-get install musl-tools clang` (same pair) |
+  | Alpine | native musl libc — question moot |
+  | OpenWRT | musl is the default libc since 2015 — question moot |
+  | Musl-LFS | musl-native LFS variant — question moot |
+  | openSUSE / SLE | install `musl-devel` + `musl-clang` from the `devel:languages:go` OBS repo |
+  | Fedora / RHEL | install `musl-filesystem` + `musl-devel` + `musl-libc` + `musl-libc-static` + `musl-clang`. **RHEL-family hosts must `dnf install epel-release` first**, otherwise the musl packages aren't visible. |
+  | NixOS | `musl-clang` is not packaged directly; use `nix-shell -p pkgsStatic.clangStdenv` or a flake / `shell.nix` pointing `nativeBuildInputs` at `pkgsStatic.llvmPackages_*.clang` (see `docs/windows-manual-test-plan.md` §6a for sample snippets) |
+  | Gentoo | follow the official Gentoo musl handbook (Gentoo's profile system handles it differently per-arch) |
+  | Standard LFS (non-Musl-LFS) | manual setup |
+  | Mageia / OpenMandriva | **no official support** |
+  | Slackware | **no official support** |
 - **`*-linux-android*`** is **Tier 2** (v1.x), same
   no-mslean4-no-lake path scope as musl, with the
   additional requirement of NDK toolchain detection
