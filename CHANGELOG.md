@@ -7,6 +7,64 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Post-OX6 CLI refactor chunk 1: `leo4.toml` config module (2026-05-24)
+
+`leo4-cli::config` module — parser + validator for the
+new per-(sub)crate `leo4.toml` config file that
+replaces the `--impl <kind>` flag on `leo4 create` /
+`leo4 init`:
+
+```toml
+[[impl]]
+kind = "mslean4"
+out  = "target/leo4-mslean4"
+
+[[impl]]
+kind = "rust-transpile"
+out  = "target/leo4-rust-transpile"
+```
+
+Schema invariants enforced at `parse_str` / `load_from_dir`:
+
+- At least one `[[impl]]` entry.
+- Each `kind` ∈ `{mslean4, rust-native, rust, rust-transpile}`.
+- All `out` paths (explicit or default
+  `target/leo4-<kind>`) MUST be disjoint.
+
+Diagnostics surface via the `ConfigError` enum
+(`NotFound` / `Io` / `Malformed` / `NoImpls` /
+`UnknownKind(name)` / `OverlappingOut(path)`).
+`render()` produces a TOML string suitable for the
+scaffold writers to emit; round-trips through
+`parse_str`.
+
+Deps: adds `toml = "0.8"` + `serde = "1"` to
+`leo4-cli`. Both are small + standard. The
+hand-rolled line-based parser in `read_cargo_pkg_name`
+stays as-is — it's too narrow to merit a TOML-crate
+dep on its own, but the new config schema (arrays of
+tables) does.
+
+Tests 18 → 30 (+12): 9 parse cases covering single /
+multi-impl / disjoint-out / overlapping-out /
+default-paths / same-kind-collision / empty /
+unknown-kind / rust-alias / malformed-toml; 3 render
+cases covering round-trip + default-out hint. clippy
+clean in `config.rs` (the pre-existing pedantic
+warnings in `main.rs` remain — separate cleanup pass).
+
+**This is chunk 1 of 5**:
+- ✅ 1. Config module + parser + validator + render
+- ⏳ 2. `leo4 create` refactor — drop `--impl`, write
+       `leo4.toml`
+- ⏳ 3. `leo4 create --subcrate` flag
+- ⏳ 4. `leo4 init` refactor — drop `--impl`, write
+       `leo4.toml`
+- ⏳ 5. `leo4 run` — read `leo4.toml`, support
+       `--impl <kind>` as selector when multiple
+       entries present; `.leo4-impl` marker becomes
+       legacy
+
 ### Changed — OX6 step 13d: leo4-parser feature flipped ON by default (2026-05-24)
 
 The `leo4-parser` cargo feature is now in

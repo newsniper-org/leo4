@@ -35,6 +35,11 @@
 
 #![allow(clippy::missing_errors_doc)]
 
+/// Post-OX6 — per-(sub)crate `leo4.toml` config (replaces
+/// the historical `--impl <kind>` CLI flag on `create` /
+/// `init`). See module doc for the file schema.
+pub mod config;
+
 use std::{
     fs,
     io::Write,

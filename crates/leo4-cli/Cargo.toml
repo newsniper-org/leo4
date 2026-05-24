@@ -20,6 +20,13 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+# Post-OX6 CLI refactor — per-(sub)crate `leo4.toml`
+# config file with potentially-multiple `[[impl]]`
+# entries (disjoint output paths). A hand-rolled
+# parser for nested arrays-of-tables is a fragility
+# risk; `toml` + `serde` are tiny + standard.
+toml  = "0.8"
+serde = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true
