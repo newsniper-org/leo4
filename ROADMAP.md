@@ -881,10 +881,16 @@ all wait for the v1.0 RC window or later.
               `Definition` translation (Ident / Lit /
               flat App). Not yet wired into production
               transpile entry points.
-        - 13b. ⏳ Expand translator coverage:
-              Structure / Inductive / Class / Instance /
-              Section / Namespace / Theorem / Axiom /
-              Import / binders / BinOp → App / attrs.
+        - 13b. ✅ Expanded translator coverage (split
+              into 13b-1 through 13b-5):
+              - 13b-1: Theorem / Axiom / Import /
+                Namespace
+              - 13b-2: binders → Pi / Lam
+              - 13b-3: BinOp / UnaryOp → App lowering
+              - 13b-4: Structure / Inductive / Class /
+                Instance
+              - 13b-5: Section / Variable / Open /
+                attributes mapping
         - 13c. ⏳ Wire `transpile_source_to_unit` /
               `transpile_source_to_units` through
               `leo4_translate` behind a feature flag;

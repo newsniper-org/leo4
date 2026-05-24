@@ -37,14 +37,14 @@
 //! shim.
 
 use leo4_lean4_parse::{
-    BinderGroup as L4BinderGroup, BinderKind as L4BinderKind, Ctor as L4Ctor,
-    Decl as L4Decl, DeclKind as L4Kind, Expr as L4Expr,
+    Attribute as L4Attr, BinderGroup as L4BinderGroup, BinderKind as L4BinderKind,
+    Ctor as L4Ctor, Decl as L4Decl, DeclKind as L4Kind, Expr as L4Expr,
     InstanceBody as L4InstanceBody, Literal as L4Lit, StructField as L4Field,
 };
 use oxilean_parse::{
-    Binder as OxBinder, BinderKind as OxBinderKind, Constructor as OxCtor,
-    Decl as OxDecl, FieldDecl as OxField, Literal as OxLit, Located, SortKind,
-    SurfaceExpr as OxExpr,
+    AttributeKind as OxAttr, Binder as OxBinder, BinderKind as OxBinderKind,
+    Constructor as OxCtor, Decl as OxDecl, FieldDecl as OxField, Literal as OxLit,
+    Located, SortKind, SurfaceExpr as OxExpr,
 };
 use oxilean_parse::span_util::dummy_span;
 
@@ -80,7 +80,61 @@ impl std::error::Error for TranslateError {}
 /// the broader "diagnostic quality" non-RC item.
 pub fn translate_decl(d: &L4Decl) -> Result<Located<OxDecl>, TranslateError> {
     let value = translate_decl_kind(&d.kind, &d.univ_params)?;
+    // Attach the leo4 attributes to the translated decl
+    // *if* the decl variant has an `attrs` field. Variants
+    // that don't (Inductive / ClassDecl / InstanceDecl /
+    // Namespace / SectionDecl / Variable / Open / Mutual /
+    // Import) silently drop attrs — oxilean's elab path
+    // re-discovers them through a separate
+    // `Decl::Attribute` wrapping shape that we don't emit
+    // here. Wrapping in an outer `Decl::Attribute` is a
+    // possible follow-up if downstream needs it.
+    let value = attach_attrs(value, &d.attrs);
     Ok(Located::new(value, dummy_span()))
+}
+
+/// Attach leo4 `Attribute`s to the variants that carry an
+/// `attrs: Vec<AttributeKind>` field. Variants without
+/// that field pass through unchanged.
+fn attach_attrs(d: OxDecl, attrs: &[L4Attr]) -> OxDecl {
+    if attrs.is_empty() {
+        return d;
+    }
+    let ox_attrs: Vec<OxAttr> = attrs.iter().map(translate_attr).collect();
+    match d {
+        OxDecl::Definition { name, univ_params, ty, val, where_clauses, .. } => {
+            OxDecl::Definition { name, univ_params, ty, val, where_clauses, attrs: ox_attrs }
+        }
+        OxDecl::Theorem { name, univ_params, ty, proof, where_clauses, .. } => {
+            OxDecl::Theorem { name, univ_params, ty, proof, where_clauses, attrs: ox_attrs }
+        }
+        OxDecl::Axiom { name, univ_params, ty, .. } => {
+            OxDecl::Axiom { name, univ_params, ty, attrs: ox_attrs }
+        }
+        other => other,
+    }
+}
+
+/// Translate a leo4 `Attribute` (name + raw_args) into
+/// oxilean's typed `AttributeKind`. Known attribute names
+/// (`simp` / `ext` / `instance` / `reducible` /
+/// `irreducible` / `inline` / `noinline` / `specialize`)
+/// map to dedicated variants; everything else lands as
+/// `Custom(name)`. `raw_args` is dropped — oxilean's typed
+/// kinds don't carry argument data; downstream attribute
+/// handlers re-parse from the raw form if they need to.
+fn translate_attr(a: &L4Attr) -> OxAttr {
+    match a.name.as_str() {
+        "simp" => OxAttr::Simp,
+        "ext" => OxAttr::Ext,
+        "instance" => OxAttr::Instance,
+        "reducible" => OxAttr::Reducible,
+        "irreducible" => OxAttr::Irreducible,
+        "inline" => OxAttr::Inline,
+        "noinline" => OxAttr::NoInline,
+        "specialize" => OxAttr::SpecializeAttr,
+        _ => OxAttr::Custom(a.name.clone()),
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -231,10 +285,55 @@ fn translate_decl_kind(
                 defs,
             })
         }
-        L4Kind::Section { .. } => Err(TranslateError::Unsupported("Section (lands in 13b-5)")),
+        L4Kind::Section { name, decls } => {
+            // oxilean's `SectionDecl` requires a name —
+            // anonymous leo4 sections (`section` with no
+            // name) get the empty string. Matches Lean 4's
+            // own behaviour for `section ... end` blocks
+            // without a name marker.
+            let mut out = Vec::with_capacity(decls.len());
+            for inner in decls {
+                out.push(translate_decl(inner)?);
+            }
+            Ok(OxDecl::SectionDecl {
+                name: name.clone().unwrap_or_default(),
+                decls: out,
+            })
+        }
         L4Kind::Mutual { .. } => Err(TranslateError::Unsupported("Mutual (deferred)")),
-        L4Kind::Open { .. } => Err(TranslateError::Unsupported("Open (lands in 13b-5)")),
-        L4Kind::Variable { .. } => Err(TranslateError::Unsupported("Variable (lands in 13b-5)")),
+        L4Kind::Open { items, raw_tail } => {
+            // leo4 captures a *list* of opened modules
+            // (`open Foo Bar Baz` → items=[Foo, Bar, Baz]).
+            // oxilean's `Open` decl carries ONE module per
+            // decl. For 13b-5, only single-item opens
+            // translate; multi-item opens would need to
+            // split into multiple decls (caller's job —
+            // not expressible via translate_decl's
+            // 1→1 return). Selective form
+            // (`open Foo (x y)`) and renaming
+            // (`open Foo renaming x → y`) live in
+            // raw_tail and are deferred — translation
+            // returns Unsupported when raw_tail is
+            // non-empty.
+            if items.len() != 1 {
+                return Err(TranslateError::Unsupported(
+                    "Open with 0 or >1 items (caller must split)",
+                ));
+            }
+            if !raw_tail.trim().is_empty() {
+                return Err(TranslateError::Unsupported(
+                    "Open with selective / renaming tail",
+                ));
+            }
+            Ok(OxDecl::Open {
+                path: items[0].split('.').map(str::to_string).collect(),
+                names: Vec::new(),
+            })
+        }
+        L4Kind::Variable { binders } => {
+            let ox_binders = translate_binders(binders)?;
+            Ok(OxDecl::Variable { binders: ox_binders })
+        }
         L4Kind::Dsl { .. }
         | L4Kind::HashCommand { .. }
         | L4Kind::Omit { .. }
@@ -767,6 +866,108 @@ mod tests {
                 assert_eq!(class_name, "Ord");
             }
             other => panic!("expected InstanceDecl, got {other:?}"),
+        }
+    }
+
+    // ─── 13b-5: Section / Variable / Open / attributes ─────
+
+    #[test]
+    fn section_with_inner_decl() {
+        let src = "section Foo\ndef x : T := y\nend Foo";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-5 supports Section").value;
+        match d {
+            OxDecl::SectionDecl { name, decls: inner } => {
+                assert_eq!(name, "Foo");
+                assert_eq!(inner.len(), 1);
+                assert!(matches!(inner[0].value, OxDecl::Definition { ref name, .. } if name == "x"));
+            }
+            other => panic!("expected SectionDecl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anonymous_section_gets_empty_name() {
+        let src = "section\ndef x : T := y\nend";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        match d {
+            OxDecl::SectionDecl { name, .. } => assert_eq!(name, ""),
+            other => panic!("expected SectionDecl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn variable_translates_binders() {
+        let src = "variable (a : Nat)";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-5 supports Variable").value;
+        match d {
+            OxDecl::Variable { binders } => {
+                assert_eq!(binders.len(), 1);
+                assert_eq!(binders[0].name, "a");
+            }
+            other => panic!("expected Variable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_single_module() {
+        let src = "open Foo.Bar";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-5 supports single-item Open").value;
+        match d {
+            OxDecl::Open { path, names } => {
+                assert_eq!(path, vec!["Foo", "Bar"]);
+                assert!(names.is_empty());
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_multi_item_unsupported_in_13b5() {
+        let src = "open Foo Bar Baz";
+        let decls = parse_decls(src).expect("must parse");
+        let err = translate_decl(&decls[0]).expect_err("multi-item Open needs caller to split");
+        assert!(matches!(err, TranslateError::Unsupported(s) if s.contains("Open")));
+    }
+
+    #[test]
+    fn attribute_simp_maps_to_typed_kind() {
+        let src = "@[simp]\ndef x : T := y";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        match d {
+            OxDecl::Definition { attrs, .. } => {
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0], OxAttr::Simp);
+            }
+            other => panic!("expected Definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn attribute_unknown_falls_to_custom() {
+        let src = "@[my_attr]\ndef x : T := y";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { attrs, .. } = d else { panic!("expected Definition") };
+        assert_eq!(attrs[0], OxAttr::Custom("my_attr".to_string()));
+    }
+
+    #[test]
+    fn attribute_dropped_on_variants_without_attrs_field() {
+        // Inductive has no `attrs` field on oxilean. The
+        // translator drops them silently (no panic, no
+        // error) — `Decl::Attribute` wrapping is a
+        // possible follow-up if downstream needs.
+        let src = "@[inline]\ninductive Color where\n  | red";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        match d {
+            OxDecl::Inductive { name, .. } => assert_eq!(name, "Color"),
+            other => panic!("expected Inductive, got {other:?}"),
         }
     }
 

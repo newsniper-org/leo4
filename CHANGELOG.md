@@ -7,6 +7,54 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13b-5: Section / Variable / Open / attributes (2026-05-24)
+
+Remaining straight-mapping Decl shapes + attribute kind
+translation:
+
+- **`Section { name: Option<String>, decls }`** →
+  `OxDecl::SectionDecl { name, decls }`. Anonymous
+  sections get the empty-string name (matches Lean 4's
+  own behaviour for unnamed `section ... end` blocks).
+- **`Variable { binders }`** → `OxDecl::Variable {
+  binders }` (binder translation reuses 13b-2's helper).
+- **`Open { items, raw_tail }`** → `OxDecl::Open { path,
+  names }`. Single-item opens translate (`open Foo.Bar`
+  → `path: ["Foo", "Bar"]`); multi-item opens or
+  selective / renaming forms return `Unsupported` (the
+  caller must split into multiple `Open` decls, which
+  the `translate_decl` 1→1 contract can't express).
+
+Attribute kind mapping: leo4 `Attribute { name, raw_args
+}` → oxilean's typed `AttributeKind`:
+
+- `simp` → `Simp`, `ext` → `Ext`, `instance` →
+  `Instance`, `reducible` → `Reducible`, `irreducible`
+  → `Irreducible`, `inline` → `Inline`, `noinline` →
+  `NoInline`, `specialize` → `SpecializeAttr`.
+- Anything else → `Custom(name)`.
+
+Attributes attach to Decl variants that carry an
+`attrs: Vec<AttributeKind>` field (Definition / Theorem
+/ Axiom). Variants without that field (Inductive /
+Class / Instance / Section / Variable / Open / Mutual /
+Namespace / Import) silently drop attrs — wrapping in
+an outer `Decl::Attribute { attrs, decl }` is a
+follow-up if downstream needs the round-trip.
+
+Tests 25 → 33 (+8): section_with_inner_decl,
+anonymous_section_gets_empty_name,
+variable_translates_binders, open_single_module,
+open_multi_item_unsupported_in_13b5,
+attribute_simp_maps_to_typed_kind,
+attribute_unknown_falls_to_custom,
+attribute_dropped_on_variants_without_attrs_field.
+Workspace lib-test count 145 → 153.
+
+clippy --all-targets -D warnings clean.
+
+**OX6 step 13b complete (13b-1 + 13b-2 + 13b-3 + 13b-4 + 13b-5 combined).**
+
 ### Added — OX6 step 13b-4: Structure / Inductive / Class / Instance (2026-05-24)
 
 `leo4_translate` now covers the type-declaration family:
