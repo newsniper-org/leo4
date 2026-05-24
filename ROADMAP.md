@@ -847,7 +847,7 @@ all wait for the v1.0 RC window or later.
   11p. ✅ `(· + 1)` anonymous fn shorthand (`·` placeholder)
   11q. ✅ Unicode operators (`≤`, `≥`, `≠`, `×`, `÷`,
        `∈`, `∉`, `∪`, `∩`, `⊆`)
-  11r. ⏳ `do for in`, `do while`, `do until` loops
+  11r. ✅ `do for in`, `do while`, `do until` loops
   11s. ⏳ DSL declarations: `notation`, `macro_rules`,
        `syntax`, `elab`, `infix` / `infixl` / `infixr` /
        `prefix` / `postfix`

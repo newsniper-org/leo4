@@ -7,6 +7,34 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11r: do-block loops (`for in` / `while` / `until`) (2026-05-24)
+
+Three new `DoStmt` variants for in-do-block iteration:
+
+- `For { binding, iter, body }` — `for x in xs do BODY`.
+- `While { cond, body }` — `while COND do BODY`.
+- `Until { cond, body }` — `until COND do BODY`.
+
+The iter / cond head is captured raw up to the
+matching `do` keyword (`do` at a word boundary, so
+`double`, `doctest`, etc. don't terminate capture
+early), then sub-parsed via `parse_expr_text`. Body
+is single-line in v1 RC — multi-line bodies need
+layout tracking and follow the same trajectory as
+`do_expr_stmt`'s single-line restriction.
+
+`do_keyword_stmt_boundary` was extended to recognise
+`for` / `while` / `until` at line start so a loop
+statement followed by `let` / `return` / another loop
+on the next line gets cleanly split into separate
+`DoStmt`s.
+
+Tests 263 → 268 (+5): do_for_in_simple, do_while_simple,
+do_until_simple, do_for_then_let,
+do_for_with_complex_iter.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11o: pattern guards `| pat if cond => …` (2026-05-24)
 
 `MatchArm` gained an `Option<Expr> guard` field; the
