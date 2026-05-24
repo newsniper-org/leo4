@@ -962,15 +962,22 @@ all wait for the v1.0 RC window or later.
     tests; regression-guarded against OxiLean upstream
     adding primitives that would silently
     `DuplicateDeclaration`.
-  - **OX5-msl** (mslean4 path): C2 (lake plugin → CLI
-    env handoff). Lake plugin elab is the source of
-    truth; CLI consumes the env via a stable
-    serialisation contract. Only affects users with
-    `[[impl]] kind = "mslean4"` in `leo4.toml` —
-    OxiLean-only users untouched.
+  - **OX5-msl** (mslean4 path) — ✅ NO-OP CLOSED 2026-05-24.
+    Code audit confirmed: all `Environment::new()` /
+    `elaborate_decl` call sites live in
+    `sibling/leo4-oxilean-build/src/` (rust-transpile
+    path only). The mslean4 path uses the **lake
+    plugin's Lean-native elaborator** (`elabCommand`
+    etc.) in an `import Lean` context — `UInt64` / `+`
+    etc. already resolve via Lean's own stdlib. No
+    Rust-side analogue of the OX5 problem exists for
+    mslean4. If a future mslean4 architectural change
+    introduces a Rust-side pre-elab phase, reopen
+    OX5-msl then; today the split is closed without
+    code work.
 
-  Sequencing: OX5-oxi first (no lake dependency,
-  lower risk + faster to ship); OX5-msl after.
+  **OX5 entirely complete 2026-05-24.** v1.0 RC blocker
+  cleared.
 - **OX2** Marshallable matrix expansion (locked 2026-05-22,
   carrier-types layer landed 2026-05-22).
   Built-ins now covered by `synthesize_canonical_wrapper`:
