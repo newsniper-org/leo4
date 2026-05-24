@@ -33,6 +33,10 @@ Cargo.lock.bak
 *.swp
 .DS_Store
 
+# Claude Code per-session state (lock files, local settings).
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
 # Spike scratch — do NOT gitignore SPIKE-*.md findings
 /spike/lake-hook/.lake
 /spike/lake-hook/build
