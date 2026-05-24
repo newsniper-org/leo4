@@ -7,6 +7,83 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 7: multi-line field types + layout-sensitive parsing + full expr re-parse (2026-05-22)
+
+OX6 grammar roadmap step 7. Closes the OX6 step 5
+limitation that `StructField.ty` and `Ctor.ty` were raw
+`String` text — they're now fully parsed `Expr` values
+with multi-line continuation support.
+
+**AST changes**:
+
+```diff
+- pub struct StructField { name: String, ty: String }
++ pub struct StructField { name: String, ty: Expr }
+
+- pub struct Ctor { name: String, ty: Option<String> }
++ pub struct Ctor { name: String, ty: Option<Expr> }
+```
+
+**Layout-sensitive boundary detection**: a new
+`field_or_ctor_boundary` PEG rule decides where one
+field/ctor's type region ends and the next starts. The
+boundary fires when the parser sees, after a newline +
+optional horizontal whitespace, any of:
+
+- next struct field header (`<ident> :` on its own line)
+- next ctor arm (`|` on its own line)
+- `deriving` keyword
+- top-level decl keyword (`def`, `structure`, `inductive`,
+  `@[…]` attribute prefix, etc.)
+- end of file
+
+Same-line content never triggers the boundary, so a field
+header followed by trailing whitespace opens a multi-line
+continuation. The continuation lines can use any
+indentation — capture grabs raw bytes between header and
+boundary.
+
+**Sub-parse with raw fallback**: captured text is fed back
+through `lean4::expr(text)` via a new `parse_expr_text`
+helper. Parse failure falls back to `Expr::Raw(text)` so a
+malformed-but-finite type annotation doesn't abort the
+whole decl.
+
+Example — `Vec (Option Nat)` field type now parses as a
+proper `App(List, Paren(App(Option, Nat)))` tree:
+
+```lean
+structure Big where
+  xs : List
+    (Option
+    Nat)
+  y : Nat
+```
+
+The boundary detection stops `xs`'s capture at `\n  y :`,
+sub-parses `List\n    (Option\n    Nat)` as `expr`, lands
+the App tree. `y`'s type starts fresh.
+
+Tests 71 → 79 (+8): struct-field-type-is-fully-parsed-expr,
+struct-field-type-with-app, struct-field-type-multi-line-
+continuation, struct-field-type-with-arrow, inductive-ctor-
+payload-is-fully-parsed-expr, inductive-ctor-multi-line-
+payload, struct-unparseable-field-falls-back-to-raw (never-
+panic invariant), structure-with-carrier-field-and-deriving.
+
+Existing 6 tests that compared `ty` against `String`
+literals updated to compare against `Expr` values. The two
+`as_deref()` calls in ctor-type tests replaced with `Expr`
+pattern matches.
+
+`lib.rs` top-doc updated to reflect that field / ctor
+types are now fully parsed (the previous "raw `String` in
+v0" caveat removed).
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: `do` notation.
+
 ### Added — OX6 step 6: attribute lists with args (2026-05-22)
 
 OX6 grammar roadmap step 6. Attribute prefix `@[…]` on
