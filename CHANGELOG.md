@@ -7,6 +7,60 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 10a: theorem + lemma + axiom decls (2026-05-22)
+
+OX6 grammar roadmap step 10 — first chunk of the
+remaining `Decl` enum. Three new top-level decl kinds.
+
+**New `DeclKind` variants** (the full step-10 AST landed
+ahead-of-schedule with this commit; grammar for the
+remaining variants is wired in step-10b/c/d):
+
+```rust
+Theorem { name, binders, ty, proof },     // theorem / lemma
+Axiom   { name, binders, ty },             // no body
+Instance { … },                             // 10b
+Class    { … },                             // 10b
+Namespace { … },                            // 10c
+Open      { … },                            // 10d
+Import    { path },                         // 10d
+Variable  { binders },                      // 10d
+Mutual    { decls },                        // 10c
+
+// supporting:
+pub enum InstanceBody { Where(Vec<StructField>), Term(Expr) }
+```
+
+Grammar landed in this commit (10a):
+
+- `theorem NAME [binders]+ : TYPE := PROOF` —
+  proof-shaped def. Same binder grammar as `def`.
+- `lemma NAME [binders]+ : TYPE := PROOF` — surface
+  synonym for `theorem`; both produce
+  `DeclKind::Theorem`.
+- `axiom NAME [binders]+ : TYPE` — no body; declared
+  with type signature only.
+
+**Side effect — `=` (propositional equality) binary op**:
+Lean 4's `a = b` for `Eq a b` needed for theorem
+proofs. Added at the comparison precedence level alongside
+`==` / `!=` / `<` / `>` / `<=` / `>=`. Disambiguated via
+`!"="` lookahead so `==` and `:=` still parse correctly.
+
+`forall` / `∀` quantifier syntax is a separate future
+step (binder-style expr form). Test fixtures avoid
+quantifiers.
+
+Tests 95 → 104 (+9): theorem-simple, lemma-parses-as-
+theorem, theorem-no-binders, axiom-simple, axiom-no-
+binders, axiom-with-binders, theorem-with-attr-prefix,
+axiom-with-attr-prefix, multi-decl-mixed-kinds (def +
+theorem + axiom in one source).
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step 10b: instance + class.
+
 ### Added — OX6 step 9: string interpolation `s!"…{x}…"` (2026-05-22)
 
 OX6 grammar roadmap step 9. Lean 4's string interpolation
