@@ -7,6 +7,30 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11m: `if let` pattern-matching if (2026-05-24)
+
+`Expr::IfLet { pattern, scrutinee, then_branch,
+else_branch }` parses Lean 4's pattern-matching `if`:
+
+```lean
+if let some x := opt then x else 0
+if let .ok v := r then v else fallback
+if let _ := x then 1 else 2
+```
+
+Equivalent to a binary `match`:
+`match SCRUT with | PATTERN => THEN | _ => ELSE`. The
+rule is dispatched **before** plain `if_expr` in the
+atom rule so the `if let pat := …` form is recognised
+without spurious backtracking against
+`if cond then …`.
+
+Tests 253 → 257 (+4): if_let_simple_some,
+if_let_with_dot_ctor, if_let_wildcard,
+plain_if_still_works.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11p: anonymous fn shorthand `(· + 1)` (2026-05-23)
 
 `Expr::DotFn(String)` accepts Lean 4's anonymous
