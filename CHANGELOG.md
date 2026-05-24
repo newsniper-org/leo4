@@ -7,6 +7,30 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11a: block + doc comments (2026-05-22)
+
+OX6 grammar roadmap step 11a — Lean 4 block comments
+`/- … -/` (with arbitrary nesting depth) and doc comments
+`/-- … -/`.
+
+Both forms are recognised by the whitespace-skipping
+machinery: the `_` rule now alternates between
+`whitespace()`, `line_comment()`, and `block_comment()`.
+The block-comment rule uses PEG recursion
+(`block_comment_body = (block_comment() / non-"-/"
+character)*`) so arbitrary nesting works.
+
+Doc comments `/-- … -/` parse as ordinary block comments
+in v0 — semantic attachment to the next decl (e.g. for
+mdoc generation, hover) is OX6 step 11u (deferred).
+
+Tests 148 → 154 (+6): top-level block comment, inline
+block comment in a decl, nested block comment,
+deeply-nested block comment, doc-comment-as-block-comment,
+multi-line block comment.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 10d: open + import + variable decls (2026-05-22)
 
 OX6 grammar roadmap step 10 — fourth chunk. Three new
