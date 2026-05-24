@@ -7,6 +7,37 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13b-1: translator covers Theorem / Axiom / Import / Namespace (2026-05-24)
+
+`leo4_translate::translate_decl` now handles four
+additional Decl shapes:
+
+- `Theorem { name, ty, proof }` (binder-less; binders
+  defer to 13b-2). Maps to `OxDecl::Theorem` with
+  `where_clauses: vec![]`, `attrs: vec![]`.
+- `Axiom { name, ty }` (binder-less). Maps to
+  `OxDecl::Axiom`.
+- `Import { path: String }` → `OxDecl::Import { path:
+  Vec<String> }` (dotted path split on `.`).
+- `Namespace { name, decls }` → recursive translation of
+  inner decls via `translate_decl`.
+
+`translate_decl_kind` signature extended to take
+`univ_params: &[String]` so the wrapper-level univ
+params propagate into all `OxDecl` variants that carry
+a `univ_params` field (Definition / Theorem / Axiom).
+
+Tests 7 → 12 (+5): theorem_with_ident_proof,
+axiom_with_ident_type, import_dotted_path_splits_on_dot,
+namespace_with_one_inner_def,
+univ_params_propagate_into_definition. Plus updated
+the prior `theorem_is_unsupported_in_13a` → renamed +
+narrowed to `theorem_with_binders_unsupported_in_13b1`
+(binders still defer to 13b-2). Workspace lib-test
+count 127 → 132.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 13a: leo4_translate foundation (2026-05-24)
 
 New `leo4-oxilean-build::leo4_translate` module —

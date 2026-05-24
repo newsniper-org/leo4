@@ -76,48 +76,85 @@ impl std::error::Error for TranslateError {}
 /// today; recovering them is future work tracked under
 /// the broader "diagnostic quality" non-RC item.
 pub fn translate_decl(d: &L4Decl) -> Result<Located<OxDecl>, TranslateError> {
-    let value = translate_decl_kind(&d.kind)?;
+    let value = translate_decl_kind(&d.kind, &d.univ_params)?;
     Ok(Located::new(value, dummy_span()))
 }
 
-fn translate_decl_kind(k: &L4Kind) -> Result<OxDecl, TranslateError> {
+fn translate_decl_kind(
+    k: &L4Kind,
+    univ_params: &[String],
+) -> Result<OxDecl, TranslateError> {
     match k {
         L4Kind::Definition { name, binders, ty, value } => {
             if !binders.is_empty() {
                 return Err(TranslateError::Unsupported(
-                    "Definition binders (lands in 13b)",
+                    "Definition binders (lands in 13b-2)",
                 ));
             }
             let ty = match ty {
-                Some(t) => Some(Box::new(translate_expr_located(t)?)),
+                Some(t) => Some(translate_expr_located(t)?),
                 None => None,
             };
-            let val = Box::new(translate_expr_located(value)?);
+            let val = translate_expr_located(value)?;
             Ok(OxDecl::Definition {
                 name: name.clone(),
-                univ_params: Vec::new(),
-                ty: ty.map(|b| *b),
-                val: *val,
+                univ_params: univ_params.to_vec(),
+                ty,
+                val,
                 where_clauses: Vec::new(),
                 attrs: Vec::new(),
             })
         }
+        L4Kind::Theorem { name, binders, ty, proof } => {
+            if !binders.is_empty() {
+                return Err(TranslateError::Unsupported(
+                    "Theorem binders (lands in 13b-2)",
+                ));
+            }
+            Ok(OxDecl::Theorem {
+                name: name.clone(),
+                univ_params: univ_params.to_vec(),
+                ty: translate_expr_located(ty)?,
+                proof: translate_expr_located(proof)?,
+                where_clauses: Vec::new(),
+                attrs: Vec::new(),
+            })
+        }
+        L4Kind::Axiom { name, binders, ty } => {
+            if !binders.is_empty() {
+                return Err(TranslateError::Unsupported(
+                    "Axiom binders (lands in 13b-2)",
+                ));
+            }
+            Ok(OxDecl::Axiom {
+                name: name.clone(),
+                univ_params: univ_params.to_vec(),
+                ty: translate_expr_located(ty)?,
+                attrs: Vec::new(),
+            })
+        }
+        L4Kind::Import { path } => Ok(OxDecl::Import {
+            path: path.split('.').map(str::to_string).collect(),
+        }),
+        L4Kind::Namespace { name, decls } => {
+            let mut out = Vec::with_capacity(decls.len());
+            for inner in decls {
+                out.push(translate_decl(inner)?);
+            }
+            Ok(OxDecl::Namespace { name: name.clone(), decls: out })
+        }
         L4Kind::DefinitionByArms { .. } => {
             Err(TranslateError::Unsupported("DefinitionByArms (no oxilean equivalent)"))
         }
-        L4Kind::Theorem { .. } => Err(TranslateError::Unsupported("Theorem (lands in 13b)")),
-        L4Kind::Axiom { .. } => Err(TranslateError::Unsupported("Axiom (lands in 13b)")),
-        L4Kind::Example { .. } => Err(TranslateError::Unsupported("Example (lands in 13b)")),
-        L4Kind::Structure { .. } => Err(TranslateError::Unsupported("Structure (lands in 13b)")),
-        L4Kind::Class { .. } => Err(TranslateError::Unsupported("Class (lands in 13b)")),
-        L4Kind::Inductive { .. } => Err(TranslateError::Unsupported("Inductive (lands in 13b)")),
-        L4Kind::Instance { .. } => Err(TranslateError::Unsupported("Instance (lands in 13b)")),
-        L4Kind::Namespace { .. } => Err(TranslateError::Unsupported("Namespace (lands in 13b)")),
-        L4Kind::Section { .. } => Err(TranslateError::Unsupported("Section (lands in 13b)")),
-        L4Kind::Mutual { .. } => Err(TranslateError::Unsupported("Mutual (lands in 13b)")),
-        L4Kind::Open { .. } => Err(TranslateError::Unsupported("Open (lands in 13b)")),
-        L4Kind::Import { .. } => Err(TranslateError::Unsupported("Import (lands in 13b)")),
-        L4Kind::Variable { .. } => Err(TranslateError::Unsupported("Variable (lands in 13b)")),
+        L4Kind::Example { .. } => Err(TranslateError::Unsupported("Example (lands in 13b-2)")),
+        L4Kind::Structure { .. } => Err(TranslateError::Unsupported("Structure (lands in 13b-4)")),
+        L4Kind::Class { .. } => Err(TranslateError::Unsupported("Class (lands in 13b-4)")),
+        L4Kind::Inductive { .. } => Err(TranslateError::Unsupported("Inductive (lands in 13b-4)")),
+        L4Kind::Instance { .. } => Err(TranslateError::Unsupported("Instance (lands in 13b-4)")),
+        L4Kind::Section { .. } => Err(TranslateError::Unsupported("Section (lands in 13b-5)")),
+        L4Kind::Mutual { .. } => Err(TranslateError::Unsupported("Mutual (deferred)")),
+        L4Kind::Open { .. } => Err(TranslateError::Unsupported("Open (lands in 13b-5)")),
+        L4Kind::Variable { .. } => Err(TranslateError::Unsupported("Variable (lands in 13b-5)")),
         L4Kind::Dsl { .. }
         | L4Kind::HashCommand { .. }
         | L4Kind::Omit { .. }
@@ -241,11 +278,83 @@ mod tests {
         ));
     }
 
+    // ─── 13b-1 coverage: Theorem / Axiom / Import / Namespace ──
+
     #[test]
-    fn theorem_is_unsupported_in_13a() {
-        let decls = parse_decls("theorem refl : a = a := rfl").expect("must parse");
-        let err = translate_decl(&decls[0]).expect_err("13a does not handle Theorem");
-        assert!(matches!(err, TranslateError::Unsupported(s) if s.contains("Theorem")));
+    fn theorem_with_ident_proof() {
+        // `=` is a binary operator → still Unsupported at
+        // the expression level (BinOp → App lowering lands
+        // in a later 13b sub-step), so use an Ident type.
+        let decls = parse_decls("theorem t : T := proof_term").expect("must parse");
+        let oxdecl = translate_decl(&decls[0]).expect("13b-1 supports Theorem").value;
+        match oxdecl {
+            OxDecl::Theorem { name, ty, proof, where_clauses, .. } => {
+                assert_eq!(name, "t");
+                assert!(matches!(ty.value, OxExpr::Var(ref s) if s == "T"));
+                assert!(matches!(proof.value, OxExpr::Var(ref s) if s == "proof_term"));
+                assert!(where_clauses.is_empty());
+            }
+            other => panic!("expected Theorem, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn axiom_with_ident_type() {
+        let decls = parse_decls("axiom em : T").expect("must parse");
+        let oxdecl = translate_decl(&decls[0]).expect("13b-1 supports Axiom").value;
+        match oxdecl {
+            OxDecl::Axiom { name, ty, .. } => {
+                assert_eq!(name, "em");
+                assert!(matches!(ty.value, OxExpr::Var(ref s) if s == "T"));
+            }
+            other => panic!("expected Axiom, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn import_dotted_path_splits_on_dot() {
+        let decls = parse_decls("import Foo.Bar.Baz").expect("must parse");
+        let oxdecl = translate_decl(&decls[0]).expect("13b-1 supports Import").value;
+        match oxdecl {
+            OxDecl::Import { path } => {
+                assert_eq!(path, vec!["Foo", "Bar", "Baz"]);
+            }
+            other => panic!("expected Import, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn namespace_with_one_inner_def() {
+        let src = "namespace Foo\ndef x : T := y\nend Foo";
+        let decls = parse_decls(src).expect("must parse");
+        let oxdecl = translate_decl(&decls[0]).expect("13b-1 supports Namespace").value;
+        match oxdecl {
+            OxDecl::Namespace { name, decls: inner } => {
+                assert_eq!(name, "Foo");
+                assert_eq!(inner.len(), 1);
+                assert!(matches!(inner[0].value, OxDecl::Definition { ref name, .. } if name == "x"));
+            }
+            other => panic!("expected Namespace, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn univ_params_propagate_into_definition() {
+        let decls = parse_decls("def f.{u} : T := y").expect("must parse");
+        let oxdecl = translate_decl(&decls[0]).expect("must translate").value;
+        match oxdecl {
+            OxDecl::Definition { univ_params, .. } => {
+                assert_eq!(univ_params, vec!["u".to_string()]);
+            }
+            other => panic!("expected Definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn theorem_with_binders_unsupported_in_13b1() {
+        let decls = parse_decls("theorem t (h : T) : U := h").expect("must parse");
+        let err = translate_decl(&decls[0]).expect_err("binders defer to 13b-2");
+        assert!(matches!(err, TranslateError::Unsupported(s) if s.contains("binders")));
     }
 
     #[test]
