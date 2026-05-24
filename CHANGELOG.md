@@ -7,6 +7,79 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 5: `structure` + `inductive` + `deriving` (2026-05-22)
+
+OX6 grammar roadmap step 5. Three new `Decl` variants
+(top-level decl set goes from 1 → 3 kinds) plus dedicated
+field / ctor AST types.
+
+**New `DeclKind` variants**:
+
+```rust
+pub enum DeclKind {
+    Definition { … },
+    Structure {
+        name: String,
+        extends: Vec<String>,
+        fields: Vec<StructField>,
+        deriving: Vec<String>,
+    },
+    Inductive {
+        name: String,
+        ty: Option<Expr>,
+        ctors: Vec<Ctor>,
+        deriving: Vec<String>,
+    },
+}
+
+pub struct StructField { name: String, ty: String }
+pub struct Ctor       { name: String, ty: Option<String> }
+```
+
+Surface coverage:
+
+- `structure NAME [extends BASE1, BASE2] where FIELDS
+  [deriving Foo, Bar]` — fields one-per-line, comma-list
+  for `extends` + `deriving`.
+- `inductive NAME [: TYPE] [where] | CTOR1 [: T1] | CTOR2
+  [: T2] [deriving Foo]` — two surface forms fed into the
+  same AST:
+  - Lean 4 modern: `inductive Color where | red | green
+    | blue` (no annotations).
+  - OxiLean older: `inductive Color : Type | red : Color
+    | green : Color | blue : Color` (explicit ctor types).
+  - Bare ctor lines (`| red`) get `ty: None`; the
+    elaborator supplies the inductive type itself.
+- `deriving Foo, Bar, Baz` clause shared by both decl
+  kinds.
+
+**Limitation**: structure field & ctor type annotations
+are captured as raw `String` text in this v0 — full
+expression re-parsing requires either layout-sensitive
+parsing (Lean 4 fields are layout-delimited) or a separate
+inline-expr grammar. Follow-up commit will handle the
+type-expr lift; until then downstream consumers re-parse
+the `String` themselves if needed.
+
+Tests 51 → 62 (+11): structure-basic, structure-with-
+deriving, structure-with-extends, structure-with-multi-
+extends, inductive-where-form-all-bare, inductive-where-
+form-mixed-annotations (bare + annotated mixed in one
+inductive), inductive-oxilean-form-explicit-type-annot,
+inductive-with-deriving, multi-decl-with-struct-and-def,
+deriving-single-class, struct-zero-fields.
+
+A `_h()` (horizontal-only whitespace, no newline) rule was
+added to the grammar so single-line field / ctor type-text
+capture has an exact line-end boundary.
+
+`lib.rs` top-doc grammar-coverage comment updated to reflect
+the v0.5 surface.
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: attribute lists (with args).
+
 ### Added — OX6 step 4: lambda + `fun` / `λ` (2026-05-22)
 
 OX6 grammar roadmap step 4. New atom `Expr::Lam(binders,
