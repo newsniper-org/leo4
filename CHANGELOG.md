@@ -7,6 +7,72 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 2: expression grammar with operator precedence (2026-05-22)
+
+OX6 grammar roadmap step 2 — replaces the v0 `Expr::Raw`
+catch-all in type / value positions with a real precedence-
+climbing expression grammar built via `peg`'s
+`precedence!` macro.
+
+New `Expr` variants:
+
+```rust
+pub enum Expr {
+    Ident(String),               // includes dotted forms
+                                 //   (`Nat.succ`)
+    Lit(Literal),                // Nat / Str
+    App(Box<Expr>, Box<Expr>),   // left-assoc fn app
+    BinOp(String, Box<Expr>, Box<Expr>),
+    UnaryOp(String, Box<Expr>),
+    Paren(Box<Expr>),
+    Raw(String),                 // catch-all fallback
+}
+
+pub enum Literal {
+    Nat(u64),
+    Str(String),                 // \\n \\t \\r \\\\ \\" \\0 escapes resolved
+}
+```
+
+Precedence ladder (low → high, matches Lean 4 / Mathlib):
+
+  25  `->` / `→`   arrow (right-assoc) ─ lowest
+  30  `||`
+  35  `&&`
+  50  `==` `!=` `<=` `>=` `<` `>`
+  65  `+` `-`
+  70  `*` `/` `%`
+  75  `^`           (right-assoc)
+  90  unary `-` `!` `¬`
+  max function application (left-assoc)
+   —  atoms (literals / idents / parens)
+
+Both ASCII (`->`) and Unicode (`→`) arrow accepted.
+Application binds tightest among non-atom forms, so
+`Nat.succ a b` = `App(App(Nat.succ, a), b)`. The arrow is
+the *lowest*-precedence binary, so `T1 + T2 -> R` =
+`(T1 + T2) -> R`.
+
+The type / value positions in `def` now share one
+expression grammar (Lean 4 unifies these), making
+`def f (xs : List (Option Nat)) : Nat := xs` parse to
+`App(List, Paren(App(Option, Nat)))` for the binder type
+rather than the v0 `Raw("List (Option Nat)")`.
+
+Tests 10 → 25 (+15 expression-grammar tests): nat / string
+literal, dotted ident, app left-assoc, add left-assoc,
+mul-binds-tighter-than-add, pow right-assoc, cmp-below-add,
+arrow right-assoc, arrow-lowest-precedence, unicode arrow
+equivalence, paren preservation, unary minus, logical
+and/or precedence, real fixture (`Nat.succ a`), pre-existing
+fixtures still pass with updated expectations (the
+header-binder + add tests now compare against `BinOp` /
+`Ident` / `Lit` instead of the v0 `Raw`).
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: `if-then-else` + `match` arms with patterns.
+
 ### Added — OX6: `leo4-lean4-parse` PEG-based Lean 4 parser scaffold (2026-05-22)
 
 OX6 — new v1.0 RC blocker tackled via fork-from-scratch.
