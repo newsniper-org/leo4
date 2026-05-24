@@ -7,6 +7,26 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11v: omit / include section-variable management (2026-05-23)
+
+Two new `DeclKind` variants for Lean 4's section-scoped
+variable management:
+
+- `Omit { items: Vec<String> }` — `omit x y z`. Locally
+  drops named section variables from the surrounding
+  `section` scope.
+- `Include { items: Vec<String> }` — `include foo`.
+  Re-introduces previously omitted (or otherwise
+  unreferenced) section variables.
+
+Each accepts a whitespace-separated list of ident-raw
+names (dotted paths like `Foo.Bar` allowed).
+
+Tests 243 → 248 (+5): omit_single, omit_multiple,
+include_single, include_multiple, omit_dotted_ident.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11t: debug / diagnostic # commands (2026-05-23)
 
 `DeclKind::HashCommand { cmd, raw_args }` accepts the
