@@ -7,6 +7,26 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11j: `@` explicit args marker (2026-05-22)
+
+New `Expr::At(Box<Expr>)` variant + grammar atom for
+Lean 4's `@`-prefixed explicit-args marker. Prefixing a
+name with `@` switches the elaborator from implicit /
+instance-resolving mode to "supply every argument
+explicitly".
+
+Surface: `@id`, `@id Nat 0`, `@Nat.succ`, `@(foo + bar)`
+(any atom can be wrapped). The `!"["` lookahead rejects
+`@[…]` (attribute prefix), though that pattern only
+appears in decl position and never in atom position; the
+lookahead is a regression guard.
+
+Tests 171 → 176 (+5). Existing `@[simp] def f` attribute
+prefix tests still pass — no collision between the two
+`@` uses.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11b: anonymous ctor `⟨a, b⟩` (2026-05-22)
 
 New `Expr::AnonCtor(Vec<Expr>)` variant + grammar atom
