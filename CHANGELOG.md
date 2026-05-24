@@ -7,6 +7,38 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11s-a: fixity decls (infix / infixl / infixr / prefix / postfix) (2026-05-24)
+
+New `DeclKind::Dsl { kind: DslKind, raw: String }`
+variant carries Lean 4's parser-extending decls. The
+`DslKind` enum has variants for the upcoming DSL family;
+this commit lands the five **fixity** variants:
+
+- `Infix` — `infix:NN " op " => target`.
+- `Infixl` — left-assoc.
+- `Infixr` — right-assoc.
+- `Prefix`.
+- `Postfix`.
+
+The header + body are captured raw to end of line —
+fixity decls are single-line in idiomatic Lean 4.
+`word_boundary` is checked inside each alternative of
+`fixity_kind` so `infixl` / `infixr` / `infix` don't
+collide (`infix` is a prefix of `infixl` lexically;
+PEG ordered choice with word_boundary inside each arm
+disambiguates).
+
+Interoperates with the 11u doc-comment + attribute /
+modifier prefix machinery — fixity decls accept the
+same `/-- … -/` / `@[…]` / modifier prefixes as any
+other top-level decl.
+
+Tests 277 → 282 (+5): fixity_infixl, fixity_infixr,
+fixity_infix_disambiguates_from_infixl,
+fixity_prefix_postfix, fixity_with_doc_prefix.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11w: equational pattern-matching `def` (2026-05-24)
 
 New `DeclKind::DefinitionByArms { name, binders, ty,
