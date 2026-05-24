@@ -53,7 +53,7 @@ A per-*path* (not per-crate) tier policy split, locked
   | Musl-LFS | musl-native LFS variant — question moot |
   | openSUSE / SLE | install `musl-devel` + `musl-clang` from the `devel:languages:go` OBS repo |
   | Fedora / RHEL | install `musl-filesystem` + `musl-devel` + `musl-libc` + `musl-libc-static` + `musl-clang`. **RHEL-family hosts must `dnf install epel-release` first**, otherwise the musl packages aren't visible. |
-  | NixOS | `musl-clang` is not packaged directly; use `nix-shell -p pkgsStatic.clangStdenv` or a flake / `shell.nix` pointing `nativeBuildInputs` at `pkgsStatic.llvmPackages_*.clang` (see `docs/windows-manual-test-plan.md` §6a for sample snippets) |
+  | NixOS | `musl-clang` is not packaged directly; use `nix-shell -p pkgsStatic.clangStdenv` or a flake / `shell.nix` pointing `nativeBuildInputs` at `pkgsStatic.llvmPackages_*.clang` (see `docs/windows-manual-test-plan.md` §6a for sample snippets — but **look up the latest Nixpkgs idiom yourself before copy-pasting**; the API moves and our snippet may lag behind upstream) |
   | Gentoo | follow the official Gentoo musl handbook (Gentoo's profile system handles it differently per-arch) |
   | Standard LFS (non-Musl-LFS) | manual setup |
   | Mageia / OpenMandriva | **no official support** |

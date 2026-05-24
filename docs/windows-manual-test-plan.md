@@ -307,6 +307,17 @@ env var.
 | Mageia / OpenMandriva | **no official support** |
 | Slackware | **no official support** |
 
+> **Heads-up for NixOS users**: the snippets below
+> reflect the Nixpkgs API as of 2026-05-24. Nixpkgs
+> moves quickly — `pkgsStatic`, `llvmPackages_N`, and
+> the `mkShell`/`clangStdenv` surface have all
+> renamed before. **Look up the current Nixpkgs idiom
+> in the NixOS / Nixpkgs manual + the
+> `nixos-unstable` channel's recent changelog before
+> copy-pasting**; treat the snippets here as a
+> starting reference, not a guaranteed-working
+> recipe.
+
 **NixOS — `shell.nix` snippet** (one-shot dev shell):
 
 ```nix
