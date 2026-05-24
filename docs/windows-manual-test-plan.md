@@ -1,9 +1,15 @@
-# Windows Manual Test Plan — C1 prelim
+# Cross-platform Manual Test Plan — C1 (Windows) + C5 (musl) prelim
 
 > Drafted 2026-05-24. Companion to `OS-PORTABILITY.md`.
 > Captures the pre-flight audit + actionable test matrix
-> for the VirtualBox + Windows 11 Pro manual verification
-> pass that precedes the Tier 2 CI infra (C1).
+> for two v1.0 RC blockers:
+>
+> - **C1 (Windows Tier 2)**: VirtualBox + Windows 11 Pro
+>   manual verification pass that precedes Tier 2 CI.
+> - **C5 (musl Tier 1+, no-mslean4-no-lake paths only)**:
+>   Alpine container or static-binary smoke test for the
+>   rust-transpile / scaffold-only / pure-Rust crate
+>   surface. (Android = C6, deferred to v1.x.)
 
 ## 0. Goal
 
@@ -273,6 +279,82 @@ windows-latest]` running `cargo build` + the subset of
 `cargo test` that doesn't need lake. lake-driven jobs
 (T5 / T6 / T7) follow once the manual pass closes
 their blockers.
+
+## 6a. C5 musl smoke matrix (separate from Windows)
+
+Run inside an Alpine container (musl-native) or on a
+local distro that ships the musl C toolchain. Verified
+2026-05-24:
+
+- **Archlinux**: `pacman -S musl clang` provides
+  `musl-gcc` + `musl-clang` (clang wrapper).
+- **Debian / Ubuntu**: `apt-get install musl-tools
+  clang` for the same pair.
+- **Other distros (Fedora / RHEL / openSUSE / NixOS /
+  Gentoo …)**: not yet verified — open audit item.
+- **Alpine**: musl is the native libc; the toolchain
+  question doesn't apply.
+
+`cc-rs` picks either compiler via
+`CC_x86_64_unknown_linux_musl` env var; set it
+explicitly when both wrappers are installed and a
+particular one is intended (Project preference:
+`musl-clang`, matching the gnullvm Windows
+single-LLVM-stack policy).
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+
+# 14 verified-musl-clean crates: pass without any C
+# toolchain (these have no cc-rs / build.rs C glue).
+cargo build --target x86_64-unknown-linux-musl \
+    -p schema-idl -p leo4-idl -p leo4-abi -p leo4-build \
+    -p leo4-macros -p leo4-macros-backend -p leo4c \
+    -p leo4-rust-emit -p leo4-cli -p leo4-rust-worker \
+    -p leo4-mslean4 -p leo4
+# Sibling crates.
+cd sibling/leo4-oxilean-build && \
+    cargo build --target x86_64-unknown-linux-musl
+cd ../leo4-lean4-parse && \
+    cargo build --target x86_64-unknown-linux-musl
+
+# With `musl-gcc` available (Arch: pacman -S musl):
+CC_x86_64_unknown_linux_musl=musl-gcc \
+    cargo build --target x86_64-unknown-linux-musl \
+        -p leo4-rust-bridge -p leo4-wasm
+
+# Or with `musl-clang` available:
+CC_x86_64_unknown_linux_musl=musl-clang \
+    cargo build --target x86_64-unknown-linux-musl \
+        -p leo4-rust-bridge -p leo4-wasm
+
+# Smoke: actually run leo4-oxilean-build under musl
+# against a fixture manifest.
+./target/x86_64-unknown-linux-musl/debug/leo4-oxilean-build \
+    --manifest tests/fixtures/musl-smoke.manifest
+```
+
+**Don't try** under musl:
+- `leo4 run --impl mslean4` — Lean's shipped
+  `libleanshared` is glibc.
+- Anything driving `lake build` — lake is glibc.
+
+CI matrix row (skeleton, Ubuntu runner verified):
+```yaml
+- target: x86_64-unknown-linux-musl
+  os: ubuntu-latest
+  setup: |
+    # Both wrappers ship via the musl-tools + clang
+    # Debian packages. Prefer musl-clang (matches the
+    # gnullvm Windows single-LLVM-stack policy);
+    # musl-gcc works too.
+    sudo apt-get install -y musl-tools clang
+  env:
+    CC_x86_64_unknown_linux_musl: musl-clang
+  build: |
+    cargo build --target x86_64-unknown-linux-musl \
+      --workspace
+```
 
 ## 6. VirtualBox-specific tips
 

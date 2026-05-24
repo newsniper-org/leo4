@@ -7,15 +7,57 @@
 
 ## 0. Why this document exists
 
-leo4 v0.1.0 runs end-to-end on Tier 1 (x86_64 Linux). macOS is
-Tier 3 (best-effort, no CI) and Windows is Tier 2 (feature parity
-expected, periodic CI). The codebase has accumulated a handful of
-Linux-shaped assumptions (`.so` extension, `-Wl,-rpath`,
+leo4 v0.1.0 runs end-to-end on Tier 1 (x86_64 Linux **glibc**).
+macOS is Tier 3 (best-effort, no CI) and Windows is Tier 2 (feature
+parity expected, periodic CI). The codebase has accumulated a
+handful of Linux-shaped assumptions (`.so` extension, `-Wl,-rpath`,
 `__attribute__((visibility))`, etc.) in scattered places. As
 Phase 9 introduces a deliberate spawn / IPC abstraction layer
 (`SPEC/reverse-direction.md` §4.4), it makes sense to make the
 same abstraction discipline a leo4-wide policy and to inventory
 where current OS branches live.
+
+### 0.1 Linux variants — musl + Android (per-path tier policy, 2026-05-24)
+
+A per-*path* (not per-crate) tier policy split, locked
+2026-05-24:
+
+- **`*-linux-musl*`** is **Tier 1+** (v1.0 RC mandatory)
+  for paths with **no `leo4-mslean4` and no lake
+  dependency**: the rust-transpile (OxiLean-only) end-
+  to-end, the scaffold-only CLI commands, and every
+  pure-Rust crate. Excluded paths: `leo4-mslean4`
+  runtime (Lean ships glibc-built `libleanshared` —
+  musl process cannot dlopen it under the same ABI),
+  the umbrella `leo4` crate when used with the
+  mslean4 backend, and anything that invokes `lake`
+  (lake is glibc-only).
+  Host C toolchain: `musl-clang` (preferred — single
+  LLVM stack end-to-end, matches the Windows gnullvm
+  policy in §1) or `musl-gcc`. Verified available
+  2026-05-24 on Debian/Ubuntu (the `musl-tools`
+  package family + `clang` for the LLVM stack) and
+  on Archlinux (the `musl` package + `clang`).
+  Other distros (Fedora / RHEL / openSUSE / NixOS /
+  Gentoo, etc.) are **not yet verified**; the package
+  names + availability are an open audit item for the
+  C1 prep pass. Alpine itself ships musl as its
+  native libc, so the question is moot there.
+  `cc-rs` picks either wrapper via
+  `CC_x86_64_unknown_linux_musl` (or the broader
+  `CC` env var). Two crates depend on this toolchain
+  being installed (`leo4-rust-bridge` via cc-rs C
+  glue, `leo4-wasm` via wasmtime's build.rs); the
+  other 14 musl-supported crates have no
+  C-toolchain requirement at all.
+- **`*-linux-android*`** is **Tier 2** (v1.x), same
+  no-mslean4-no-lake path scope as musl, with the
+  additional requirement of NDK toolchain detection
+  in `cc-rs`-consuming crates.
+- All other Linux glibc targets (`x86_64-unknown-linux-gnu`,
+  `aarch64-unknown-linux-gnu`) remain Tier 1 as before
+  — *no* path exclusions; they are the canonical leo4
+  runtime environment.
 
 This is the home for both.
 

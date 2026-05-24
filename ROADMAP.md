@@ -676,6 +676,27 @@ all wait for the v1.0 RC window or later.
 - **C1** Windows runtime CI matrix. Code compiles clean
   against `*-pc-windows-gnullvm`; runtime verification
   waits for CI infra.
+- **C5** `*-linux-musl*` Tier 1+ support for paths
+  with **no `leo4-mslean4` and no lake dependency**
+  (locked 2026-05-24). Concretely: the rust-transpile
+  (OxiLean-only) end-to-end, the scaffold-only CLI
+  commands, and every pure-Rust crate. Audit verified
+  2026-05-24: 14 crates build clean under
+  `--target x86_64-unknown-linux-musl` with no extra
+  setup (schema-idl, leo4-idl, leo4-abi, leo4-build,
+  leo4-macros, leo4-macros-backend, leo4c,
+  leo4-rust-emit, leo4-cli, leo4-rust-worker,
+  leo4-mslean4 *compile-only — runtime needs glibc*,
+  leo4 *compile-only*, sibling/leo4-oxilean-build,
+  sibling/leo4-lean4-parse); 2 crates need a musl C
+  toolchain (`musl-clang` or `musl-gcc` — `cc-rs`
+  picks either via `CC_x86_64_unknown_linux_musl`)
+  installed on the host (leo4-rust-bridge via cc-rs
+  C glue, leo4-wasm via wasmtime build.rs); the
+  leo4-mslean4 runtime path is excluded (Lean ships
+  glibc-built libleanshared → musl process can't
+  dlopen it). Remaining work: CI matrix row + manual
+  verification + docs.
 - **G2** Publish to crates.io. API surface stabilises
   through Phase 10 first.
 - **OX1** `leo4-oxilean-build` invocation wiring (locked
@@ -1015,6 +1036,14 @@ all wait for the v1.0 RC window or later.
 - B2 ConstraintExpr<Atom> typed AST.
 - B3 async reverse exports.
 - C2 macOS Tier 1 promotion / C3 wasm64 sibling project.
+- **C6** `*-linux-android*` Tier 2 support — sibling
+  policy to C5 (musl, RC blocker). Same
+  no-mslean4-no-lake scope (rust-transpile + scaffold
+  + pure-Rust crates). Requires NDK toolchain
+  detection in `cc-rs`-using crates; cross-compile
+  matrix expands to `aarch64-linux-android` +
+  `armv7-linux-androideabi` + `x86_64-linux-android`
+  + `i686-linux-android` at minimum. Locked 2026-05-24.
 - D3 VS Code extension.
 - D4 logicutils removal in favor of native
   `buildFileUnlessUpToDate'`.
