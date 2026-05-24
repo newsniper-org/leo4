@@ -7,6 +7,32 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11n: `match h : e with` scrutinee binding (2026-05-24)
+
+`Expr::MatchBind { binding, scrutinee, arms }` parses
+Lean 4's match scrutinee-binding form:
+
+```lean
+match h : opt with
+| some x => x
+| none => 0
+```
+
+Inside each arm body, `h` is the equality proof
+`h : SCRUT = PATTERN` — surfaces by parsing the
+binding ident only, leaving the proof semantics to the
+elaborator. Sibling of `Expr::Match`; existing
+`Match`-consumers keep working without migration.
+
+The bind-form is dispatched before plain `match … with`
+via PEG ordered choice; the `IDENT ":" !"="` lookahead
+distinguishes `match h : e with` from `match e with`.
+
+Tests 257 → 260 (+3): match_bind_simple,
+plain_match_still_works, match_bind_with_dot_ctor_arm.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11m: `if let` pattern-matching if (2026-05-24)
 
 `Expr::IfLet { pattern, scrutinee, then_branch,
