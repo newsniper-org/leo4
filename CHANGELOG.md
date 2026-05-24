@@ -7,6 +7,52 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 10c: namespace + section + mutual blocks (2026-05-22)
+
+OX6 grammar roadmap step 10 — third chunk. Three new
+top-level decl kinds for scoping / grouping.
+
+**Surface coverage**:
+
+- `namespace NAME … end [NAME]` — scoped block; inner
+  decls get the namespace prefix at elab time. Trailing
+  `end` name is optional (parser doesn't enforce
+  matching; elab handles it).
+- `namespace Foo.Bar` — qualified namespace names.
+- `section [NAME] … end [NAME]` — like namespace but
+  doesn't add a prefix; scopes `variable` decls + opens.
+  Anonymous form `section … end` also accepted.
+- `mutual … end` — block of mutually-recursive decls.
+  Bare `end` terminator (mutual blocks aren't named).
+
+**AST**:
+
+- `DeclKind::Section { name: Option<String>, decls: Vec<Decl> }`
+  added (Namespace + Mutual already in the step-10a
+  ahead-of-schedule AST batch).
+
+Grammar uses PEG mutual recursion (decl rule references
+namespace/section/mutual rules which reference back to
+decl) to support nested blocks. Tests verify:
+
+- Nested namespaces (`namespace Outer / namespace Inner /
+  end Inner / end Outer`).
+- Mixed inner decl kinds (structure + inductive inside a
+  namespace).
+- Attribute prefix on mutual blocks (`@[macro_inline]
+  mutual …`).
+- Empty namespaces.
+
+Tests 124 → 134 (+10): namespace-with-inner-decls,
+namespace-end-without-name, namespace-dotted-name,
+section-anonymous, section-named, mutual-two-decls,
+nested-namespaces, namespace-contains-structure-and-
+inductive, mutual-with-attr-prefix, empty-namespace.
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step 10d: open + import + variable.
+
 ### Changed — OX6 plan expanded to ~25 sub-steps, all v1.0 RC mandatory (2026-05-22)
 
 병익's directive (2026-05-22): rather than ship OX6 in
