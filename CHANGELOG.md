@@ -7,6 +7,38 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11c: modifier prefixes + abbrev (2026-05-22)
+
+`Decl` gained a `modifiers: Vec<String>` field for Lean 4
+decl-keyword modifier prefixes:
+
+- `private`, `protected` — visibility
+- `noncomputable` — non-computable definitions
+- `partial` — partial recursion (no termination check)
+- `unsafe` — relaxed elaboration
+
+Multiple modifiers allowed in any order (e.g.
+`private noncomputable def`).
+
+**`abbrev` alias**: `abbrev NAME := …` surfaces as
+`DeclKind::Definition` with `"abbrev"` in `modifiers`
+(Lean 4 desugars `abbrev` to a reducible `def` at elab).
+Universe params + attribute prefix work on `abbrev` too.
+
+Grammar wires this via a new `modifier_keyword()` rule
+called as a prefix in the `decl()` wrapper. Prefix
+modifiers precede inner-decl modifiers (the synthetic
+`"abbrev"` from `abbrev_decl`) so combined examples like
+`@[simp] private abbrev …` yield `modifiers: ["private",
+"abbrev"]`.
+
+Tests 185 → 195 (+10): partial / noncomputable / private
+/ protected / unsafe def, combined `private noncomputable`,
+attr+modifier mix, abbrev → Definition + `"abbrev"` tag,
+abbrev with universe param, no-modifier regression.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11i: universe annotation `.{u, v}` (2026-05-22)
 
 `Decl` gained a `univ_params: Vec<String>` field for the
