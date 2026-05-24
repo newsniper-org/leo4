@@ -7,6 +7,20 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11b: anonymous ctor `⟨a, b⟩` (2026-05-22)
+
+New `Expr::AnonCtor(Vec<Expr>)` variant + grammar atom
+for Lean 4's Unicode-angle-bracket shorthand. `⟨1, 2⟩`
+elaborates to the unique constructor of the expected
+type's single-ctor inductive (e.g. `Point.mk 1 2`).
+
+Surface: `⟨a, b⟩`, `⟨42⟩`, `⟨⟩` (empty), nested
+`⟨⟨1, 2⟩, ⟨3, 4⟩⟩`, complex element exprs
+`⟨a + b, fun n => n⟩`. The element grammar is the full
+expr (precedence ladder, lambda, etc.).
+
+Tests 165 → 171 (+6). clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11g: anonymous structure literal `{ x := 1, y := 2 }` (2026-05-22)
 
 New `Expr::AnonStruct(Vec<(String, Expr)>)` variant +
