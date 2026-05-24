@@ -7,6 +7,19 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11k: `example` anonymous theorem (2026-05-22)
+
+New `DeclKind::Example { binders, ty, proof }` variant
++ grammar rule. `example : T := proof` is Lean 4's
+anonymous-theorem form — smoke-tests a proof without
+binding a name.
+
+Surface: no binders, with binders, with attribute prefix,
+with quantifier in the type (`example : forall n, n = n
+:= fun n => rfl`).
+
+Tests 195 → 199 (+4). clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11c: modifier prefixes + abbrev (2026-05-22)
 
 `Decl` gained a `modifiers: Vec<String>` field for Lean 4
