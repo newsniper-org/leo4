@@ -24,6 +24,13 @@ nightly-floats = ["leo4-abi/nightly-floats"]
 # leo4 IDL + canonical-ABI + LeanProc/LeanProcInvoker contract.
 leo4-abi = { path = "../../crates/leo4-abi" }
 
+# OX6 step 13 — PEG-based Lean 4 parser. Translator lives in
+# the `leo4_translate` module; production wiring lands across
+# 13a (foundation) → 13b–13c (translator coverage + wiring) →
+# 13d (default switchover). oxilean-parse stays as the
+# fallback parser path until 13d.
+leo4-lean4-parse = { path = "../leo4-lean4-parse" }
+
 # OxiLean toolchain layered up to codegen. The transpile
 # pipeline:
 #   oxilean-parse  → parse Lean source

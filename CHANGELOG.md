@@ -7,6 +7,42 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13a: leo4_translate foundation (2026-05-24)
+
+New `leo4-oxilean-build::leo4_translate` module —
+translator from `leo4_lean4_parse`'s Decl/Expr AST into
+`oxilean_parse`'s `Decl` / `SurfaceExpr` AST. Foundation
+commit; production wiring lands in 13b–13d.
+
+This commit's coverage:
+
+- `Definition { name, value, ty: Option<_> }` with
+  binder-less signatures. Expression subset:
+  `Expr::Ident`, `Expr::Lit(Nat/Str/Float)`,
+  `Expr::App`, `Expr::Paren`.
+- Every other Decl variant + `Expr::BinOp` return
+  `TranslateError::Unsupported(diag_text)` —
+  step-13b/13c work expands.
+- DSL / HashCommand / Omit / Include / DefinitionByArms
+  return `Unsupported` *permanently* — they have no
+  oxilean-parse equivalent. Consumers needing those
+  surfaces operate on the leo4-lean4-parse AST
+  directly.
+
+Dep: adds `leo4-lean4-parse = { path = "..." }` to
+`leo4-oxilean-build`'s `[dependencies]`. The existing
+oxilean-parse-direct parser path (`transpile_source*`
+entry points) is **not** modified in this commit —
+13c will wire the translator in behind a feature flag.
+
+Tests: 7 unit tests under `leo4_translate::tests` —
+ident body, nat-lit body, app body, no-type-ann
+preserves Optional, binders unsupported diagnostic,
+Theorem unsupported diagnostic, DSL permanently
+unsupported. Workspace lib-test count 120 → 127.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 12: oxilean-parse v0.1.2 cross-check (2026-05-24)
 
 `sibling/leo4-lean4-parse/tests/oxilean_cross_check.rs`

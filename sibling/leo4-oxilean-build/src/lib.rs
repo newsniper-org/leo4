@@ -157,6 +157,13 @@
 
 #![allow(clippy::missing_errors_doc)]
 
+/// OX6 step 13 — translator from `leo4_lean4_parse::Decl`
+/// (PEG-based Lean 4 parser AST) into `oxilean_parse::Decl`
+/// (the surface AST the rest of this crate's elab / codegen
+/// pipeline already consumes). Foundation for the parser
+/// switchover; production wiring lands in 13b–13d.
+pub mod leo4_translate;
+
 use leo4_abi::LeanError;
 use oxilean_codegen::lcnf::LcnfFunDecl;
 use oxilean_codegen::rust_target_backend::{RustItem, RustTargetBackend};

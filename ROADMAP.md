@@ -869,13 +869,29 @@ all wait for the v1.0 RC window or later.
         oxilean_cross_check.rs`. Field-level expr
         equivalence intentionally skipped (representation
         shapes diverge by design).
-  13. ⏳ leo4-oxilean-build switches its default parser
+  13. 🟡 leo4-oxilean-build switches its default parser
         from `oxilean_parse::Parser` to
         `leo4_lean4_parse::parse_decls`. OX3/OX4 textual
         pre-rewrites in `lean4_normalize` become legacy
         (still kept for the optional `oxilean-parse`
         fallback path, but OX6 handles the surface
-        natively).
+        natively). Sub-step rollout:
+        - 13a. ✅ Foundation: add `leo4-lean4-parse` dep,
+              `leo4_translate` module skeleton, trivial
+              `Definition` translation (Ident / Lit /
+              flat App). Not yet wired into production
+              transpile entry points.
+        - 13b. ⏳ Expand translator coverage:
+              Structure / Inductive / Class / Instance /
+              Section / Namespace / Theorem / Axiom /
+              Import / binders / BinOp → App / attrs.
+        - 13c. ⏳ Wire `transpile_source_to_unit` /
+              `transpile_source_to_units` through
+              `leo4_translate` behind a feature flag;
+              oxilean-parse stays as fallback for
+              `TranslateError::Unsupported`.
+        - 13d. ⏳ Flip feature flag default ON; legacy
+              path becomes opt-out.
 
   Once step 13 lands the OX3 / OX4 work transitions from
   "active dialect bridge" to "legacy compatibility layer".
