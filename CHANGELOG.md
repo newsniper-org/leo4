@@ -7,6 +7,57 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 9: string interpolation `s!"…{x}…"` (2026-05-22)
+
+OX6 grammar roadmap step 9. Lean 4's string interpolation
+parses natively as `Expr::InterpStr(Vec<InterpPart>)` —
+alternating literal text + `{expr}` holes.
+
+**AST**:
+
+```rust
+pub enum InterpPart {
+    Text(String),     // literal-text segment, escapes resolved
+    Hole(Expr),       // {…} interpolation
+}
+```
+
+Surface coverage:
+
+- `s!"hello {name}"` — text-then-hole.
+- `s!"{x}"` — single-hole-only.
+- `s!"sum: {a + b}"` — hole with arbitrary expr (the full
+  precedence ladder is available inside the braces).
+- `s!"x={x}, y={y}"` — multiple holes.
+- `s!"hello"` — no-hole string (still `InterpStr` with one
+  `Text` part, distinguishable from a plain `"hello"` Lit
+  at the parser level).
+- `s!"set {{x, y}} -> {result}"` — `{{` / `}}` escapes to
+  literal `{` / `}` (matches Lean 4 + Rust convention).
+- Standard escapes `\\n \\t \\r \\\\ \\"` resolved in
+  text segments via the new `decode_interp_text` helper.
+
+The grammar uses a `!"{"` lookahead to distinguish a real
+`{expr}` hole from the `{{` escape; same trick on `}}`.
+The hole's expression is parsed via the full `expr` rule,
+so nested constructs (binops, app, etc.) work inside
+braces.
+
+Out of scope today: nested `s!` strings inside holes
+(Lean 4 also accepts this — recursive interpolation).
+v0 limitation; almost never appears in real code.
+
+Tests 87 → 95 (+8): single-hole-only, text-then-hole,
+hole-with-complex-expr, multiple-holes, text-only-no-holes,
+escaped-braces, text-escape-sequences (`\n`),
+def-body-with-interp.
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: full `Decl` enum (theorem / lemma / axiom /
+instance / class / namespace / open / import / variable /
+mutual).
+
 ### Added — OX6 step 8: `do` notation (2026-05-22)
 
 OX6 grammar roadmap step 8. Lean 4's `do` notation parses
