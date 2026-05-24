@@ -7,6 +7,41 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11u: doc-string semantic binding (2026-05-24)
+
+`Decl` gained a `doc: Option<String>` field. A `/-- … -/`
+doc-comment immediately preceding a decl is now
+captured and attached to that decl's `doc` field
+(matching Lean 4's convention — `simp`, `Mathlib`, and
+`lean4doc` all key off the same surface).
+
+Grammar changes:
+
+- `block_comment` rule now uses `"/-" !"-"` lookahead
+  so `/-- … -/` does NOT get silently eaten as
+  whitespace.
+- New `doc_comment() -> String` rule captures the raw
+  body between `/--` and `-/` (whitespace preserved
+  for markdown-renderer fidelity).
+- `decl` wrapper consumes an optional leading
+  `doc_comment()` (ordering: doc → attr → modifier →
+  body) and writes it into `decl.doc`.
+
+**Breaking** for direct `Decl` construction sites
+outside the parser — the new `doc: None` field must be
+supplied. All in-tree construction sites updated.
+
+Tests 268 → 273 (+5): doc_comment_none_when_no_doc,
+doc_comment_attaches_to_theorem,
+doc_comment_with_attr_and_modifier_prefix,
+block_comment_not_eaten_as_doc,
+doc_comment_multi_line. Also updates the prior
+`doc_comment_treated_as_block_comment` test to assert
+the new attaching semantics (renamed to
+`doc_comment_attaches_to_next_decl`).
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11r: do-block loops (`for in` / `while` / `until`) (2026-05-24)
 
 Three new `DoStmt` variants for in-do-block iteration:

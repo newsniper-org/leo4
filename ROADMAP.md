@@ -853,7 +853,7 @@ all wait for the v1.0 RC window or later.
        `prefix` / `postfix`
   11t. ✅ Debug commands: `#check`, `#eval`, `#print`,
        `#guard`, `#guard_msgs`
-  11u. ⏳ Doc strings `/-- … -/` semantic binding
+  11u. ✅ Doc strings `/-- … -/` semantic binding
        (attaching to the next decl)
   11v. ✅ `omit` / `include` section-variable management
   11w. ⏳ `def f | 0 => … | n+1 => …` pattern-matching
