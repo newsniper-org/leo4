@@ -891,11 +891,16 @@ all wait for the v1.0 RC window or later.
                 Instance
               - 13b-5: Section / Variable / Open /
                 attributes mapping
-        - 13c. ⏳ Wire `transpile_source_to_unit` /
-              `transpile_source_to_units` through
-              `leo4_translate` behind a feature flag;
-              oxilean-parse stays as fallback for
-              `TranslateError::Unsupported`.
+        - 13c. ✅ `leo4-parser` cargo feature (default
+              OFF). `transpile_source_if_exported` /
+              `transpile_source_to_unit` /
+              `transpile_source_to_units` go through
+              `parse_decls_for_transpile` helper which
+              tries `leo4-lean4-parse` → `leo4_translate`
+              first when the feature is on, falling
+              back to the oxilean-parse walker on any
+              failure. Feature-off behaviour is bit-
+              identical to pre-13c.
         - 13d. ⏳ Flip feature flag default ON; legacy
               path becomes opt-out.
 

@@ -19,6 +19,13 @@ default = []
 # LeanComplexBF16x2, LeanComplexF128x2). Requires a nightly
 # toolchain — see `crates/leo4-abi/src/floats_nightly.rs`.
 nightly-floats = ["leo4-abi/nightly-floats"]
+# OX6 step 13c — route the `transpile_source*` entry points
+# through `leo4_translate` (`leo4-lean4-parse` → translate →
+# oxilean Decl) as the PRIMARY parser path; oxilean-parse
+# becomes the fallback when translation fails
+# (`TranslateError::Unsupported`). Default OFF in 13c so the
+# rollout is opt-in; 13d flips this to ON.
+leo4-parser = []
 
 [dependencies]
 # leo4 IDL + canonical-ABI + LeanProc/LeanProcInvoker contract.

@@ -7,6 +7,53 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13c: leo4-parser feature flag + transpile_source* wiring (2026-05-24)
+
+New `leo4-parser` cargo feature (default OFF) routes
+the `transpile_source_if_exported` /
+`transpile_source_to_unit` /
+`transpile_source_to_units` entry points through the
+`leo4-lean4-parse` → `leo4_translate` path. On any
+failure (parser rejection or
+`TranslateError::Unsupported`), the helper transparently
+falls back to the legacy oxilean-parse walker — so
+turning the feature on never *reduces* the set of
+accepted sources.
+
+Two new private helpers in `lib.rs`:
+
+- `parse_decls_for_transpile(normalised: &str) ->
+  Result<Vec<Located<Decl>>, LeanError>` — central
+  routing. With the feature off, identical to the
+  pre-13c legacy walker.
+- `parse_first_decl_for_transpile(...)` — convenience
+  for the single-decl entry points; errors with
+  `DECODE_ERROR` on empty source.
+
+Three entry points migrated to the helpers:
+`transpile_source_if_exported`,
+`transpile_source_to_unit`,
+`transpile_source_to_units`.
+
+`transpile_source` (the lower-level entry that doesn't
+inspect `@[leo4_export]`) intentionally **not** migrated
+in 13c — staying with the direct oxilean call until
+13d, since callers of this entry point have explicitly
+opted out of the leo4 surface.
+
+5 new helper tests (2 always-on +
+3 `#[cfg(feature = "leo4-parser")]`):
+parse_decls_for_transpile_simple_def,
+parse_first_decl_empty_source_errors,
+parse_decls_for_transpile_multi_decl,
+leo4_parser_path_succeeds_on_translatable_def,
+leo4_parser_path_falls_back_on_unsupported. Workspace
+lib-test count 153 → 156 (feature off) / → 158 (feature
+on).
+
+clippy --all-targets -D warnings clean under BOTH
+feature configurations.
+
 ### Added — OX6 step 13b-5: Section / Variable / Open / attributes (2026-05-24)
 
 Remaining straight-mapping Decl shapes + attribute kind

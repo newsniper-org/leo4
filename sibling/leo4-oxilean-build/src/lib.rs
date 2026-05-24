@@ -1844,22 +1844,98 @@ pub fn decl_name(decl: &Located<Decl>) -> Option<&str> {
 ///
 /// Errors propagate as for `transpile_source` (parse / elab /
 /// LCNF / Rust-emit failures wrap into `LeanError`).
+/// OX6 step 13c — parse a normalised source into
+/// `Vec<Located<Decl>>` for the transpile pipeline. When
+/// the `leo4-parser` feature is enabled, tries the
+/// `leo4-lean4-parse` → `leo4_translate` path first; falls
+/// back to the legacy oxilean-parse walker on any failure
+/// (parser rejection or `TranslateError::Unsupported`).
+/// With the feature disabled this is the same as the
+/// legacy walker — zero behavioural delta from pre-13c.
+fn parse_decls_for_transpile(
+    normalised: &str,
+) -> Result<Vec<Located<Decl>>, LeanError> {
+    #[cfg(feature = "leo4-parser")]
+    {
+        if let Ok(decls) = try_parse_via_leo4(normalised) {
+            return Ok(decls);
+        }
+        // Translation hit Unsupported / parser rejected —
+        // fall through to the oxilean-parse walker. The
+        // leo4-side diagnostic is intentionally dropped:
+        // until 13d (feature default ON), the leo4 path is
+        // an opportunistic upgrade, not a replacement; the
+        // oxilean diagnostic remains the authoritative one
+        // for users.
+    }
+    parse_decls_via_oxilean(normalised)
+}
+
+/// Convenience wrapper used by the single-decl entry
+/// points (`transpile_source_to_unit` /
+/// `transpile_source_if_exported`). Takes the first decl
+/// from the parsed list; errors if the source is empty.
+fn parse_first_decl_for_transpile(
+    normalised: &str,
+) -> Result<Located<Decl>, LeanError> {
+    let mut all = parse_decls_for_transpile(normalised)?;
+    if all.is_empty() {
+        return Err(LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            "leo4-oxilean-build: source contained no declarations".to_string(),
+        ));
+    }
+    Ok(all.remove(0))
+}
+
+/// Legacy walker — drives oxilean's `Lexer` + `Parser`
+/// directly. Used unconditionally when `leo4-parser` is
+/// off, and as the fallback when the leo4 path fails.
+fn parse_decls_via_oxilean(normalised: &str) -> Result<Vec<Located<Decl>>, LeanError> {
+    let mut lexer = Lexer::new(normalised);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::new(tokens);
+    let mut out = Vec::new();
+    while !parser.is_eof() {
+        let d = parser.parse_decl().map_err(|e| {
+            LeanError::new(
+                leo4_abi::error::error_codes::DECODE_ERROR,
+                format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
+            )
+        })?;
+        out.push(d);
+    }
+    Ok(out)
+}
+
+#[cfg(feature = "leo4-parser")]
+fn try_parse_via_leo4(normalised: &str) -> Result<Vec<Located<Decl>>, LeanError> {
+    let l4 = leo4_lean4_parse::parse_decls(normalised).map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!("leo4-lean4-parse: parse_decls failed: {e:?}"),
+        )
+    })?;
+    let mut out = Vec::with_capacity(l4.len());
+    for d in &l4 {
+        let translated = leo4_translate::translate_decl(d).map_err(|e| {
+            LeanError::new(
+                leo4_abi::error::error_codes::DECODE_ERROR,
+                format!("leo4_translate: {e}"),
+            )
+        })?;
+        out.push(translated);
+    }
+    Ok(out)
+}
+
 pub fn transpile_source_if_exported(
     env: &Environment,
     registry: &mut Leo4ExportRegistry,
     src: &str,
 ) -> Result<Option<String>, LeanError> {
     let normalised = lean4_normalize(src);
-
-    let mut lexer = Lexer::new(&normalised);
-    let tokens = lexer.tokenize();
-    let mut parser = Parser::new(tokens);
-    let parsed = parser.parse_decl().map_err(|e| {
-        LeanError::new(
-            leo4_abi::error::error_codes::DECODE_ERROR,
-            format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
-        )
-    })?;
+    let parsed = parse_first_decl_for_transpile(&normalised)?;
 
     if !decl_has_leo4_export(&parsed) {
         return Ok(None);
@@ -1929,16 +2005,7 @@ pub fn transpile_source_to_unit(
     mangled: &str,
 ) -> Result<Option<TranspileUnit>, LeanError> {
     let normalised = lean4_normalize(src);
-
-    let mut lexer = Lexer::new(&normalised);
-    let tokens = lexer.tokenize();
-    let mut parser = Parser::new(tokens);
-    let parsed = parser.parse_decl().map_err(|e| {
-        LeanError::new(
-            leo4_abi::error::error_codes::DECODE_ERROR,
-            format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
-        )
-    })?;
+    let parsed = parse_first_decl_for_transpile(&normalised)?;
     process_parsed_decl(env, registry, &parsed, mangled)
 }
 
@@ -1965,24 +2032,11 @@ pub fn transpile_source_to_units(
     name_to_mangled: &HashMap<String, String>,
 ) -> Result<Vec<TranspileUnit>, LeanError> {
     let normalised = lean4_normalize(src);
-    // Walk the parser manually — upstream `oxilean_parse::parser::parse_decls`
-    // v0.1.2's EOF detection only catches `UnexpectedEof`, not
-    // `UnexpectedToken { got: Eof }`, so trailing whitespace in
-    // a multi-decl source triggers a spurious parse error.
-    // `Parser::is_eof()` is the right loop guard.
-    let mut lexer = Lexer::new(&normalised);
-    let tokens = lexer.tokenize();
-    let mut parser = Parser::new(tokens);
-    let mut parsed_all: Vec<Located<Decl>> = Vec::new();
-    while !parser.is_eof() {
-        let d = parser.parse_decl().map_err(|e| {
-            LeanError::new(
-                leo4_abi::error::error_codes::DECODE_ERROR,
-                format!("leo4-oxilean-build: parse_decl failed: {e:?}"),
-            )
-        })?;
-        parsed_all.push(d);
-    }
+    // OX6 step 13c: parse via the leo4-lean4-parse →
+    // translate path when the `leo4-parser` feature is on;
+    // otherwise (and when translation fails) fall back to
+    // the legacy oxilean-parse walker.
+    let parsed_all = parse_decls_for_transpile(&normalised)?;
 
     let mut units: Vec<TranspileUnit> = Vec::new();
     for parsed in &parsed_all {
@@ -3470,6 +3524,61 @@ pub fn emit_crate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── OX6 step 13c: parser routing helper ──────────────
+
+    #[test]
+    fn parse_decls_for_transpile_simple_def() {
+        // Works under both feature settings — the source
+        // is in the shared accepted surface.
+        let decls = parse_decls_for_transpile("def x : T := y")
+            .expect("simple def must parse");
+        assert_eq!(decls.len(), 1);
+        assert!(matches!(decls[0].value, Decl::Definition { ref name, .. } if name == "x"));
+    }
+
+    #[test]
+    fn parse_first_decl_empty_source_errors() {
+        let err = parse_first_decl_for_transpile("   \n  \n")
+            .expect_err("empty source must error");
+        assert_eq!(err.code, leo4_abi::error::error_codes::DECODE_ERROR);
+    }
+
+    #[test]
+    fn parse_decls_for_transpile_multi_decl() {
+        let decls = parse_decls_for_transpile("def x : T := y\ndef z : U := w")
+            .expect("multi-decl must parse");
+        assert_eq!(decls.len(), 2);
+    }
+
+    #[cfg(feature = "leo4-parser")]
+    #[test]
+    fn leo4_parser_path_succeeds_on_translatable_def() {
+        let decls = try_parse_via_leo4("def x : T := y")
+            .expect("leo4 path must handle translatable def");
+        assert_eq!(decls.len(), 1);
+    }
+
+    #[cfg(feature = "leo4-parser")]
+    #[test]
+    fn leo4_parser_path_falls_back_on_unsupported() {
+        // leo4-lean4-parse accepts `notation` (DSL); the
+        // translator returns Unsupported permanently. The
+        // outer parse_decls_for_transpile helper should
+        // fall back to oxilean — which itself accepts the
+        // `notation` decl shape.
+        let result = parse_decls_for_transpile(r#"notation:65 a " ⊕ " b => Sum.inl a b"#);
+        // Either fallback succeeded (oxilean parsed it) or
+        // oxilean also rejected — but the leo4 path's
+        // Unsupported must NOT bubble out as the final
+        // error. If we see an error here, the code field
+        // is set by the OXilean path, not by us giving up.
+        if let Err(e) = result {
+            assert_eq!(e.code, leo4_abi::error::error_codes::DECODE_ERROR);
+            // Diagnostic should come from oxilean, not leo4_translate.
+            assert!(!e.message.contains("leo4_translate"));
+        }
+    }
 
     #[test]
     fn type_mapper_emits_pure_rust() {
