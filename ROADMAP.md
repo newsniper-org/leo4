@@ -812,28 +812,28 @@ all wait for the v1.0 RC window or later.
   10a. ✅ `theorem` / `lemma` / `axiom` decls + `=`
         propositional equality
   10b. ✅ `instance` + `class` decls
-  10c. ⏳ `namespace` + `section` + `mutual` blocks
-  10d. ⏳ `open` + `import` + `variable` decls
+  10c. ✅ `namespace` + `section` + `mutual` blocks
+  10d. ✅ `open` + `import` + `variable` decls
 
   ─── Surface coverage fill-in (steps 11a–11l;
        v1.0 RC mandatory) ───
-  11a. ⏳ Block comments `/- … -/` (nested) + doc
-       comments `/-- … -/`
-  11b. ⏳ Anonymous ctor `⟨a, b⟩` (Unicode angle brackets)
-  11c. ⏳ Modifier prefixes (`partial def`,
+  11a. ✅ Block comments `/- … -/` (nested) + doc
+       comments `/-- … -/` (semantic binding in 11u)
+  11b. ✅ Anonymous ctor `⟨a, b⟩` (Unicode angle brackets)
+  11c. ✅ Modifier prefixes (`partial def`,
        `noncomputable def`, `private def`,
        `protected def`, `abbrev`)
-  11d. ⏳ let-in expression `let x := e; body`
-  11e. ⏳ `by …` tactic block (term-level entry into
+  11d. ✅ let-in expression `let x := e; body`
+  11e. ✅ `by …` tactic block (term-level entry into
        tactic mode)
-  11f. ⏳ Multi-line `do` statements (`if` / `match` /
+  11f. ✅ Multi-line `do` statements (`if` / `match` /
        `let` spanning lines inside `do`)
-  11g. ⏳ Anonymous structure literal `{ x := 1, y := 2 }`
-  11h. ⏳ List literal `[1, 2, 3]`
-  11i. ⏳ Universe annotation `def foo.{u, v} : Sort u`
-  11j. ⏳ `@` explicit args (`@id Nat 0`)
-  11k. ⏳ `example : T := proof` (anonymous theorem)
-  11l. ⏳ Numeric literal extensions (`0x1F` hex,
+  11g. ✅ Anonymous structure literal `{ x := 1, y := 2 }`
+  11h. ✅ List literal `[1, 2, 3]`
+  11i. ✅ Universe annotation `def foo.{u, v} : Sort u`
+  11j. ✅ `@` explicit args (`@id Nat 0`)
+  11k. ✅ `example : T := proof` (anonymous theorem)
+  11l. ✅ Numeric literal extensions (`0x1F` hex,
        `0b101` binary, `3.14` float, `1_000` separator),
        extended string escapes (`\xHH`, `\u{…}`),
        multiline strings `"""…"""`
