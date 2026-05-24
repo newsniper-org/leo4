@@ -92,9 +92,9 @@ this table.
 | **Spawn / IPC** | worker process lifecycle + IPC for reverse direction | `leo4_worker_ops_t` (`SPEC/reverse-direction.md` §4.4) | stub (9-4a), POSIX (9-4b, `posix_spawn` + `socketpair`), Windows (9-4c, `CreateProcessA` + `CreateNamedPipeA`) | **POSIX + Windows code landed 2026-05-23**; Windows runtime verification follows the Tier 2 CI matrix |
 | **Dynamic library loading (Rust)** | open shim `.so` and resolve symbols | `libloading::Library` / `Symbol` | one (cross-platform) | adequate |
 | **Dynamic library loading (Lean)** | wrapper-module init at runtime | Lean's `@[extern]` + leanc link step | one (host-platform leanc decides) | adequate |
-| **Dynamic library naming** | choose `.so` / `.dylib` / `.dll` for a given package | TBD | Lean side hard-codes `.so` (`lake/Leo4/Leo4/Build.lean:227`) | **needs layer** |
+| **Dynamic library naming** | choose `.so` / `.dylib` / `.dll` for a given package | `Leo4.Platform.dynlibPrefix` / `dynlibExt` / `isPlatformDynlib` / `stemOfDynlib` (`lake/Leo4/Leo4/Platform.lean`) | one (Lean), `System.Platform.isWindows` / `isOSX` branching | adequate (landed 2026-05-24) |
 | **C compiler visibility attribute** | mark shim entry points exported | not needed under gnullvm target choice | `__attribute__((visibility("default")))` works on every tier (Linux gcc / clang, gnullvm clang, macOS clang) | covered by Tier 2 target choice |
-| **Shared-library RPATH / DLL search path** | resolve `libleanshared` + user `.so` at load time | TBD | `-Wl,-rpath,...` (Linux/macOS) only (`lake/Leo4/Leo4/Build.lean:233, 262`) | **needs layer** |
+| **Shared-library RPATH / DLL search path** | resolve `libleanshared` + user libs at load time | `Leo4.Platform.linkRpath?` (`lake/Leo4/Leo4/Platform.lean`) — returns `some -Wl,-rpath,…` on POSIX, `none` on Windows (PE has no rpath) | one (Lean) | adequate for the build-time link step (landed 2026-05-24); Windows load-time DLL discovery (`leo4-mslean4` loader-side `AddDllDirectory` / PATH manipulation) follows once C1 manual testing identifies the chosen strategy |
 | **Filesystem atomic write** | handshake / mangling / schema emit | Lean `IO.FS.writeBinFile` + rename-into-place | one (Lean) | adequate on POSIX; needs review on Windows |
 | **Path separators / extensions** | constructing build-output paths | Lean `System.FilePath` / Rust `std::path::Path` | std-library | adequate |
 | **Environment variable conventions** | runtime cdylib / shim discovery | leo4-defined names (`LEO4_SHIM_SO`, `LEO4_RUST_CDYLIB`, …) | one (leo4) | adequate |
@@ -106,14 +106,14 @@ or new branches are discovered.
 
 | Location | Branch / assumption | Concern | Recommended layer | Priority |
 |---|---|---|---|---|
-| `lake/Leo4/Leo4/Build.lean:227` | `name.endsWith ".so"` | Dynamic library naming | new "library extension" layer (returns `.so` / `.dylib` / `.dll`) | medium |
-| `lake/Leo4/Leo4/Build.lean:233, 262` | `-Wl,-rpath,...` | Runtime library search path | new "library search path" layer (Linux: rpath; macOS: rpath / `@loader_path`; Windows: PATH at load / install dir / nothing) | medium |
-| `lake/Leo4/Leo4/Build.lean:259` | `-shared` on `leanc` | shared-library link command | overlap with the above; can share the layer | medium |
+| `lake/Leo4/Leo4/Build.lean:227` (was) | `name.endsWith ".so"` | Dynamic library naming | `Leo4.Platform.isPlatformDynlib` / `stemOfDynlib` | **resolved 2026-05-24** |
+| `lake/Leo4/Leo4/Build.lean:233, 262` (was) | `-Wl,-rpath,...` | Runtime library search path (build-time) | `Leo4.Platform.linkRpath?` (POSIX: `Some`, Windows: `None`) | **resolved 2026-05-24** for the build step; Windows load-time discovery follows |
+| `lake/Leo4/Leo4/Build.lean:259` | `-shared` on `leanc` | shared-library link command | covered — clang accepts `-shared` on every leo4 tier (Linux gcc/clang, macOS clang, gnullvm-clang Windows produces a PE DLL) | resolved (covered by gnullvm Tier 2 target choice) |
 | `lake/Leo4Plugin/Leo4Plugin/Main.lean:1792` | `__attribute__((visibility("default")))` in shim source | C compiler visibility | **covered** — gnullvm Tier 2 target choice keeps clang `__attribute__` available on every tier | resolved |
 | `lake/Leo4Plugin/Leo4Plugin/Main.lean` (shim emit, generally) | `-fPIC`, gcc/clang command line | C compiler flags | **covered** — same reason; gcc-style flags work on every tier via leanc / clang / gnullvm-clang | resolved |
 | `shim/leo4_rust_bridge.c` (Phase 9-4) | `posix_spawn` / `CreateProcessA`, `socketpair` / `CreateNamedPipeA`, dispatcher-side reaping | Spawn / IPC + worker lifecycle | `leo4_worker_ops_t` — POSIX + Windows backends both implemented | resolved |
 | `crates/leo4-rust-worker/src/main.rs:330` | Windows `open_ipc_channel` client side (`CreateFileW` on the dispatcher's named pipe + retry on race) | Spawn / IPC — worker side counterpart | `open_windows_pipe` via `std::fs::OpenOptions::open` (CreateFileW under the hood); 10× linear backoff on `NotFound`/`ConnectionRefused` for the narrow worker-spawned-before-pipe-registered race | resolved (cross-compile clean on `x86_64-pc-windows-gnullvm`; runtime verification follows Tier 2 CI) |
-| `crates/leo4-build/src/lib.rs:24` (comment) | acknowledges `.so` / `.dylib` / `.dll` exist but only wires `.so` | Dynamic library naming | use the same layer as `lake/Leo4/Leo4/Build.lean:227` | low |
+| `crates/leo4-build/src/lib.rs:24` (comment) | acknowledges `.so` / `.dylib` / `.dll` exist but always uses `.leo4-shim.so` | Dynamic library naming (internal leo4 convention, NOT system-conventional) | **intentional** — `.leo4-shim.so` is leo4 internal naming on every platform; `libloading` / `LoadLibraryW` accept any extension; PE DLL content works under `.so` suffix. See `Leo4.Platform.defaultShimSuffix` comment. | by design |
 
 ## 4. Conventions for new layers
 

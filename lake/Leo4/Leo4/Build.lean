@@ -20,8 +20,12 @@
 
 import Lean.Data.Json
 import Lean.Data.Json.FromToJson
+import Leo4.Platform
 
 namespace Leo4.Build
+
+open Leo4.Platform (dynlibExt dynlibPrefix defaultShimSuffix
+                    isPlatformDynlib stemOfDynlib linkRpath?)
 
 open Lean (Json ToJson FromJson fromJson? toJson)
 
@@ -115,9 +119,17 @@ instance : FromJson BuildCfg where
 
 namespace BuildCfg
 
-/-- Canonical output path: `<outDir>/<outName>.so`. -/
+/-- Canonical output path: `<outDir>/<outName>.so`.
+The `.so` suffix is **intentionally constant on every
+platform** — see `Leo4.Platform.defaultShimSuffix`. The
+plugin writer + `leo4-build` + `leo4-mslean4` readers all
+agree on this leo4-internal naming so the
+handshake/mangling/shim file triple stays discoverable
+through a single naming rule. On Windows the file content
+is a PE DLL regardless; `libloading` / `LoadLibraryW`
+don't inspect the extension. -/
 def defaultSoPath (cfg : BuildCfg) : System.FilePath :=
-  cfg.outDir / s!"{cfg.outName}.so"
+  cfg.outDir / s!"{cfg.outName}{defaultShimSuffix}"
 
 def load (path : System.FilePath) : IO BuildCfg := do
   let text ← IO.FS.readFile path
@@ -218,19 +230,25 @@ def linkShared (cfg : BuildCfg) (objs : Array System.FilePath) (out : System.Fil
   -- in `lake-manifest.json` (transitive Lean modules like Leo4 own
   -- their own `initialize_*` symbols too); RPATH covers the
   -- load-time search path.
+  -- Per Leo4.Platform: detect `lib*.so` (Linux),
+  -- `lib*.dylib` (macOS), `*.dll` (Windows gnullvm). The
+  -- platform layer encapsulates both the file-naming
+  -- detection (`isPlatformDynlib` / `stemOfDynlib`) and
+  -- the rpath flag emission (`linkRpath?` is `none` on
+  -- Windows since PE binaries don't carry rpath).
   let collectLibDir (dir : System.FilePath) : IO (Array String) := do
     if !(← dir.pathExists) then return #[]
     let entries ← dir.readDir
     let mut libs : Array String := #[]
     for entry in entries do
       let name := entry.fileName
-      if name.startsWith "lib" && name.endsWith ".so" then
-        let stem := (name.drop 3).dropEnd 3
-        libs := libs.push s!"-l{stem}"
+      if isPlatformDynlib name then
+        libs := libs.push s!"-l{stemOfDynlib name}"
     if libs.isEmpty then return #[]
-    return #["-L", dir.toString]
-        ++ libs
-        ++ #["-Wl,-rpath," ++ dir.toString]
+    let rpathFlag : Array String := match linkRpath? dir.toString with
+      | some flag => #[flag]
+      | none      => #[]  -- Windows: rely on PATH / .exe-adjacent search
+    return #["-L", dir.toString] ++ libs ++ rpathFlag
   let userLibDir : System.FilePath := cfg.pkgRoot / ".lake" / "build" / "lib"
   let mut userLibArgs : Array String ← collectLibDir userLibDir
   -- Walk lake-manifest.json for direct dep packages and pick up
@@ -252,14 +270,22 @@ def linkShared (cfg : BuildCfg) (objs : Array System.FilePath) (out : System.Fil
           let depRoot : System.FilePath := cfg.pkgRoot / dir
           let depLibDir := depRoot / ".lake" / "build" / "lib"
           userLibArgs := userLibArgs ++ (← collectLibDir depLibDir)
-  -- RPATH so the dynamic linker resolves `libleanshared.so` at load
-  -- time without the consumer setting `LD_LIBRARY_PATH`. Without
-  -- this, ldd would print `not found` and `dlopen` would fail with
-  -- `cannot open shared object file`.
+  -- RPATH so the dynamic linker resolves the Lean
+  -- runtime DLL at load time without the consumer
+  -- setting `LD_LIBRARY_PATH`. POSIX (Linux / macOS):
+  -- emit `-Wl,-rpath,<dir>`. Windows (gnullvm): rpath
+  -- doesn't apply to PE; the dependent DLL
+  -- (`leanshared.dll`) must be reachable via PATH /
+  -- adjacent dir / `AddDllDirectory` — the loader
+  -- (`leo4-mslean4`) is responsible for arranging that
+  -- on Windows.
+  let leanRpath : Array String := match linkRpath? leanLibDir with
+    | some flag => #[flag]
+    | none      => #[]
   let args := #["-shared", "-o", out.toString]
             ++ objs.map (·.toString)
-            ++ #["-L", leanLibDir, "-lleanshared",
-                 "-Wl,-rpath," ++ leanLibDir]
+            ++ #["-L", leanLibDir, "-lleanshared"]
+            ++ leanRpath
             ++ userLibArgs
             ++ cfg.extraLDFlags
   runOrThrow cfg.leancPath.toString args

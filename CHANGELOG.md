@@ -7,6 +7,60 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Leo4.Platform: linker / dynlib OS abstraction layer (2026-05-24)
+
+New `lake/Leo4/Leo4/Platform.lean` — first leo4-Lean
+OS abstraction layer per `OS-PORTABILITY.md` §1 policy.
+Encapsulates the linker / dynamic-library file
+conventions previously hardcoded in `Leo4.Build`:
+
+- `dynlibExt` — `"so"` / `"dylib"` / `"dll"`.
+- `dynlibPrefix` — `"lib"` on POSIX, `""` on Windows
+  (gnullvm-clang doesn't `lib`-prefix the DLL itself;
+  the import library `lib<name>.dll.a` is a separate
+  artefact we don't dlopen).
+- `isPlatformDynlib(name)` / `stemOfDynlib(name)` —
+  detection + parsing of platform-conventional
+  library filenames produced by Lake's per-module
+  shared build.
+- `linkRpath?(dir)` — `Some "-Wl,-rpath,<dir>"` on
+  POSIX, `None` on Windows (PE binaries have no rpath
+  concept; DLL discovery happens via PATH / .exe-
+  adjacent / `AddDllDirectory` at load time).
+- `defaultShimSuffix` — `".so"` on every platform,
+  documenting the leo4-internal convention. `libloading`
+  / `LoadLibraryW` don't inspect extensions, so a PE DLL
+  with `.so` suffix loads fine.
+
+`Leo4.Build` migrated:
+
+- `defaultSoPath` documents the always-`.so`
+  convention (via `defaultShimSuffix`).
+- `linkShared`'s `collectLibDir` now uses
+  `isPlatformDynlib` / `stemOfDynlib` (was hardcoded
+  `"lib"` prefix + `".so"` suffix → would miss Lake's
+  Windows `<name>.dll` output).
+- `linkShared`'s `-Wl,-rpath` flags (per-lib-dir and
+  for `leanLibDir`) now go through `linkRpath?` →
+  skipped on Windows.
+
+`OS-PORTABILITY.md` ledger updated:
+
+- §2 gains the `Leo4.Platform` rows for "Dynamic
+  library naming" and "Shared-library RPATH / DLL
+  search path" (build-time portion).
+- §3 audit items at Build.lean:227 / 233+262 / 259
+  marked **resolved 2026-05-24**.
+- `crates/leo4-build/src/lib.rs:24` marked **by design**
+  (intentional leo4-internal `.so` convention).
+
+`lake build` verified clean.
+
+The Windows load-time DLL discovery question (where
+`leanshared.dll` lives + how the loader finds it)
+remains for the `leo4-mslean4` loader side — surfaces
+in C1 manual testing.
+
 ### Added — leo4-rust-worker Windows IPC: pipe-client implementation (2026-05-24)
 
 Phase 9-4c's missing half. The shim's C-side
