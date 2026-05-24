@@ -840,21 +840,22 @@ all wait for the v1.0 RC window or later.
 
   ─── Surface coverage tail (steps 11m+; ALSO v1.0 RC
        mandatory per 병익) ───
-  11m. ⏳ `if let pat := e then … else …` / `let-else`
-  11n. ⏳ `match h : e with …` (scrutinee binding)
+  11m. ✅ `if let pat := e then … else …` (let-else
+        deferred — not a Lean 4 term-mode form)
+  11n. ✅ `match h : e with …` (scrutinee binding)
   11o. ⏳ Pattern guards (`| ctor h => …`)
-  11p. ⏳ `(. + 1)` anonymous fn shorthand
-  11q. ⏳ Unicode operators (`≤`, `≥`, `≠`, `×`, `÷`,
+  11p. ✅ `(· + 1)` anonymous fn shorthand (`·` placeholder)
+  11q. ✅ Unicode operators (`≤`, `≥`, `≠`, `×`, `÷`,
        `∈`, `∉`, `∪`, `∩`, `⊆`)
   11r. ⏳ `do for in`, `do while`, `do until` loops
   11s. ⏳ DSL declarations: `notation`, `macro_rules`,
        `syntax`, `elab`, `infix` / `infixl` / `infixr` /
        `prefix` / `postfix`
-  11t. ⏳ Debug commands: `#check`, `#eval`, `#print`,
+  11t. ✅ Debug commands: `#check`, `#eval`, `#print`,
        `#guard`, `#guard_msgs`
   11u. ⏳ Doc strings `/-- … -/` semantic binding
        (attaching to the next decl)
-  11v. ⏳ `omit` / `include` section-variable management
+  11v. ✅ `omit` / `include` section-variable management
   11w. ⏳ `def f | 0 => … | n+1 => …` pattern-matching
        def
 
@@ -872,6 +873,30 @@ all wait for the v1.0 RC window or later.
 
   Once step 13 lands the OX3 / OX4 work transitions from
   "active dialect bridge" to "legacy compatibility layer".
+
+  **Post-OX6 CLI refactor (planned 2026-05-24)** —
+  applied **only after OX6 is fully done**:
+
+  - `leo4 create` and `leo4 init` both drop the
+    `--impl <runtime-impl-identifier>` option. Per-
+    (sub)crate runtime-impl selection moves entirely
+    into a `leo4.toml` config file. Multiple impls may
+    be specified per (sub)crate, but if more than one
+    is listed each impl's output path **must** be
+    disjoint from every other's — overlap is rejected
+    at config-parse time.
+  - `leo4 create` additionally gains an optional
+    `--subcrate` flag: when set, `create` performs the
+    scaffold as a subcrate of the *current workspace*
+    (located relative to CWD) rather than as a
+    standalone crate.
+  - `leo4 init` follows the same `--impl` →
+    `leo4.toml` move, but does **not** gain
+    `--subcrate` (init's contract is "this directory").
+
+  Sequencing rationale: keep the CLI surface stable
+  while OX6 churn lands; flip both together once the
+  parser is the single source of truth.
 
   **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)** — elab
   env bootstrap. CLI's transpile path runs `elaborate_decl`
