@@ -7,6 +7,37 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11l: numeric + string literal extensions (2026-05-22)
+
+`Literal` enum gained a `Float(String)` variant + the
+parser grammar now accepts:
+
+- **Hex / binary / octal** numeric literals: `0xFF`,
+  `0b1010`, `0o17` (case-insensitive prefixes).
+- **Digit separators**: `1_000_000`, `0xFF_FF`,
+  `0b1010_1010`, `1_000.5` — all radix forms accept
+  `_` between digits.
+- **Float literals**: `3.14`, `1.5e10`, `1.0e-3`. Float
+  takes priority over Nat so `1.5` parses as Float (not
+  Nat-then-dot-shortcut). Held as the original source
+  text (`Literal::Float(String)`) rather than `f64` to
+  keep `Eq` derive sound (NaN-incomparable).
+- **Multi-line strings**: `"""…"""` triple-quoted, raw
+  (no escape resolution; arbitrary content including
+  newlines).
+- **Extended string escapes** in `"…"`: `\xHH` (single-
+  byte hex), `\u{H+}` (Unicode codepoint up to 6 hex
+  digits). Other escapes (`\n \t \r \\ \" \0`) already
+  supported.
+
+Tests 217 → 230 (+13): hex / binary / octal nat,
+separator-bearing nats, simple float, scientific float,
+separator in float, float-vs-nat priority,
+multiline string, multiline raw-pass-through, hex byte
+escape, Unicode codepoint escape, def with hex value.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11f: multi-line do statement values (2026-05-22)
 
 Step 8's `do` notation supported only single-line
