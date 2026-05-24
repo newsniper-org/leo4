@@ -7,6 +7,60 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 3: `if-then-else` + `match` with patterns (2026-05-22)
+
+OX6 grammar roadmap step 3. Two new top-level expression
+forms + a full pattern AST.
+
+**`if-then-else`** — `Expr::If(cond, then, else)`. Added
+as an atom alternative so it slots into the precedence
+ladder naturally. `x + if a then b else c` parses with
+the if as the `+`'s RHS atom; `if a then 1 + 2 else 3 * 4`
+gets full binary-op trees in each branch; nested `if` in
+either branch works without parens.
+
+**`match`** — `Expr::Match(scrut, Vec<MatchArm>)` where
+`MatchArm { pattern, body }`. The arm separator is a single
+`|` token; the precedence ladder accepts `||` as a binary
+op, so `match c with | _ => a || b | x => x` correctly
+recognises `a || b` as the first arm's body and the
+second `|` as the next arm's separator.
+
+**Pattern AST**:
+
+```rust
+pub enum Pattern {
+    Wildcard,                        // `_`
+    Var(String),                     // `x` (may be dotted: `Color.red`)
+    Lit(Literal),                    // `42` / `"s"`
+    Ctor(String, Vec<Pattern>),      // `node l r`
+    DotCtor(String, Vec<Pattern>),   // `.lt` / `.some x`
+    Paren(Box<Pattern>),
+    Tuple(Vec<Pattern>),             // `(a, b)`
+}
+```
+
+Bare ident (with or without dots) parses as `Var` — the
+elaborator decides ctor-vs-var classification. Multi-arg
+applications parse as `Ctor`. Lean 4's dot-shorthand
+`.ctorName [args]` parses natively as `DotCtor` (no need
+for the OX4 `strip_ctor_dot_shorthand` textual pre-rewrite
+once OX6 is the default parser).
+
+Tests 25 → 41 (+16 tests): if-simple, if-inside-binop,
+if-with-complex-branches, nested-if, match-single-arm-
+wildcard, match-multi-arm, match-dot-ctor (3 forms),
+match-dot-ctor-with-args, match-qualified-ctor (Color.red),
+match-ctor-with-args (`node l r`), match-tuple-pattern,
+match-lit-pattern, match-body-uses-or-binary-op (verifies
+`|` / `||` disambiguation), match-with-complex-scrutinee,
+plus two end-to-end `def`-body fixtures (`safeDiv`,
+`colorName`).
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: lambda + `fun`.
+
 ### Added — OX6 step 2: expression grammar with operator precedence (2026-05-22)
 
 OX6 grammar roadmap step 2 — replaces the v0 `Expr::Raw`
