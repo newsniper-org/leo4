@@ -112,6 +112,7 @@ or new branches are discovered.
 | `lake/Leo4Plugin/Leo4Plugin/Main.lean:1792` | `__attribute__((visibility("default")))` in shim source | C compiler visibility | **covered** — gnullvm Tier 2 target choice keeps clang `__attribute__` available on every tier | resolved |
 | `lake/Leo4Plugin/Leo4Plugin/Main.lean` (shim emit, generally) | `-fPIC`, gcc/clang command line | C compiler flags | **covered** — same reason; gcc-style flags work on every tier via leanc / clang / gnullvm-clang | resolved |
 | `shim/leo4_rust_bridge.c` (Phase 9-4) | `posix_spawn` / `CreateProcessA`, `socketpair` / `CreateNamedPipeA`, dispatcher-side reaping | Spawn / IPC + worker lifecycle | `leo4_worker_ops_t` — POSIX + Windows backends both implemented | resolved |
+| `crates/leo4-rust-worker/src/main.rs:330` | Windows `open_ipc_channel` client side (`CreateFileW` on the dispatcher's named pipe + retry on race) | Spawn / IPC — worker side counterpart | `open_windows_pipe` via `std::fs::OpenOptions::open` (CreateFileW under the hood); 10× linear backoff on `NotFound`/`ConnectionRefused` for the narrow worker-spawned-before-pipe-registered race | resolved (cross-compile clean on `x86_64-pc-windows-gnullvm`; runtime verification follows Tier 2 CI) |
 | `crates/leo4-build/src/lib.rs:24` (comment) | acknowledges `.so` / `.dylib` / `.dll` exist but only wires `.so` | Dynamic library naming | use the same layer as `lake/Leo4/Leo4/Build.lean:227` | low |
 
 ## 4. Conventions for new layers

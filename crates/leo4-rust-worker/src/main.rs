@@ -329,11 +329,74 @@ fn open_ipc_channel(cli: &Cli) -> Result<Box<dyn ReadWrite>, String> {
 
 #[cfg(windows)]
 fn open_ipc_channel(cli: &Cli) -> Result<Box<dyn ReadWrite>, String> {
-    let Some(_pipe) = cli.ipc_pipe.as_ref() else {
+    let Some(pipe) = cli.ipc_pipe.as_ref() else {
         return Err("--ipc-pipe required on Windows targets".into());
     };
-    // Phase 9-4c lights this up (CreateFile on the named pipe).
-    Err("Windows named-pipe IPC not yet implemented (Phase 9-4c)".into())
+    open_windows_pipe(pipe).map(|f| Box::new(f) as Box<dyn ReadWrite>)
+}
+
+/// Open a duplex named pipe at `pipe_path` (the path the
+/// dispatcher created via `CreateNamedPipeA`,
+/// `\\.\pipe\leo4_rust_<pid>_<nonce>` per
+/// `shim/leo4_rust_bridge.c` § "Windows backend
+/// (Phase 9-4c)").
+///
+/// `std::fs::OpenOptions::open` on Windows calls
+/// `CreateFileW` under the hood, which is the
+/// client-side counterpart to `CreateNamedPipeA` /
+/// `ConnectNamedPipe`. Read+write maps to
+/// `GENERIC_READ | GENERIC_WRITE`, matching the
+/// dispatcher's `PIPE_ACCESS_DUPLEX`. Byte-stream mode
+/// (`PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT`
+/// on the server side) lines up with `File`'s
+/// blocking `Read` / `Write` impls.
+///
+/// **Retry loop**: the dispatcher's normal flow is
+/// `CreateNamedPipeA` → `CreateProcessA(worker)` →
+/// `ConnectNamedPipe` (blocks). The worker's
+/// `open_ipc_channel` typically runs *before* the
+/// dispatcher reaches `ConnectNamedPipe`, but a
+/// narrow race exists where the worker process starts
+/// before the named pipe is fully registered. Retry a
+/// bounded number of times with linear backoff (10ms,
+/// 20ms, …, 100ms) on `NotFound` / `ConnectionRefused`
+/// — those are the two error kinds Windows surfaces
+/// when the pipe doesn't yet exist or already has its
+/// instance count saturated.
+#[cfg(windows)]
+fn open_windows_pipe(pipe_path: &str) -> Result<std::fs::File, String> {
+    use std::fs::OpenOptions;
+    use std::io::ErrorKind;
+    use std::thread;
+    use std::time::Duration;
+
+    let mut last_err: Option<std::io::Error> = None;
+    for attempt in 0..10u32 {
+        match OpenOptions::new().read(true).write(true).open(pipe_path) {
+            Ok(f) => return Ok(f),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::NotFound | ErrorKind::ConnectionRefused
+                ) =>
+            {
+                last_err = Some(e);
+                let backoff = Duration::from_millis(10 * u64::from(attempt + 1));
+                thread::sleep(backoff);
+            }
+            Err(e) => {
+                return Err(format!(
+                    "open named pipe `{pipe_path}` failed: {e}"
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "named pipe `{pipe_path}` not available after 10 retries (~550ms): {}",
+        last_err
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "no underlying error captured".into())
+    ))
 }
 
 #[cfg(not(any(unix, windows)))]

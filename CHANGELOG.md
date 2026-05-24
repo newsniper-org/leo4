@@ -7,6 +7,57 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — leo4-rust-worker Windows IPC: pipe-client implementation (2026-05-24)
+
+Phase 9-4c's missing half. The shim's C-side
+dispatcher landed `CreateNamedPipeA` +
+`CreateProcessA` + `ConnectNamedPipe` in 2026-05-23,
+but the Rust worker's `open_ipc_channel` Windows
+branch (`crates/leo4-rust-worker/src/main.rs:336`)
+was still a stub returning `"Windows named-pipe IPC
+not yet implemented (Phase 9-4c)"`. Reverse direction
+on Windows blocked.
+
+New `open_windows_pipe(pipe_path)` opens the dispatcher's
+named pipe via `std::fs::OpenOptions::new().read(true)
+.write(true).open(pipe_path)` — `CreateFileW`
+under the hood, which is the client-side counterpart
+to the dispatcher's `CreateNamedPipeA` /
+`ConnectNamedPipe` server side. The returned `File`
+already implements `Read + Write` (and therefore the
+worker's local `ReadWrite` trait), so the rest of the
+worker is unchanged.
+
+**Race handling**: dispatcher's normal flow is
+`CreateNamedPipeA` → `CreateProcessA(worker)` →
+`ConnectNamedPipe` (blocks until worker opens). The
+worker's open call usually races *ahead* of the
+dispatcher's `ConnectNamedPipe`, which the shim
+already handles by accepting `ERROR_PIPE_CONNECTED`
+(`shim/leo4_rust_bridge.c:532`). The narrow opposite
+race (worker spawned but pipe not yet registered)
+surfaces as `NotFound` / `ConnectionRefused` — the
+worker retries 10 times with linear backoff (10ms,
+20ms, …, 100ms — total ~550ms cap) before giving up
+with a diagnostic.
+
+**Verification**:
+- `cargo check -p leo4-rust-worker --target
+  x86_64-pc-windows-gnullvm` — clean cross-compile
+  on the Tier 2 target.
+- `cargo clippy -p leo4-rust-worker --target
+  x86_64-pc-windows-gnullvm` — no warnings in the
+  new lines (the existing leo4-rust-worker
+  pedantic-warning debt is pre-existing).
+- `cargo test -p leo4-rust-worker` on Linux host —
+  6/6 still pass (the Windows path is `#[cfg(windows)]`
+  so Linux build doesn't see it).
+
+`OS-PORTABILITY.md` §2 Spawn/IPC row "Windows runtime
+verification follows the Tier 2 CI matrix" → the
+Rust worker side is now landed; only runtime
+verification on actual Windows hardware remains.
+
 ### Added — OX5-oxi step 2: end-to-end integration tests via transpile_source_to_unit (2026-05-24)
 
 Three integration tests that exercise the new bootstrap
