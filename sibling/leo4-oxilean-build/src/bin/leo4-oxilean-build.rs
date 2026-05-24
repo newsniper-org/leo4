@@ -61,10 +61,9 @@
 //!   IO error reading manifest / source / out_dir).
 
 use leo4_oxilean_build::{
-    emit_crate, transpile_source_to_unit, transpile_source_to_units,
-    Leo4ExportRegistry,
+    emit_crate, leo4_env_bootstrap::bootstrap_env, transpile_source_to_unit,
+    transpile_source_to_units, Leo4ExportRegistry,
 };
-use oxilean_kernel::env::Environment;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
@@ -226,7 +225,14 @@ fn main() -> ExitCode {
         .unwrap_or_else(|e| die(format!("parsing manifest: {e}")));
 
     let mut registry = Leo4ExportRegistry::new();
-    let env = Environment::new();
+    // OX5-oxi: populate env with OxiLean prelude + leo4
+    // boundary primitives before elab so the transpile
+    // pipeline doesn't choke on `NameNotFound("UInt64")`
+    // etc. Zero lake/lean overhead — both layers run
+    // in-process against the oxilean-kernel cargo dep.
+    let env = bootstrap_env().unwrap_or_else(|e| {
+        die(format!("leo4-oxilean-build: env bootstrap failed: {e}"))
+    });
     let mut units = Vec::with_capacity(manifest.sources.len());
     let mut skipped = 0usize;
     let mut errors = 0usize;

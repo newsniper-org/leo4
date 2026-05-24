@@ -7,6 +7,66 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX5-oxi step 1: leo4_env_bootstrap module + CLI wire-in (2026-05-24)
+
+New `leo4-oxilean-build::leo4_env_bootstrap` module —
+populates the `oxilean_kernel::Environment` passed to
+`transpile_source*`'s elab step with:
+
+1. **OxiLean prelude** via
+   `oxilean_kernel::init_builtin_env`: Bool, Unit,
+   Empty, Nat, String, Eq, Prod, List, axioms (Quot,
+   propext, Classical.choice, DecidableEq) + recursors
+   + Nat arithmetic.
+2. **leo4 boundary primitives** via
+   `add_leo4_primitives`: sized integers
+   (UInt8/16/32/64/128, Int8/16/32/64/128), floats
+   (Float32, Float64), Char. Each lands as
+   `Declaration::Axiom { ty: Sort 1, … }` — the
+   elaborator only needs the names to resolve to *some*
+   sort; the marshalling layer encodes the actual wire
+   format separately.
+
+**Zero lake/lean overhead**: both layers run in-process
+against the `oxilean-kernel` cargo dep that
+`leo4-oxilean-build` already pulls. OxiLean-only users
+(`leo4.toml` with only `kind = "rust-transpile"`) get
+full elab without any Lean toolchain install.
+
+The CLI binary (`bin/leo4-oxilean-build.rs`) replaces
+its historical `Environment::new()` (empty → would
+fail elab on first `NameNotFound`) with `bootstrap_env()`.
+
+`LEO4_PRIMITIVE_TYPES` const exposes the
+augmentation list as `&[&str]` so future updates to
+the leo4 boundary primitive set sync in one place.
+Nightly-floats variants (`Float16`, `BFloat16`,
+`Float128`, complex variants) are intentionally NOT
+in this list — OxiLean has no use for them and they're
+handled at the Rust-codegen layer.
+
+7 new unit tests: bootstrap_env_installs_oxilean_prelude,
+bootstrap_env_installs_leo4_primitives,
+bootstrap_env_uint64_and_int64_distinct_axioms,
+bootstrap_env_idempotent_within_single_call,
+add_leo4_primitives_alone_works_on_fresh_env,
+leo4_primitive_list_covers_all_sized_ints,
+no_overlap_between_leo4_primitives_and_oxilean_builtins
+(the last cross-checks against OxiLean's own
+`all_builtin_names()` to prevent silent
+`DuplicateDeclaration` regressions when OxiLean
+upstream adds new built-ins).
+
+Workspace lib-test count 158 → 165. clippy
+--all-targets -D warnings clean.
+
+**OX5-oxi remaining work**: step 2 — exercise the new
+env on a real fixture (`def x : UInt64 := 0`) through
+`transpile_source_to_unit` to confirm elab succeeds end-
+to-end. Currently the env is bootstrapped + names
+resolve; whether elab fully accepts a leo4 boundary
+source is the integration test that closes the loop.
+
 ### Changed — Post-OX6 CLI refactor chunk 5: `leo4 run` reads `leo4.toml` + `--impl` selector (2026-05-24)
 
 `leo4 run`'s impl resolution rewritten with a Post-OX6

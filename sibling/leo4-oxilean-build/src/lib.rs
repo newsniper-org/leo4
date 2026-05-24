@@ -164,6 +164,14 @@
 /// switchover; production wiring lands in 13b–13d.
 pub mod leo4_translate;
 
+/// OX5-oxi — elab env bootstrap (no lake/lean dependency).
+/// `bootstrap_env()` builds an `oxilean_kernel::Environment`
+/// populated with OxiLean's `init_builtin_env` prelude +
+/// leo4 boundary primitives (`UInt8..128`, `Int8..128`,
+/// `Float32/64`, `Char`) so `transpile_source*`'s elab
+/// step doesn't choke on `NameNotFound`.
+pub mod leo4_env_bootstrap;
+
 use leo4_abi::LeanError;
 use oxilean_codegen::lcnf::LcnfFunDecl;
 use oxilean_codegen::rust_target_backend::{RustItem, RustTargetBackend};
