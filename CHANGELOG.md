@@ -7,6 +7,31 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11i: universe annotation `.{u, v}` (2026-05-22)
+
+`Decl` gained a `univ_params: Vec<String>` field for the
+`def foo.{u, v} : Sort u` form (Mathlib-ubiquitous). The
+field is populated for every decl kind that accepts a
+universe-parameter list: `def`, `theorem` / `lemma`,
+`axiom`, `structure`, `inductive`, `class`, `instance`.
+Empty `Vec` when the decl has no `.{…}` annotation.
+
+A new `univ_params_opt()` PEG rule (returns
+`Vec<String>`; empty on absence) is woven into each
+applicable decl rule immediately after the name. Existing
+construction sites updated to pipe the captured list into
+the AST field.
+
+Existing tests unaffected (`univ_params: vec![]` is the
+default for source without `.{…}` annotations).
+
+Tests 176 → 185 (+9): def-single-univ, def-multi-univ,
+def-no-univ (regression), theorem-with-univ, axiom-with-
+univ, structure-with-univs, inductive-with-univ, class-
+with-univ, combined-attr-prefix-and-univ.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11j: `@` explicit args marker (2026-05-22)
 
 New `Expr::At(Box<Expr>)` variant + grammar atom for
