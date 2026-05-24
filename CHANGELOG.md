@@ -7,6 +7,46 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 4: lambda + `fun` / `λ` (2026-05-22)
+
+OX6 grammar roadmap step 4. New atom `Expr::Lam(binders,
+body)` with `LamBinder` enum:
+
+```rust
+pub enum LamBinder {
+    Untyped(String),                            // fun x => …
+    Typed { kind, names, ty },                  // fun (x : T) => …
+}
+```
+
+Surface forms covered:
+
+- `fun x => body` (single untyped)
+- `fun a b c => body` (multi untyped)
+- `fun (x : Nat) => body` (typed explicit)
+- `fun (a b : Nat) => body` (typed multi-name)
+- `fun {T : Type} (x : T) => body` (mixed implicit + explicit)
+- `λ x => body` (Unicode λ — Lean 4 accepts both)
+- `fun x -> body` (dash arrow — OX3's `lean4_normalize`
+  rewrites `=>` to `->`; PEG accepts both natively so it
+  can replace the normaliser later without surface
+  regressions)
+
+Lambda binders are independent of `def`'s `BinderGroup`
+because lambda allows bare untyped names (`fun x => …`) and
+`def` doesn't.
+
+Tests 41 → 51 (+10): identity, multi-arg, typed-explicit,
+typed-multi-name, mixed-typed-groups (implicit + explicit),
+Unicode-λ, dash-arrow-body, lam-inside-def-value,
+body-is-full-expr (`fun a b c => f a + g b * h c`),
+no-collision-with-def-keyword (multi-decl source: a
+lambda body must not eat the next decl's `def`).
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: `structure` + `inductive` + `deriving`.
+
 ### Added — OX6 step 3: `if-then-else` + `match` with patterns (2026-05-22)
 
 OX6 grammar roadmap step 3. Two new top-level expression
