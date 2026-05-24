@@ -7,6 +7,47 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — Post-OX6 CLI refactor chunk 5: `leo4 run` reads `leo4.toml` + `--impl` selector (2026-05-24)
+
+`leo4 run`'s impl resolution rewritten with a Post-OX6
+four-way precedence:
+
+1. **`leo4.toml` present + `--impl <kind>`**: the flag
+   acts as a **selector** picking the matching
+   `[[impl]]` entry. A selector that matches none of
+   the listed kinds errors with the available list
+   (typo guard).
+2. **`leo4.toml` present, no `--impl`**: the FIRST
+   `[[impl]]` entry wins (multi-impl users put their
+   primary entry first).
+3. **No `leo4.toml`, legacy `.leo4-impl` marker
+   present**: marker value is used (pre-Post-OX6
+   projects keep building). A mismatching `--impl`
+   flag errors with a `leo4 init` migration hint.
+4. **Neither present**: hard error pointing at
+   `leo4 init`, unless `--impl` is explicitly passed
+   (bootstrap mode — flag intent wins).
+
+The `rust` / `rust-native` alias resolves
+bidirectionally — a `[[impl]] kind = "rust"` entry
+matches both `--impl rust` and `--impl rust-native`,
+and vice versa.
+
+Tests 50 → 59 (+9):
+resolve_run_impl_leo4_toml_single_no_selector,
+resolve_run_impl_leo4_toml_multi_first_entry_default,
+resolve_run_impl_leo4_toml_multi_selector_picks_match,
+resolve_run_impl_leo4_toml_selector_no_match_errors,
+resolve_run_impl_legacy_marker_fallback,
+resolve_run_impl_legacy_marker_with_mismatching_selector_errors,
+resolve_run_impl_neither_present_errors,
+resolve_run_impl_explicit_flag_bootstraps_when_neither_present,
+resolve_run_impl_rust_alias_matches_rust_native_entry.
+
+**Post-OX6 CLI refactor complete (chunks 1-5).**
+Workspace lib-test count for `leo4-cli`: 18 →
+59 (+41 across the refactor).
+
 ### Changed — Post-OX6 CLI refactor chunk 4: `leo4 init` writes / migrates `leo4.toml` (2026-05-24)
 
 `leo4 init` drops the required `--impl <kind>` flag.

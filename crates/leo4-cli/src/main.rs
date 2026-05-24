@@ -115,9 +115,16 @@ enum Cmd {
 
     /// Build + run the project end-to-end. Detects direction
     /// automatically from `Cargo.toml`'s `[lib] crate-type`
-    /// (`["cdylib"]` ⇒ reverse, else forward). Reads the target
-    /// implementation from `<dir>/.leo4-impl` (written by
-    /// `leo4 create` / `leo4 init`); override with `--impl`.
+    /// (`["cdylib"]` ⇒ reverse, else forward).
+    ///
+    /// Impl resolution precedence (Post-OX6):
+    /// 1. Explicit `--impl <kind>` matches an entry in
+    ///    `leo4.toml`'s `[[impl]]` list (or picks one
+    ///    when multiple are present).
+    /// 2. First `[[impl]]` entry in `leo4.toml`.
+    /// 3. Legacy `.leo4-impl` marker (pre-Post-OX6
+    ///    projects — `leo4 init` auto-migrates these).
+    /// 4. Hard error pointing at `leo4 init`.
     Run {
         /// Override auto-detection of forward vs reverse.
         #[arg(long)]
@@ -677,6 +684,89 @@ leo4 = {{ path = "{leo4_root}/crates/leo4", features = ["rust-exports"] }}
 
 // ─── `leo4 run` (build + execute) ───────────────────────────────────
 
+/// Post-OX6 impl resolution for `leo4 run`:
+///
+/// - **No explicit selector, no `leo4.toml`, legacy
+///   marker present**: use the marker. (Pre-Post-OX6
+///   projects keep working until the user runs
+///   `leo4 init` to migrate.)
+/// - **`leo4.toml` present with single `[[impl]]`**:
+///   use that entry; an explicit `--impl <kind>` must
+///   match its kind or we error (a mismatch is more
+///   likely a typo than a real intent).
+/// - **`leo4.toml` present with multiple `[[impl]]`s**:
+///   `--impl <kind>` is the selector; without it, the
+///   FIRST entry wins. A selector that matches none of
+///   the entries errors with the available list.
+/// - **Neither config nor marker**: hard error pointing
+///   at `leo4 init` to bootstrap.
+fn resolve_run_impl(dir: &Path, cli_impl: Option<&ImplKind>) -> Result<ImplKind, String> {
+    use crate::config::{ConfigError, Leo4Config};
+
+    match Leo4Config::load_from_dir(dir) {
+        Ok(cfg) => {
+            // cfg.impls is non-empty by validate() invariant.
+            let selected = match cli_impl {
+                None => &cfg.impls[0],
+                Some(want) => {
+                    let want_marker = want.marker_str();
+                    cfg.impls
+                        .iter()
+                        .find(|e| {
+                            // Accept the rust/rust-native
+                            // alias on both sides.
+                            e.kind == want_marker
+                                || (want_marker == "rust-native" && e.kind == "rust")
+                                || (want_marker == "rust" && e.kind == "rust-native")
+                        })
+                        .ok_or_else(|| {
+                            let listed: Vec<String> =
+                                cfg.impls.iter().map(|e| e.kind.clone()).collect();
+                            format!(
+                                "run: `--impl {want_marker}` is not listed in {dir:?}/leo4.toml. \
+                                 Available: [{}]. Edit leo4.toml to add it, or pass one of the listed kinds.",
+                                listed.join(", ")
+                            )
+                        })?
+                }
+            };
+            parse_impl_kind(&selected.kind).map_err(|e| {
+                format!("run: leo4.toml kind {:?} unparseable: {e}", selected.kind)
+            })
+        }
+        Err(ConfigError::NotFound) => {
+            // Fall back to legacy marker.
+            if let Some(legacy) = read_impl_marker(dir) {
+                if let Some(want) = cli_impl {
+                    if want != &legacy {
+                        return Err(format!(
+                            "run: legacy `.leo4-impl` marker says `{}`, but you passed \
+                             `--impl {}`. Migrate the project with `leo4 init` so the \
+                             selector resolves against `leo4.toml`.",
+                            legacy.marker_str(),
+                            want.marker_str(),
+                        ));
+                    }
+                }
+                return Ok(legacy);
+            }
+            // No config + no marker + maybe an explicit
+            // `--impl` flag → still error, but trust the
+            // flag's intent and surface the bootstrap path.
+            if let Some(want) = cli_impl {
+                return Ok(want.clone());
+            }
+            Err(format!(
+                "run: no `leo4.toml` or `.leo4-impl` at {dir:?}. \
+                 Run `leo4 init <direction>` here to bootstrap, or pass \
+                 `--impl <kind>` explicitly to override."
+            ))
+        }
+        Err(e) => Err(format!("run: {e}")),
+    }
+}
+
+
 fn run_run(
     direction_arg: Option<Direction>,
     iface_arg: Option<String>,
@@ -697,17 +787,14 @@ fn run_run(
         ));
     }
 
-    // Resolve --impl: explicit override > .leo4-impl marker > error.
-    let impl_kind = match impl_arg {
-        Some(k) => k,
-        None => read_impl_marker(&dir).ok_or_else(|| {
-            format!(
-                "run: no `.leo4-impl` marker at {dir:?}. \
-                 Either re-run `leo4 init --impl <mslean4|rust-native>` to write one, \
-                 or pass `--impl <…>` explicitly to this command."
-            )
-        })?,
-    };
+    // Resolve impl with Post-OX6 four-way precedence:
+    //   1. Explicit `--impl <kind>` flag on the command line.
+    //   2. `leo4.toml`'s `[[impl]]` list (with `--impl` acting as
+    //      a *selector* when multiple entries are present; first
+    //      entry wins when no selector is passed).
+    //   3. Legacy `.leo4-impl` marker (pre-Post-OX6 projects).
+    //   4. Hard error with migration guidance.
+    let impl_kind = resolve_run_impl(&dir, impl_arg.as_ref())?;
     check_impl_supported(&impl_kind)?;
 
     let pkg_name = read_cargo_pkg_name(&cargo_toml)
@@ -1793,6 +1880,120 @@ kind = "rust-transpile"
             !dir.join(".leo4-impl").exists(),
             "init must delete the legacy marker"
         );
+    }
+
+    // ─── Post-OX6 chunk 5: leo4 run impl resolution ───────
+
+    fn write_min_cargo_toml(dir: &Path) {
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"p\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resolve_run_impl_leo4_toml_single_no_selector() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        write_leo4_toml(&dir, "mslean4").unwrap();
+        let kind = resolve_run_impl(&dir, None).unwrap();
+        assert_eq!(kind, ImplKind::Mslean4);
+    }
+
+    #[test]
+    fn resolve_run_impl_leo4_toml_multi_first_entry_default() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        fs::write(
+            dir.join("leo4.toml"),
+            "[[impl]]\nkind = \"mslean4\"\n[[impl]]\nkind = \"rust-transpile\"\n",
+        )
+        .unwrap();
+        // No --impl flag → first entry (mslean4) wins.
+        let kind = resolve_run_impl(&dir, None).unwrap();
+        assert_eq!(kind, ImplKind::Mslean4);
+    }
+
+    #[test]
+    fn resolve_run_impl_leo4_toml_multi_selector_picks_match() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        fs::write(
+            dir.join("leo4.toml"),
+            "[[impl]]\nkind = \"mslean4\"\n[[impl]]\nkind = \"rust-transpile\"\n",
+        )
+        .unwrap();
+        let kind = resolve_run_impl(&dir, Some(&ImplKind::RustTranspile)).unwrap();
+        assert_eq!(kind, ImplKind::RustTranspile);
+    }
+
+    #[test]
+    fn resolve_run_impl_leo4_toml_selector_no_match_errors() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        // Config has only mslean4; user asks for
+        // rust-transpile → error with available list.
+        write_leo4_toml(&dir, "mslean4").unwrap();
+        let err = resolve_run_impl(&dir, Some(&ImplKind::RustTranspile))
+            .expect_err("non-listed selector must error");
+        assert!(err.contains("rust-transpile"), "{err}");
+        assert!(err.contains("Available"), "{err}");
+    }
+
+    #[test]
+    fn resolve_run_impl_legacy_marker_fallback() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        // No leo4.toml; only the legacy marker.
+        write_impl_marker(&dir, &ImplKind::Mslean4).unwrap();
+        let kind = resolve_run_impl(&dir, None).unwrap();
+        assert_eq!(kind, ImplKind::Mslean4);
+    }
+
+    #[test]
+    fn resolve_run_impl_legacy_marker_with_mismatching_selector_errors() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        write_impl_marker(&dir, &ImplKind::Mslean4).unwrap();
+        let err = resolve_run_impl(&dir, Some(&ImplKind::RustNative))
+            .expect_err("mismatching selector on legacy marker must error");
+        assert!(err.contains("leo4 init"), "{err}");
+    }
+
+    #[test]
+    fn resolve_run_impl_neither_present_errors() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        let err = resolve_run_impl(&dir, None)
+            .expect_err("no config + no marker must error");
+        assert!(err.contains("leo4 init"), "{err}");
+    }
+
+    #[test]
+    fn resolve_run_impl_explicit_flag_bootstraps_when_neither_present() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        // No config, no marker, but explicit --impl flag.
+        // Per the chunk-5 contract, the flag's intent
+        // wins (bootstrapping case).
+        let kind = resolve_run_impl(&dir, Some(&ImplKind::Mslean4)).unwrap();
+        assert_eq!(kind, ImplKind::Mslean4);
+    }
+
+    #[test]
+    fn resolve_run_impl_rust_alias_matches_rust_native_entry() {
+        let dir = tempdir();
+        write_min_cargo_toml(&dir);
+        fs::write(
+            dir.join("leo4.toml"),
+            "[[impl]]\nkind = \"rust-native\"\n",
+        )
+        .unwrap();
+        // The flag's marker_str is "rust-native"; the
+        // alias logic also lets "rust" entry resolve.
+        let kind = resolve_run_impl(&dir, Some(&ImplKind::RustNative)).unwrap();
+        assert_eq!(kind, ImplKind::RustNative);
     }
 
     #[test]
