@@ -937,15 +937,34 @@ all wait for the v1.0 RC window or later.
   while OX6 churn lands; flip both together once the
   parser is the single source of truth.
 
-  **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)** — elab
-  env bootstrap. CLI's transpile path runs `elaborate_decl`
-  in an empty `Environment::new()`, so even successfully-
-  parsed code fails on `NameNotFound("UInt64")` /
-  `NameNotFound("+")`. The CLI needs to populate the env
-  with the Lean stdlib + leo4 runtime decls before elab.
-  Option (a): bake an env snapshot built ahead-of-time;
-  Option (b): point the CLI at a pre-elaborated `.olean`
-  cache the lake plugin produced.
+  **OX5 (NEW v1.0 RC blocker, locked 2026-05-22; split
+  2026-05-24)** — elab env bootstrap. CLI's transpile
+  path runs `elaborate_decl` in an empty
+  `Environment::new()`, so even successfully-parsed code
+  fails on `NameNotFound("UInt64")` /
+  `NameNotFound("+")`. Per-impl resolution chosen
+  2026-05-24 (OxiLean-only users must avoid all
+  lake/lean overhead):
+
+  - **OX5-oxi** (rust-transpile path): use OxiLean's
+    own `init_builtin_env` (covers Bool/Unit/Empty/
+    Nat/String/Eq/Prod/List/axioms) + leo4-side
+    augmentation for boundary primitives OxiLean
+    doesn't ship by default (UInt8..UInt128,
+    Int8..Int128, Float32, Float64, Char). E1 is the
+    primary path (oxilean-kernel cargo dep already
+    pulled by leo4-oxilean-build); E2 augmentation
+    covers the leo4-required surface OxiLean misses.
+    **Zero lake/lean overhead for OxiLean-only users.**
+  - **OX5-msl** (mslean4 path): C2 (lake plugin → CLI
+    env handoff). Lake plugin elab is the source of
+    truth; CLI consumes the env via a stable
+    serialisation contract. Only affects users with
+    `[[impl]] kind = "mslean4"` in `leo4.toml` —
+    OxiLean-only users untouched.
+
+  Sequencing: OX5-oxi first (no lake dependency,
+  lower risk + faster to ship); OX5-msl after.
 - **OX2** Marshallable matrix expansion (locked 2026-05-22,
   carrier-types layer landed 2026-05-22).
   Built-ins now covered by `synthesize_canonical_wrapper`:
