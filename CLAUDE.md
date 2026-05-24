@@ -113,6 +113,34 @@ already-built `.olean` files. We do **not** hook
 `Lake.Module.recBuildLean` (it stayed `private` across v4.27.0 →
 v4.30.0-rc2). Full investigation: `spike/SPIKE-0-FINDINGS.md`.
 
+## How to Work With the rust-transpile Path (OxiLean)
+
+`sibling/leo4-oxilean-build` is the no-lake-no-lean
+rust-transpile path. Pipeline:
+
+1. Parse the user's Lean source with
+   `leo4_lean4_parse::parse_decls` (OX6 PEG-based parser,
+   strict superset of oxilean-parse v0.1.2's accepted
+   surface).
+2. Translate `leo4_lean4_parse::Decl` →
+   `oxilean_parse::Decl` via the `leo4_translate` module.
+   On `TranslateError::Unsupported`, fall back to the
+   legacy oxilean-parse-direct walker.
+3. Elaborate against an env bootstrapped by
+   `leo4_env_bootstrap::bootstrap_env()` —
+   `oxilean_kernel::init_builtin_env` (Bool / Unit /
+   Empty / Nat / String / Eq / Prod / List + axioms)
+   plus leo4 boundary primitives (UInt8..128, Int8..128,
+   Float32/64, Char) as `Declaration::Axiom`. **Zero
+   lake/lean overhead.**
+4. Lower via `oxilean_codegen::to_lcnf` and emit a Rust
+   crate.
+
+The `leo4-parser` cargo feature (default ON since
+2026-05-24) selects the leo4-lean4-parse → leo4_translate
+path; `--no-default-features` falls back to
+oxilean-parse-direct.
+
 ## How to Work With the `leo4::import!` Layer
 
 `leo4::import! { fn add(a: u64, b: u64) -> u64; … }` is a

@@ -403,8 +403,18 @@ across the boundary in step with Lean's unboxing. Discovered
 | Tier | Platforms                       | Guarantee |
 |------|---------------------------------|-----------|
 | 1    | x86_64-unknown-linux-gnu        | every commit verified by CI; regressions block merge |
+| 1+   | `*-linux-musl*` for **no-mslean4-no-lake** paths (rust-transpile / scaffold / pure-Rust crates) | feature parity within the path scope; v1.0 RC mandatory (C5, locked 2026-05-24). See `OS-PORTABILITY.md` §0.1 |
 | 2    | x86_64-pc-windows-**gnullvm**   | feature parity expected, periodic CI |
+| 2    | `*-linux-android*` for the same no-mslean4-no-lake scope | C6, deferred to v1.x |
 | 3    | aarch64-apple-darwin / x86_64-apple-darwin | best-effort; community fixes welcome but not gating |
+
+**The 1+ / 2 (android) tiers are per-PATH, not
+per-crate** — the `leo4-mslean4` runtime path stays
+glibc-only (Lean ships `libleanshared` linked against
+glibc; a musl / android process cannot dlopen it
+across the ABI boundary), but the `leo4-oxilean-build`
+rust-transpile path, the scaffold-only CLI commands,
+and every pure-Rust crate are fair game.
 
 **Windows = `*-pc-windows-gnullvm`, not `*-pc-windows-msvc`**
 (adopted 2026-05-21). The gnullvm target uses clang + lld + UCRT,

@@ -6,18 +6,63 @@ toolchain version.
 ## Status
 
 **Phases 0–8 released as v0.1.0 (2026-05-21). Phase 9
-(reverse direction: Rust → Lean) **fully end-to-end as of
-2026-05-23** — declarative Lake `extern_lib` integration,
-dispatcher↔worker handshake, runtime ABI, and
-`examples/05-rust-export/` running with correct values for
-every export.** The forward pipeline runs end-to-end on
-Tier 1 (x86_64 Linux): Lake plugin, Rust workspace, shim
-synthesis, C ↔ Lean dispatch, mutual recursion, async `io<T>`
-lift, and a Mathlib-compatible carrier-type subset with opt-in
-bridges. `tests/mangling/` confirms cross-impl byte-identical
-mangling across **70 mangled instantiations** (29 logical entries)
-with schema_hash `qi5gb74dbjyxo` between the Lean plugin and the
-Rust `schema-idl` crate.
+(reverse direction: Rust → Lean) fully end-to-end as of
+2026-05-23.** The forward pipeline runs end-to-end on
+Tier 1 (x86_64 Linux glibc): Lake plugin, Rust workspace,
+shim synthesis, C ↔ Lean dispatch, mutual recursion, async
+`io<T>` lift, and a Mathlib-compatible carrier-type subset
+with opt-in bridges. `tests/mangling/` confirms cross-impl
+byte-identical mangling across **70 mangled instantiations**
+(29 logical entries) with schema_hash `qi5gb74dbjyxo` between
+the Lean plugin and the Rust `schema-idl` crate.
+
+**v1.0 RC progress (2026-05-24)** — the v1.0 RC OX
+blockers cleared in a single push:
+
+- **OX6** PEG-based Lean 4 parser (`sibling/leo4-lean4-parse`),
+  steps 1–13d landed; `leo4-oxilean-build`'s default
+  parser is now `leo4_lean4_parse::parse_decls` →
+  `leo4_translate` → `oxilean_parse::Decl`; the legacy
+  oxilean-parse-direct path remains as fallback. Strict
+  superset of oxilean-parse v0.1.2's accepted surface.
+- **OX5** elab env bootstrap — `leo4-oxilean-build`'s
+  rust-transpile path uses `oxilean_kernel::init_builtin_env`
+  + leo4 boundary primitives (UInt8..128, Int8..128,
+  Float32/64, Char). Zero lake/lean overhead. `OX5-msl`
+  closed no-op (mslean4 path uses lake plugin's Lean-native
+  elab; no Rust-side analogue exists).
+- **Post-OX6 CLI refactor** — `leo4 create` / `leo4 init`
+  drop the `--impl <kind>` flag; runtime-impl selection
+  moves into a per-(sub)crate `leo4.toml` config file.
+  `leo4 create --subcrate` registers into the surrounding
+  workspace's `members` array. `leo4 init` auto-migrates
+  any legacy `.leo4-impl` marker. `leo4 run` reads
+  `leo4.toml` with `--impl <kind>` as selector when
+  multiple `[[impl]]` entries are present.
+- **OS abstraction Leo4.Platform layer** — first leo4-Lean
+  OS abstraction (`lake/Leo4/Leo4/Platform.lean`)
+  encapsulates `.so` / `.dylib` / `.dll` choice and the
+  POSIX-only `-Wl,-rpath` emission previously hardcoded
+  in `Leo4.Build`.
+- **Windows IPC** for reverse direction worker side
+  (`leo4-rust-worker`'s `open_ipc_channel`) — the missing
+  half of Phase 9-4c — now opens the dispatcher's named
+  pipe via `CreateFileW` with retry on the spawn race.
+  Cross-compile clean on `x86_64-pc-windows-gnullvm`.
+- **musl Tier 1+ policy** (C5, v1.0 RC mandatory) for
+  paths with no `leo4-mslean4` and no lake dependency
+  (rust-transpile / scaffold-only / pure-Rust crates).
+  14 workspace crates build musl-clean out of the box;
+  `leo4-rust-bridge` / `leo4-wasm` need a host musl C
+  toolchain (`musl-clang` or `musl-gcc`).
+  `leo4-rust-bridge`'s build.rs auto-fixes Arch's
+  `musl-clang` `stdatomic.h` packaging quirk.
+  **Android `*-linux-android*` Tier 2** (C6) deferred
+  to v1.x with the same path scope.
+- **`*-pc-windows-gnullvm` Tier 2** runtime verification
+  (C1) — `docs/windows-manual-test-plan.md` holds the
+  pre-flight audit + test matrix; manual VirtualBox pass
+  precedes CI infra.
 
 The reverse pipeline (Phase 9) lets Rust expose
 `#[leo4::export]`-tagged functions that Lean calls through a
@@ -122,18 +167,42 @@ What works today:
   - `#[leo4::export(isolated)]` opts a function into
     per-call fresh worker mode; `LEO4_RUST_WORKER_RECYCLE_CALLS`
     bounds the persistent worker's lifetime (9.X).
-- **`leo4` CLI** (`crates/leo4-cli/`, 2026-05-23) — `leo4
-  create <direction> <dir>` scaffolds a new project;
-  `leo4 init <direction>` integrates leo4 into an existing
-  Cargo crate (idempotent Cargo.toml append + lean/ scaffold).
+- **`leo4` CLI** (`crates/leo4-cli/`, 2026-05-23; refactor
+  2026-05-24) — `leo4 create <direction> <dir>` scaffolds
+  a new project; `leo4 init <direction>` integrates leo4
+  into an existing Cargo crate (idempotent Cargo.toml
+  append + lean/ scaffold). **Both write a `leo4.toml`**
+  declaring runtime impls; `--impl <kind>` is no longer a
+  CLI flag. `leo4 create --subcrate` registers the new
+  crate into the surrounding workspace's `members` array.
+  `leo4 init` auto-migrates the legacy `.leo4-impl`
+  marker. `leo4 run` reads `leo4.toml` with `--impl`
+  acting as a selector when multiple `[[impl]]` entries
+  are present.
+- **Sibling parser fork** (`sibling/leo4-lean4-parse/`,
+  2026-05-22 → 2026-05-24) — PEG-based Lean 4 parser
+  (`peg` crate), strict superset of `oxilean-parse`
+  v0.1.2's accepted surface. Replaced the OX3/OX4
+  textual pre-rewrite chain in
+  `leo4-oxilean-build`. 289 tests (288 lib + 1
+  cross-check against oxilean-parse on a shared
+  corpus). leo4_translate (`sibling/leo4-oxilean-build`
+  `leo4_translate` module) lowers
+  `leo4_lean4_parse::Decl` → `oxilean_parse::Decl`
+  so the elab / codegen pipeline stays unchanged.
 
 Open items:
 
 - Some `LeanError` codes (`0x02` / `0x03` / `0x04` / `0x06` / `0x08`)
   are reserved but not yet exercised by a test fixture.
-- Windows runtime verification for the 9-4c backend — code
-  compiles under the gnullvm Tier 2 target choice; CI
-  matrix coverage follows.
+- **C1** Windows runtime verification (Tier 2 CI matrix
+  for `*-pc-windows-gnullvm`). Code compiles + worker-side
+  Windows IPC landed 2026-05-24; manual VirtualBox pass
+  (`docs/windows-manual-test-plan.md`) precedes CI.
+- **C5** musl CI matrix row pending; code 0-changes
+  needed (audit verified 2026-05-24).
+- **G2** Publish to crates.io — API surface stabilised;
+  metadata + dep-order publish remains.
 - `LEO4_ERR_RUST_WORKER_RESTARTED` (0x00020002) is reserved
   but not surfaced — recycle is currently transparent.
 - `LEO4_RUST_WORKER_RECYCLE_SECONDS` (time-based recycle)
@@ -229,6 +298,8 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │   └── leo4-cli/           # `leo4` scaffold CLI (create / init)
 ├── lake/                   # Lake workspace (Lean side)
 │   ├── Leo4/               # runtime library
+│   │   ├── Leo4/Platform.lean
+│   │   │                   # OS abstraction layer (dynlib ext, rpath, …)
 │   │   └── Leo4/MathlibBridge/
 │   │                       # opt-in 1-to-1 conversions Lean carriers ↔ Mathlib
 │   ├── Leo4Plugin/         # Lake plugin exe (leo4plugin)
@@ -238,11 +309,16 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │                           # `lean_exe` that `require Leo4Rust`s it
 ├── sibling/                # non-workspace Cargo / Lake projects
 │   ├── leo4-wasip3/        # stable Rust + wasm32-wasip2 + wasip3 v0.6
+│   ├── leo4-lean4-parse/   # OX6 PEG-based Lean 4 parser (strict
+│   │                       # superset of oxilean-parse v0.1.2)
+│   ├── leo4-oxilean-build/ # OxiLean transpile path (uses leo4-lean4-parse
+│   │                       # + leo4_translate; OX5-oxi env bootstrap)
 │   └── mathlib-bridge-test/# Lake package verifying Mathlib bridges
-├── docs/                   # Typst documentation suite
+├── docs/                   # Typst documentation suite + plans
 │   ├── template/leo4-book.typ
 │   ├── learning/{en,ko,ja,de}/main.typ
-│   └── implement-from-scratch/{en,ko,ja,de}/main.typ
+│   ├── implement-from-scratch/{en,ko,ja,de}/main.typ
+│   └── windows-manual-test-plan.md   # C1 + C5 prelim audit + test matrix
 ├── ci/                     # Multi-version Lean matrix infra
 │   ├── Dockerfile.lean-test
 │   ├── entrypoint.sh
@@ -312,12 +388,19 @@ just glue-shim-build OUT_OBJ                              # leanc -c the Lean gl
 # Sibling tests (off the default ladder):
 just mathlib-bridge-test                   # type-checks Mathlib bridges (1-2h cold)
 
-# Project scaffolding (leo4 CLI):
+# Project scaffolding (leo4 CLI; refactored 2026-05-24):
 cargo install --path crates/leo4-cli       # install `leo4` binary on PATH
 leo4 create forward my-app                 # new project (Lean exports + Rust caller)
 leo4 create reverse my-solver              # new project (Rust cdylib + Lean caller)
+leo4 create forward sub --subcrate         # scaffold as a subcrate of the current
+                                           # Cargo workspace (auto-registers in `members`)
 leo4 init forward                          # add leo4 to existing Cargo crate (cwd)
 leo4 init reverse --dir path/to/crate      # same, with explicit dir
+                                           # auto-migrates legacy `.leo4-impl` marker
+                                           # to `leo4.toml` if found
+leo4 run                                   # build + run end-to-end (impl resolved
+                                           # from `leo4.toml`; --impl <kind> selects
+                                           # when multiple [[impl]] entries listed)
 
 # Multi-version Lean matrix (containerised):
 just ci-image           # build the container image once
@@ -380,13 +463,25 @@ local-container output and GitHub Actions output is a real bug.
 
 | Tier | Platforms | Guarantee |
 |------|-----------|-----------|
-| 1    | x86_64-unknown-linux-gnu          | every commit, every matrix entry must pass |
-| 2    | x86_64-pc-windows-**gnullvm**     | feature parity, periodic CI (clang + lld + UCRT toolchain, see `LEO4-DESIGN.md §9.1`) |
-| 3    | macOS (Apple Silicon / Intel)     | best-effort; not gating, no CI |
+| 1    | x86_64-unknown-linux-gnu                                                        | every commit, every matrix entry must pass |
+| 1+   | `*-linux-musl*` for **no-mslean4-no-lake** paths (rust-transpile / scaffold / pure-Rust) | feature parity within the path scope; v1.0 RC mandatory (C5, locked 2026-05-24) |
+| 2    | x86_64-pc-windows-**gnullvm**                                                   | feature parity, periodic CI (clang + lld + UCRT toolchain, see `LEO4-DESIGN.md §9.1`) |
+| 2    | `*-linux-android*` for the same no-mslean4-no-lake scope                        | C6, deferred to v1.x |
+| 3    | macOS (Apple Silicon / Intel)                                                   | best-effort; not gating, no CI |
+
+The mslean4 runtime path is glibc-only because Lean ships
+`libleanshared` linked against glibc; a musl process
+cannot dlopen it across the ABI boundary. The
+rust-transpile (OxiLean) path has no such constraint —
+the entire pipeline is pure Rust + the `oxilean-kernel`
+cargo dep.
 
 macOS dropped from Tier 1 to Tier 3 on 2026-05-20 — see
 `LEO4-DESIGN.md §9.1` for rationale. The code paths remain
 platform-agnostic; only the test/exit-criteria scope shrunk.
+
+See `OS-PORTABILITY.md` §0.1 for the per-distro musl
+toolchain setup matrix.
 
 ## License
 

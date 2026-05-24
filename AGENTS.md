@@ -645,32 +645,67 @@ would be expensive to relitigate:
     mixing decl kinds, `def` `where` clauses, and possibly
     other syntactic forms surfacing in real code. Same
     textual-pre-rewrite approach as OX3.
-  - **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)**:
-    elab env bootstrap. CLI's transpile path elaborates in
-    an empty `Environment::new()`, so even successfully-
-    parsed code fails on `NameNotFound("UInt64")` /
-    `NameNotFound("+")`. v1.0 RC needs either a baked env
-    snapshot (built ahead-of-time from Lean stdlib + leo4
-    runtime) or pointing the CLI at the lake plugin's
-    pre-elaborated `.olean` cache.
-  - **OX6 (v1.0 RC blocker, plan expanded 2026-05-22)**:
-    PEG-based Lean 4 parser fork at
-    `sibling/leo4-lean4-parse/`. Built from scratch using
-    the `peg` crate; strict superset of `oxilean-parse`
-    v0.1.2 where overlapping; AST shapes mirror upstream
-    for downstream interop.
-
-    **All ~25 sub-steps of OX6 are v1.0 RC mandatory**
-    (steps 1–10 grammar build-out, 11a–11l v1.0 RC-
-    critical surface gaps, 11m–11w surface-coverage tail
-    including DSL / macro / debug-command decls, 12
-    cross-check vs `oxilean-parse`, 13 leo4-oxilean-build
-    switchover). Steps 1–10b done at this point; the
-    expanded plan with 10c–13 is in ROADMAP.md OX6 entry.
-
-    Once step 13 lands the OX3 / OX4 textual rewrites
-    transition from "active dialect bridge" to "legacy
-    compatibility layer".
+  - **OX5 (CLOSED 2026-05-24)** — elab env bootstrap,
+    split per-impl per 병익's "OxiLean-only users must
+    have zero lake/lean overhead" constraint:
+    - **OX5-oxi (DONE)**: `leo4-oxilean-build`'s
+      `leo4_env_bootstrap` calls
+      `oxilean_kernel::init_builtin_env` (Bool / Unit /
+      Empty / Nat / String / Eq / Prod / List + axioms
+      + Nat arithmetic) then augments with leo4 boundary
+      primitives (UInt8..128, Int8..128, Float32/64,
+      Char). Zero lake/lean dependency.
+    - **OX5-msl (NO-OP CLOSED)**: code audit confirmed
+      mslean4 path uses lake plugin's Lean-native elab
+      (`import Lean` context); no Rust-side analogue of
+      the OX5 problem exists.
+  - **OX6 (CLOSED 2026-05-24)** — PEG-based Lean 4 parser
+    fork at `sibling/leo4-lean4-parse/`. All ~25 sub-
+    steps landed: grammar build-out 1–10, surface
+    coverage 11a–11w (block / doc comments, anon ctor,
+    anon struct, list literal, modifier prefixes,
+    let-in, by tactics, multi-line do, universe annot,
+    @ explicit args, example, numeric extensions,
+    if-let, scrutinee binding, pattern guards, `(· + 1)`
+    shorthand, Unicode ops, do for/while/until, DSL
+    decls notation/macro_rules/syntax/elab + fixity,
+    debug `#commands`, omit/include, doc-comment
+    semantic binding, equational `def`-by-arms),
+    oxilean-parse cross-check (12), leo4-oxilean-build
+    switchover (13a–13d with `leo4-parser` cargo
+    feature flipped ON 13d). OX3 / OX4 textual rewrites
+    remain as input filter to both parser paths but the
+    primary surface translator is now leo4-lean4-parse.
+  - **Post-OX6 CLI refactor (CLOSED 2026-05-24)** —
+    `leo4 create` + `leo4 init` dropped the
+    `--impl <kind>` flag in favor of per-(sub)crate
+    `leo4.toml`. `leo4 create --subcrate` registers
+    the new crate into the surrounding workspace's
+    `members` array. `leo4 init` auto-migrates legacy
+    `.leo4-impl`. `leo4 run` reads `leo4.toml` with
+    `--impl <kind>` as a selector when multiple
+    `[[impl]]` entries are present.
+  - **C5 musl Tier 1+ (NEW v1.0 RC blocker, locked
+    2026-05-24)** — `*-linux-musl*` for paths with NO
+    `leo4-mslean4` AND NO lake dependency. 14 crates
+    audit-verified clean; `leo4-rust-bridge`'s build.rs
+    auto-fixes Arch's `musl-clang` `stdatomic.h`
+    packaging quirk. **C6 android Tier 2** deferred to
+    v1.x as the sibling policy.
+  - **Leo4.Platform layer (NEW 2026-05-24)** —
+    `lake/Leo4/Leo4/Platform.lean`, first leo4-Lean OS
+    abstraction layer per OS-PORTABILITY.md §4 policy.
+    Encapsulates `dynlibExt` / `dynlibPrefix` /
+    `linkRpath?` previously hardcoded in `Leo4.Build`.
+    Three OS-PORTABILITY §3 medium-priority audit items
+    resolved.
+  - **Windows IPC worker side (NEW 2026-05-24)** —
+    Phase 9-4c's missing half. `leo4-rust-worker`'s
+    `open_windows_pipe` opens the dispatcher's named
+    pipe via `CreateFileW` (`std::fs::OpenOptions::open`
+    on Windows) with 10× retry backoff for the spawn
+    race. Cross-compile clean on
+    `x86_64-pc-windows-gnullvm`.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from
