@@ -7,6 +7,39 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13b-2: translator lifts binders into Pi / Lam (2026-05-24)
+
+`leo4_translate` now handles binders for Definition,
+Theorem, and Axiom. Each leo4 `BinderGroup`
+`(a b : Nat)` expands into oxilean's per-name
+`Vec<Binder>` representation `[Binder{name:"a",…},
+Binder{name:"b",…}]`, then the resulting binder list
+wraps:
+
+- The decl's **type** in a `Pi(binders, inner_ty)` —
+  i.e. `Nat → Nat → T` for `def f (a b : Nat) : T`.
+- The decl's **body** in a `Lam(binders, inner_val)` —
+  i.e. `fun a b => …` for the val of the same def.
+
+Empty binders pass through unchanged (no spurious
+Pi/Lam wrap for `def x : T := y`).
+
+`BinderKind` mapping: `Explicit` → `Default`,
+`Implicit` → `Implicit`, `Instance` → `Instance`.
+(`StrictImplicit` does not have a leo4-lean4-parse
+counterpart and isn't reachable via this path.)
+
+Tests 12 → 15 (+3): definition_with_one_explicit_binder_lifts_to_pi_and_lam,
+definition_multi_binder_group_expands_per_name,
+binder_kinds_map_correctly, theorem_with_binders_lifts,
+no_binders_skips_pi_lam_wrap. Removed the prior 13b-1
+"theorem with binders unsupported" + 13a
+"definition with binders unsupported" negative
+assertions — both now translate. Workspace lib-test
+count 132 → 135.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 13b-1: translator covers Theorem / Axiom / Import / Namespace (2026-05-24)
 
 `leo4_translate::translate_decl` now handles four

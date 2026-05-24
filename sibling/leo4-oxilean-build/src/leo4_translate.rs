@@ -37,11 +37,12 @@
 //! shim.
 
 use leo4_lean4_parse::{
-    Decl as L4Decl, DeclKind as L4Kind, Expr as L4Expr,
-    Literal as L4Lit,
+    BinderGroup as L4BinderGroup, BinderKind as L4BinderKind, Decl as L4Decl,
+    DeclKind as L4Kind, Expr as L4Expr, Literal as L4Lit,
 };
 use oxilean_parse::{
-    Decl as OxDecl, Literal as OxLit, Located, SurfaceExpr as OxExpr,
+    Binder as OxBinder, BinderKind as OxBinderKind, Decl as OxDecl,
+    Literal as OxLit, Located, SurfaceExpr as OxExpr,
 };
 use oxilean_parse::span_util::dummy_span;
 
@@ -86,16 +87,15 @@ fn translate_decl_kind(
 ) -> Result<OxDecl, TranslateError> {
     match k {
         L4Kind::Definition { name, binders, ty, value } => {
-            if !binders.is_empty() {
-                return Err(TranslateError::Unsupported(
-                    "Definition binders (lands in 13b-2)",
-                ));
-            }
+            let oxbinders = translate_binders(binders)?;
             let ty = match ty {
-                Some(t) => Some(translate_expr_located(t)?),
+                Some(t) => {
+                    let inner_ty = translate_expr_located(t)?;
+                    Some(wrap_pi(&oxbinders, inner_ty))
+                }
                 None => None,
             };
-            let val = translate_expr_located(value)?;
+            let val = wrap_lam(&oxbinders, translate_expr_located(value)?);
             Ok(OxDecl::Definition {
                 name: name.clone(),
                 univ_params: univ_params.to_vec(),
@@ -106,30 +106,27 @@ fn translate_decl_kind(
             })
         }
         L4Kind::Theorem { name, binders, ty, proof } => {
-            if !binders.is_empty() {
-                return Err(TranslateError::Unsupported(
-                    "Theorem binders (lands in 13b-2)",
-                ));
-            }
+            let oxbinders = translate_binders(binders)?;
+            let inner_ty = translate_expr_located(ty)?;
+            let ty = wrap_pi(&oxbinders, inner_ty);
+            let proof = wrap_lam(&oxbinders, translate_expr_located(proof)?);
             Ok(OxDecl::Theorem {
                 name: name.clone(),
                 univ_params: univ_params.to_vec(),
-                ty: translate_expr_located(ty)?,
-                proof: translate_expr_located(proof)?,
+                ty,
+                proof,
                 where_clauses: Vec::new(),
                 attrs: Vec::new(),
             })
         }
         L4Kind::Axiom { name, binders, ty } => {
-            if !binders.is_empty() {
-                return Err(TranslateError::Unsupported(
-                    "Axiom binders (lands in 13b-2)",
-                ));
-            }
+            let oxbinders = translate_binders(binders)?;
+            let inner_ty = translate_expr_located(ty)?;
+            let ty = wrap_pi(&oxbinders, inner_ty);
             Ok(OxDecl::Axiom {
                 name: name.clone(),
                 univ_params: univ_params.to_vec(),
-                ty: translate_expr_located(ty)?,
+                ty,
                 attrs: Vec::new(),
             })
         }
@@ -166,6 +163,54 @@ fn translate_decl_kind(
 
 fn translate_expr_located(e: &L4Expr) -> Result<Located<OxExpr>, TranslateError> {
     Ok(Located::new(translate_expr(e)?, dummy_span()))
+}
+
+/// Translate a list of `BinderGroup`s into oxilean's
+/// per-name `Vec<Binder>`. Each group `(a b : Nat)` →
+/// `[Binder { name: "a", ty: Some(Nat), info: Default },
+///   Binder { name: "b", ty: Some(Nat), info: Default }]`.
+fn translate_binders(groups: &[L4BinderGroup]) -> Result<Vec<OxBinder>, TranslateError> {
+    let mut out = Vec::new();
+    for g in groups {
+        let ty = translate_expr_located(&g.ty)?;
+        let info = translate_binder_kind(&g.kind);
+        for name in &g.names {
+            out.push(OxBinder {
+                name: name.clone(),
+                ty: Some(Box::new(ty.clone())),
+                info: info.clone(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn translate_binder_kind(k: &L4BinderKind) -> OxBinderKind {
+    match k {
+        L4BinderKind::Explicit => OxBinderKind::Default,
+        L4BinderKind::Implicit => OxBinderKind::Implicit,
+        L4BinderKind::Instance => OxBinderKind::Instance,
+    }
+}
+
+/// Wrap `inner` in a Pi-type over the given binders.
+/// Empty binders pass through unchanged.
+fn wrap_pi(binders: &[OxBinder], inner: Located<OxExpr>) -> Located<OxExpr> {
+    if binders.is_empty() {
+        inner
+    } else {
+        Located::new(OxExpr::Pi(binders.to_vec(), Box::new(inner)), dummy_span())
+    }
+}
+
+/// Wrap `inner` in a Lambda over the given binders.
+/// Empty binders pass through unchanged.
+fn wrap_lam(binders: &[OxBinder], inner: Located<OxExpr>) -> Located<OxExpr> {
+    if binders.is_empty() {
+        inner
+    } else {
+        Located::new(OxExpr::Lam(binders.to_vec(), Box::new(inner)), dummy_span())
+    }
 }
 
 fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
@@ -267,15 +312,97 @@ mod tests {
         }
     }
 
+    // ─── 13b-2: binders lift into Pi (type) / Lam (body) ──
+
     #[test]
-    fn definition_with_binders_is_unsupported_in_13a() {
-        let decls = parse_decls("def add (a : Nat) (b : Nat) : Nat := a")
+    fn definition_with_one_explicit_binder_lifts_to_pi_and_lam() {
+        // `def f (a : Nat) : T := a` should translate to:
+        //   ty:  Pi([a:Nat], T)
+        //   val: Lam([a], a)
+        let decls = parse_decls("def f (a : Nat) : T := a").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-2 supports binders").value;
+        match d {
+            OxDecl::Definition { ty, val, .. } => {
+                let ty_val = ty.expect("ty must be Some");
+                match ty_val.value {
+                    OxExpr::Pi(binders, _body) => {
+                        assert_eq!(binders.len(), 1);
+                        assert_eq!(binders[0].name, "a");
+                        assert_eq!(binders[0].info, OxBinderKind::Default);
+                    }
+                    other => panic!("expected Pi, got {other:?}"),
+                }
+                match val.value {
+                    OxExpr::Lam(binders, _body) => {
+                        assert_eq!(binders.len(), 1);
+                        assert_eq!(binders[0].name, "a");
+                    }
+                    other => panic!("expected Lam, got {other:?}"),
+                }
+            }
+            other => panic!("expected Definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn definition_multi_binder_group_expands_per_name() {
+        // `def f (a b : Nat) : T := a` — single BinderGroup
+        // with 2 names → 2 oxilean Binders.
+        let decls = parse_decls("def f (a b : Nat) : T := a").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        match d {
+            OxDecl::Definition { ty, .. } => {
+                let ty_val = ty.expect("ty must be Some");
+                let OxExpr::Pi(binders, _) = ty_val.value else {
+                    panic!("expected Pi");
+                };
+                assert_eq!(binders.len(), 2);
+                assert_eq!(binders[0].name, "a");
+                assert_eq!(binders[1].name, "b");
+            }
+            other => panic!("expected Definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binder_kinds_map_correctly() {
+        // Explicit `()` → Default, Implicit `{}` → Implicit,
+        // Instance `[]` → Instance.
+        let decls = parse_decls("def f (a : T) {b : T} [c : T] : T := a")
             .expect("must parse");
-        let err = translate_decl(&decls[0]).expect_err("13a does not handle binders");
-        assert!(matches!(
-            err,
-            TranslateError::Unsupported(s) if s.contains("binder")
-        ));
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { ty, .. } = d else { panic!("expected Definition") };
+        let ty_val = ty.expect("ty must be Some");
+        let OxExpr::Pi(binders, _) = ty_val.value else { panic!("expected Pi") };
+        assert_eq!(binders.len(), 3);
+        assert_eq!(binders[0].info, OxBinderKind::Default);
+        assert_eq!(binders[1].info, OxBinderKind::Implicit);
+        assert_eq!(binders[2].info, OxBinderKind::Instance);
+    }
+
+    #[test]
+    fn theorem_with_binders_lifts() {
+        let decls = parse_decls("theorem t (h : T) : U := h").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-2 supports theorem binders").value;
+        match d {
+            OxDecl::Theorem { ty, proof, .. } => {
+                assert!(matches!(ty.value, OxExpr::Pi(ref bs, _) if bs.len() == 1));
+                assert!(matches!(proof.value, OxExpr::Lam(ref bs, _) if bs.len() == 1));
+            }
+            other => panic!("expected Theorem, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_binders_skips_pi_lam_wrap() {
+        // `def x : T := y` — empty binders, ty/val pass
+        // through without Pi/Lam.
+        let decls = parse_decls("def x : T := y").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { ty, val, .. } = d else { panic!("expected Definition") };
+        let ty_val = ty.expect("ty must be Some");
+        assert!(matches!(ty_val.value, OxExpr::Var(_)));
+        assert!(matches!(val.value, OxExpr::Var(_)));
     }
 
     // ─── 13b-1 coverage: Theorem / Axiom / Import / Namespace ──
@@ -348,13 +475,6 @@ mod tests {
             }
             other => panic!("expected Definition, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn theorem_with_binders_unsupported_in_13b1() {
-        let decls = parse_decls("theorem t (h : T) : U := h").expect("must parse");
-        let err = translate_decl(&decls[0]).expect_err("binders defer to 13b-2");
-        assert!(matches!(err, TranslateError::Unsupported(s) if s.contains("binders")));
     }
 
     #[test]
