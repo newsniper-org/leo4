@@ -7,6 +7,41 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX5-oxi step 2: end-to-end integration tests via transpile_source_to_unit (2026-05-24)
+
+Three integration tests that exercise the new bootstrap
+env through the full `transpile_source_to_unit`
+pipeline:
+
+- `bootstrap_env_resolves_uint64_in_def_signature` —
+  `@[leo4_export] def ident_u64 (x : UInt64) : UInt64
+  := x`. Asserts the elab step does NOT surface a
+  `NameNotFound("UInt64")` diagnostic. Other
+  downstream failures (LCNF / codegen disagreements
+  on `UInt64`) are out of OX5-oxi scope; this test
+  scopes its assertion to the elab name-resolution
+  contract.
+- `bootstrap_env_resolves_nat_in_def_signature` —
+  same shape with `Nat` (covered by E1 / OxiLean's
+  own `init_builtin_env`). Verifies the E1 layer in
+  isolation.
+- `empty_env_would_have_failed_on_uint64` —
+  regression guard: with a bare
+  `Environment::new()` (no bootstrap), elab MUST
+  fail. If this test ever stops failing without
+  bootstrap, OxiLean upstream started shipping
+  `UInt64` itself → trim `LEO4_PRIMITIVE_TYPES` +
+  drop this test.
+
+Workspace lib-test count 165 → 168. clippy
+--all-targets -D warnings clean.
+
+**OX5-oxi complete** for the parser-driven path —
+`bootstrap_env()` is the new env source for every
+`transpile_source*` invocation through the CLI; the
+augmentation list is the single point of edit when new
+boundary primitives land.
+
 ### Added — OX5-oxi step 1: leo4_env_bootstrap module + CLI wire-in (2026-05-24)
 
 New `leo4-oxilean-build::leo4_env_bootstrap` module —

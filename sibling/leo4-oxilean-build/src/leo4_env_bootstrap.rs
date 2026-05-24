@@ -187,6 +187,97 @@ mod tests {
         }
     }
 
+    // ─── OX5-oxi step 2: end-to-end via transpile_source_to_unit ──
+
+    #[test]
+    fn bootstrap_env_resolves_uint64_in_def_signature() {
+        // The minimum fixture proving the augmentation
+        // works end-to-end: a `def` whose signature
+        // mentions `UInt64`. Body just returns the bound
+        // param so no `OfNat` / arithmetic-typeclass
+        // resolution is needed — purely the `UInt64`
+        // identifier resolution that the empty env
+        // historically failed on.
+        let env = bootstrap_env().expect("env bootstrap");
+        let mut registry = crate::Leo4ExportRegistry::new();
+        let src = "@[leo4_export]\ndef ident_u64 (x : UInt64) : UInt64 := x";
+
+        let result = crate::transpile_source_to_unit(
+            &env,
+            &mut registry,
+            src,
+            "_test_ident_u64_mangled",
+        );
+
+        // The transpile may still fail downstream (LCNF
+        // / codegen) on `UInt64` if the marshalling
+        // layer disagrees, but the elab step MUST NOT
+        // surface `NameNotFound("UInt64")` anymore — that
+        // is OX5-oxi's contract. Any other diagnostic is
+        // a separate concern.
+        if let Err(e) = &result {
+            assert!(
+                !e.message.contains("NameNotFound") || !e.message.contains("UInt64"),
+                "OX5-oxi regression: UInt64 must resolve under the bootstrapped env. \
+                 Diagnostic was: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_env_resolves_nat_in_def_signature() {
+        // Same shape, but with Nat (which OxiLean's own
+        // `init_builtin_env` already installs). This
+        // exercises the E1 layer in isolation.
+        let env = bootstrap_env().expect("env bootstrap");
+        let mut registry = crate::Leo4ExportRegistry::new();
+        let src = "@[leo4_export]\ndef ident_nat (x : Nat) : Nat := x";
+
+        let result = crate::transpile_source_to_unit(
+            &env,
+            &mut registry,
+            src,
+            "_test_ident_nat_mangled",
+        );
+        if let Err(e) = &result {
+            assert!(
+                !e.message.contains("NameNotFound") || !e.message.contains("Nat"),
+                "Nat must resolve under OxiLean's own init_builtin_env. \
+                 Diagnostic was: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_env_would_have_failed_on_uint64() {
+        // Sanity / regression check: with a completely
+        // empty env (no bootstrap), elab *should* report
+        // NameNotFound on UInt64. If this test stops
+        // failing without bootstrap, OxiLean upstream
+        // started shipping UInt64 itself — at which point
+        // the leo4 augmentation list can be trimmed.
+        let env = oxilean_kernel::env::Environment::new();
+        let mut registry = crate::Leo4ExportRegistry::new();
+        let src = "@[leo4_export]\ndef regress_u64 (x : UInt64) : UInt64 := x";
+        let result = crate::transpile_source_to_unit(
+            &env,
+            &mut registry,
+            src,
+            "_test_regress_u64",
+        );
+        // Don't assert on the *exact* error shape — the
+        // pipeline has several layers any of which may
+        // catch a missing name first. Just confirm the
+        // empty-env path doesn't silently succeed.
+        assert!(
+            result.is_err(),
+            "regression: empty env should NOT successfully \
+             transpile a UInt64-typed def. If OxiLean now \
+             ships UInt64, trim LEO4_PRIMITIVE_TYPES + this \
+             test."
+        );
+    }
+
     #[test]
     fn no_overlap_between_leo4_primitives_and_oxilean_builtins() {
         // Sanity: leo4's augmentation list MUST NOT

@@ -946,16 +946,22 @@ all wait for the v1.0 RC window or later.
   2026-05-24 (OxiLean-only users must avoid all
   lake/lean overhead):
 
-  - **OX5-oxi** (rust-transpile path): use OxiLean's
-    own `init_builtin_env` (covers Bool/Unit/Empty/
-    Nat/String/Eq/Prod/List/axioms) + leo4-side
-    augmentation for boundary primitives OxiLean
-    doesn't ship by default (UInt8..UInt128,
-    Int8..Int128, Float32, Float64, Char). E1 is the
-    primary path (oxilean-kernel cargo dep already
-    pulled by leo4-oxilean-build); E2 augmentation
-    covers the leo4-required surface OxiLean misses.
-    **Zero lake/lean overhead for OxiLean-only users.**
+  - **OX5-oxi** (rust-transpile path) — ✅ DONE 2026-05-24
+    via `leo4_env_bootstrap` module in
+    `leo4-oxilean-build`. `bootstrap_env()` calls
+    OxiLean's `init_builtin_env` (covers Bool / Unit /
+    Empty / Nat / String / Eq / Prod / List + axioms +
+    recursors + Nat arithmetic) then
+    `add_leo4_primitives` augments with sized integers
+    (UInt8..UInt128, Int8..Int128), floats (Float32 /
+    Float64), Char. CLI binary's
+    `Environment::new()` replaced with
+    `bootstrap_env()`. **Zero lake/lean overhead** —
+    both layers run in-process against the
+    oxilean-kernel cargo dep. 10 unit + 3 integration
+    tests; regression-guarded against OxiLean upstream
+    adding primitives that would silently
+    `DuplicateDeclaration`.
   - **OX5-msl** (mslean4 path): C2 (lake plugin → CLI
     env handoff). Lake plugin elab is the source of
     truth; CLI consumes the env via a stable
