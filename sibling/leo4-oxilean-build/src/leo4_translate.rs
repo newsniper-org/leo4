@@ -235,8 +235,30 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             Ok(OxExpr::App(Box::new(f), Box::new(x)))
         }
         L4Expr::Paren(inner) => translate_expr(inner),
-        L4Expr::BinOp(..) => {
-            Err(TranslateError::Unsupported("BinOp (lowering to App lands in 13b)"))
+        L4Expr::BinOp(op, lhs, rhs) => {
+            // Lower `BinOp("+", lhs, rhs)` to the
+            // application tree `App(App(Var("+"), lhs),
+            // rhs)`. The operator surfaces as a `Var` —
+            // oxilean's elaborator resolves `+` against
+            // its `HAdd.hAdd` typeclass entry (the same
+            // path it takes for explicit-form sources).
+            // For Unicode operators (≤, ≥, ≠, ×, ÷, ∈,
+            // ∉, ∪, ∩, ⊆) the op symbol is passed
+            // through verbatim; oxilean handles dispatch
+            // identically to ASCII.
+            let f = Located::new(OxExpr::Var(op.clone()), dummy_span());
+            let lhs = translate_expr_located(lhs)?;
+            let rhs = translate_expr_located(rhs)?;
+            let f_lhs = Located::new(
+                OxExpr::App(Box::new(f), Box::new(lhs)),
+                dummy_span(),
+            );
+            Ok(OxExpr::App(Box::new(f_lhs), Box::new(rhs)))
+        }
+        L4Expr::UnaryOp(op, x) => {
+            let f = Located::new(OxExpr::Var(op.clone()), dummy_span());
+            let x = translate_expr_located(x)?;
+            Ok(OxExpr::App(Box::new(f), Box::new(x)))
         }
         _ => Err(TranslateError::Unsupported("Expr variant (lands in 13b)")),
     }
@@ -475,6 +497,59 @@ mod tests {
             }
             other => panic!("expected Definition, got {other:?}"),
         }
+    }
+
+    // ─── 13b-3: BinOp / UnaryOp → App lowering ─────────
+
+    #[test]
+    fn binop_plus_lowers_to_nested_app() {
+        // `a + b` should become `App(App(Var("+"), a), b)`.
+        let decls = parse_decls("def x : T := a + b").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
+        let OxExpr::App(f_lhs, rhs) = val.value else {
+            panic!("expected outer App");
+        };
+        assert!(matches!(rhs.value, OxExpr::Var(ref s) if s == "b"));
+        let OxExpr::App(f, lhs) = f_lhs.value else {
+            panic!("expected inner App");
+        };
+        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "+"));
+        assert!(matches!(lhs.value, OxExpr::Var(ref s) if s == "a"));
+    }
+
+    #[test]
+    fn binop_unicode_op_preserved() {
+        let decls = parse_decls("def x : T := a ≤ b").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
+        let OxExpr::App(f_lhs, _) = val.value else { panic!("expected App") };
+        let OxExpr::App(f, _) = f_lhs.value else { panic!("expected App") };
+        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "≤"));
+    }
+
+    #[test]
+    fn unary_op_lowers_to_app() {
+        let decls = parse_decls("def x : T := -y").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
+        let OxExpr::App(f, x) = val.value else { panic!("expected App") };
+        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "-"));
+        assert!(matches!(x.value, OxExpr::Var(ref s) if s == "y"));
+    }
+
+    #[test]
+    fn left_assoc_chain_nests_correctly() {
+        // `a + b + c` parses as `(a + b) + c` →
+        // App(App(+, App(App(+, a), b)), c).
+        let decls = parse_decls("def x : T := a + b + c").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
+        // Outermost is App(App(+, …), c).
+        let OxExpr::App(_, rhs_c) = &val.value else {
+            panic!("expected outer App");
+        };
+        assert!(matches!(rhs_c.value, OxExpr::Var(ref s) if s == "c"));
     }
 
     #[test]

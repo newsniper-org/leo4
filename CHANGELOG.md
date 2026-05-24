@@ -7,6 +7,31 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13b-3: BinOp / UnaryOp → App lowering (2026-05-24)
+
+`leo4_translate::translate_expr` now lowers binary and
+unary operators to the application-tree shape oxilean
+expects:
+
+- `BinOp("+", lhs, rhs)` → `App(App(Var("+"), lhs), rhs)`.
+- `UnaryOp("-", x)` → `App(Var("-"), x)`.
+
+The operator symbol surfaces as a `Var(op_string)` —
+oxilean's elaborator resolves it against the
+`HAdd.hAdd` / `Neg.neg` / etc. typeclass entries the
+same way it does for explicit applications.
+
+**Unicode operators preserved verbatim**: `≤`, `≥`,
+`≠`, `×`, `÷`, `∈`, `∉`, `∪`, `∩`, `⊆` pass through
+the symbol unchanged.
+
+Tests 15 → 19 (+4): binop_plus_lowers_to_nested_app,
+binop_unicode_op_preserved, unary_op_lowers_to_app,
+left_assoc_chain_nests_correctly. Workspace lib-test
+count 135 → 139.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 13b-2: translator lifts binders into Pi / Lam (2026-05-24)
 
 `leo4_translate` now handles binders for Definition,
