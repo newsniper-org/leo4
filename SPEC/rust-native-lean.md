@@ -585,20 +585,38 @@ Rust source**.
 ### 9.6 Open questions for the transpile path
 
 - [x] **Does `oxilean-elab` parse arbitrary Lean 4 source
-      reliably?** Partial — `oxilean-elab::lean4_compat` v0.1.2
-      provides a *textual* pre-processor (`Lean4TermRewriter::
-      standard` + `Lean4SyntaxAdapter::adapt_all`) that handles
-      arrow / bind / where / logic-op surface differences, but
-      *not* parser-level shape differences. Specifically,
-      OxiLean's `parse_definition` accepts
-      `def name {univs} : type := value` only — Lean 4
-      header binders `def f (x : T) : R := body` need an
-      *AST-level* lift above the parser (not yet implemented).
-      The leo4 runtime library (`lake/Leo4/Leo4/*.lean`) is
-      written in OxiLean-native body-lambda shape; user
-      packages that use header-binder syntax will need a
-      pre-pass. Wired in `sibling/leo4-oxilean-build/src/lib.rs::lean4_normalize`
-      (2026-05-22).
+      reliably?** Originally answered "partial" via
+      `oxilean-elab::lean4_compat` v0.1.2's *textual*
+      pre-processor (`Lean4TermRewriter::standard` +
+      `Lean4SyntaxAdapter::adapt_all`) and leo4's
+      `lean4_normalize` textual pre-rewrites (2026-05-22,
+      OX3 / OX4). **Resolved 2026-05-24** by OX6: a
+      PEG-based Lean 4 parser at
+      `sibling/leo4-lean4-parse/`, strict superset of
+      `oxilean-parse` v0.1.2's accepted surface (block /
+      doc comments, anonymous ctor, anonymous struct,
+      list literal, modifier prefixes, let-in, by
+      tactics, multi-line do, universe annotations,
+      `@` explicit args, example, numeric extensions,
+      `if let`, scrutinee binding, pattern guards,
+      `(· + 1)` shorthand, Unicode operators, `do for`
+      / `while` / `until`, DSL decls
+      `notation` / `macro_rules` / `syntax` / `elab` +
+      fixity, debug `#` commands, omit / include,
+      doc-comment semantic binding, equational
+      `def`-by-arms). The header-binder issue that
+      motivated the original `lean4_normalize` is now
+      handled natively at the grammar level. The
+      `leo4_translate` module
+      (`sibling/leo4-oxilean-build/src/leo4_translate.rs`)
+      lowers `leo4_lean4_parse::Decl` →
+      `oxilean_parse::Decl` so the rest of the elab /
+      codegen pipeline is unchanged. The textual
+      `lean4_normalize` chain stays in the source as
+      the fallback path when `TranslateError::Unsupported`
+      fires (the `leo4-parser` cargo feature toggles
+      between primary and fallback; default ON since
+      2026-05-24).
 - [x] **Does the LCNF lowering preserve attribute metadata
       (specifically `@[leo4_export]` tags)?** No — upstream
       `elaborate_decl` v0.1.2 unwraps `Decl::Attribute { attrs,
@@ -625,6 +643,22 @@ Rust source**.
       The answer should be yes — both sides use
       `leo4-abi`'s `LeanMarshal` impls — but it's worth a
       conformance fixture once the pipeline is end-to-end.
+- [x] **Elab env bootstrap** — answered 2026-05-24 by
+      OX5-oxi. The transpile path no longer elaborates
+      against an empty `Environment::new()`. The
+      `leo4_env_bootstrap::bootstrap_env()` helper
+      (`sibling/leo4-oxilean-build/src/leo4_env_bootstrap.rs`)
+      calls `oxilean_kernel::init_builtin_env`
+      (Bool / Unit / Empty / Nat / String / Eq / Prod /
+      List + axioms + Nat arithmetic) then augments
+      with leo4 boundary primitives missing from
+      OxiLean v0.1.2 (UInt8..128, Int8..128, Float32,
+      Float64, Char) as `Declaration::Axiom`. **Zero
+      lake/lean overhead** — runs in-process against
+      the `oxilean-kernel` cargo dep that
+      `leo4-oxilean-build` already pulls. OxiLean-only
+      users install nothing beyond
+      `leo4-oxilean-build`.
 
 ## 9. Cross-references
 

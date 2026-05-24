@@ -202,6 +202,21 @@ is a direct Rust function call. See `SPEC/rust-native-lean.md`
 §2 + §6 for the trait surface and the three-paths comparison
 table.
 
+**Status update 2026-05-24** — the OxiLean **transpile**
+path (the §9 variant of `rust-native-lean.md`, not the
+in-process `LeanProc` variant) is now end-to-end:
+`sibling/leo4-oxilean-build` parses with the OX6 PEG-based
+Lean 4 parser (`sibling/leo4-lean4-parse`, strict
+superset of `oxilean-parse` v0.1.2), translates to
+`oxilean_parse::Decl` via `leo4_translate`, elaborates
+against an env bootstrapped by `leo4_env_bootstrap`
+(OxiLean `init_builtin_env` + leo4 boundary primitives,
+**zero lake/lean overhead**), and lowers via
+`oxilean_codegen::to_lcnf`. OxiLean-only users install
+nothing beyond `leo4-oxilean-build`. The in-process
+`LeanProc` variant of `rust-native-lean.md` remains
+future work (§8 in that doc).
+
 ### Two-axis classification of leo4 surface satisfiability
 
 For an alt-impl (OxiLean or future) to be a leo4 backend, it

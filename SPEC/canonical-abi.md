@@ -120,12 +120,26 @@ with omitted payloads.
 If a field's type is `Self` (see `SPEC/idl-grammar.ebnf`), encode/decode
 recurses into the same record/variant definition. Encoders MUST tolerate
 arbitrary recursion depth; decoders MAY enforce a depth cap configured
-through `leo4.toml` (`max_decode_depth`, default 256) and return error
-code `0x0000_0008` (decode-depth-exceeded) on overflow. `leo4-abi`
+through `leo4.toml` (key `max_decode_depth`, default 256) and return
+error code `0x0000_0008` (decode-depth-exceeded) on overflow. `leo4-abi`
 exposes the default cap as `MAX_DECODE_DEPTH` together with a
 `check_decode_depth(depth) -> Result<usize, LeanError>` helper that
 self-recursive decoders MUST call on every recursive site (Phase
 10-F1).
+
+> **`leo4.toml` co-tenancy note.** The same `leo4.toml`
+> file at the (sub)crate root carries the CLI's
+> `[[impl]]` array (Post-OX6 CLI refactor, 2026-05-24 —
+> see `crates/leo4-cli/src/config.rs`). The
+> `max_decode_depth` key specified here is a top-level
+> scalar that coexists with the `[[impl]]` array of
+> tables in the same file — TOML's mixed-scalar-and-
+> array-of-tables shape supports both natively. The
+> CLI's `Leo4Config` parser ignores unknown keys (via
+> serde's default-deny model on declared fields only),
+> so adding `max_decode_depth` does not break it. v0.1.0
+> ships the constant in `leo4-abi`; the TOML-driven
+> override is a future v1.x knob.
 
 `Self` carries no type information of its own on the wire — its layout
 is identical to the enclosing record/variant's. Hence `Self` does **not**

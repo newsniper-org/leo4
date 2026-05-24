@@ -388,10 +388,21 @@ This lets `libleo4_rust_bridge.a` link on every platform from
 day 1; the bridge is always present, even where reverse-direction
 is not yet ported.
 
-**Status (2026-05-23):** POSIX (`__unix__ || __APPLE__`) and
-Windows (`_WIN32`) backends both shipped; the stub backend
-stays as the unconditional fallback for unsupported tiers.
-Windows runtime verification waits on the Tier 2 CI matrix.
+**Status (2026-05-24):** POSIX (`__unix__ || __APPLE__`) and
+Windows (`_WIN32`) backends both shipped on the dispatcher
+(C) side; the stub backend stays as the unconditional
+fallback for unsupported tiers. The **worker-side**
+counterpart — `leo4-rust-worker`'s
+`open_ipc_channel` Windows branch — was a stub through
+2026-05-23 and was filled 2026-05-24 with a real
+`CreateFileW` (via `std::fs::OpenOptions::open`)
+implementation that retries 10× on `NotFound` /
+`ConnectionRefused` to absorb the spawn-then-register
+race; the worker now compiles + cross-compiles clean
+on `x86_64-pc-windows-gnullvm`. Windows *runtime*
+verification still waits on the Tier 2 CI matrix
+(`docs/windows-manual-test-plan.md` holds the manual
+prep audit).
 
 The "single C translation unit" promise (§11) is preserved —
 all three backends are sections of the same file gated by
@@ -809,7 +820,7 @@ build is `cc <single-file>` on every supported platform.
 | Lake plugin Rust-IDL ingestion + Lean wrapper emit | ✅ |
 | `examples/05-rust-export/` end-to-end demo | ✅ |
 | `tests/conformance/` reverse-direction byte parity | partial — pipeline emit verified in 9-7; per-primitive harness 9.X |
-| Windows backend (`CreateProcess` + named pipe) | ✅ code; Tier 2 runtime CI follows |
+| Windows backend (dispatcher `CreateProcess` + `CreateNamedPipeA`; worker `CreateFileW` via `OpenOptions::open` with 10× retry) | ✅ code on both sides as of 2026-05-24; Tier 2 runtime CI follows |
 | `#[leo4::export(isolated)]` opt-in mode | ✅ |
 | Recycle policy — call-based (`LEO4_RUST_WORKER_RECYCLE_CALLS`) | ✅ |
 | Recycle policy — time-based (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) | ✅ (Phase 10-A4) |
