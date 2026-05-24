@@ -7,6 +7,31 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11p: anonymous fn shorthand `(· + 1)` (2026-05-23)
+
+`Expr::DotFn(String)` accepts Lean 4's anonymous
+function shorthand triggered by the `·` (U+00B7 MIDDLE
+DOT) placeholder. Supported surface forms:
+
+- `(· + 1)` — single placeholder binary op (`λ x => x + 1`).
+- `(1 + ·)` — placeholder on the right (`λ x => 1 + x`).
+- `(· + ·)` — multiple placeholders (`λ x y => x + y`).
+- `(·.field)` — projection shorthand (`λ x => x.field`).
+
+The body is captured as raw text between the parens;
+consumer can sub-parse via `expr()`. A paren *without*
+any `·` placeholder still parses as `Expr::Paren` (the
+look-ahead rule confirms placeholder presence before
+committing to `DotFn`). Nested parens inside the body
+are not supported in v1 RC.
+
+Tests 248 → 253 (+5): dot_fn_simple_binary,
+dot_fn_projection, dot_fn_two_placeholders,
+dot_fn_placeholder_on_right,
+paren_without_placeholder_is_paren_not_dot_fn.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11v: omit / include section-variable management (2026-05-23)
 
 Two new `DeclKind` variants for Lean 4's section-scoped
