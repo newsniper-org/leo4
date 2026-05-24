@@ -7,6 +7,37 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11w: equational pattern-matching `def` (2026-05-24)
+
+New `DeclKind::DefinitionByArms { name, binders, ty,
+arms }` parses Lean 4's equational definition form:
+
+```lean
+def factorial : Nat → Nat
+  | 0 => 1
+  | n+1 => (n+1) * factorial n
+```
+
+Distinct from `Definition` by the trailing `| pat =>
+body | …` arms (no `:=` separator). The
+`definition_by_arms` rule is dispatched **before**
+plain `definition` in `decl_body`; the `&arm_bar()`
+lookahead commits the choice only when an `|` arm
+actually follows the type annotation, so plain
+`def NAME := EXPR` keeps parsing through the normal
+`Definition` path.
+
+Sibling of `Definition` — consumers can choose between
+source-faithful equation rendering vs.
+match-desugared shape.
+
+Tests 273 → 277 (+4): def_by_arms_simple,
+def_by_arms_dot_ctor, plain_def_still_works,
+def_by_arms_with_doc_and_attr (interoperates with the
+11u doc-comment + attribute prefix machinery).
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11u: doc-string semantic binding (2026-05-24)
 
 `Decl` gained a `doc: Option<String>` field. A `/-- … -/`

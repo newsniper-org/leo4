@@ -856,7 +856,7 @@ all wait for the v1.0 RC window or later.
   11u. ✅ Doc strings `/-- … -/` semantic binding
        (attaching to the next decl)
   11v. ✅ `omit` / `include` section-variable management
-  11w. ⏳ `def f | 0 => … | n+1 => …` pattern-matching
+  11w. ✅ `def f | 0 => … | n+1 => …` pattern-matching
        def
 
   ─── Integration (steps 12–13) ───
