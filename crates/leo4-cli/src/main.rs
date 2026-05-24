@@ -49,6 +49,8 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
+use crate::config::{ImplEntry, Leo4Config};
+
 #[derive(Parser, Debug)]
 #[command(
     name = "leo4",
@@ -63,6 +65,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Cmd {
     /// Create a NEW leo4 project in a fresh directory.
+    ///
+    /// Runtime impl selection moved to the scaffolded
+    /// `leo4.toml`. Edit `[[impl]] kind = "..."` post-
+    /// create to switch impls or add additional ones —
+    /// see `leo4-cli/src/config.rs` module docs.
     Create {
         direction: Direction,
         /// Target directory. Created if absent; must be empty if it
@@ -76,23 +83,6 @@ enum Cmd {
         /// to `../leo4` (sibling layout).
         #[arg(long)]
         leo4_root: Option<PathBuf>,
-        /// Lean implementation to target. **Required** — no
-        /// default. Accepted values:
-        ///
-        /// - `mslean4` — reference Lean 4 via `<lean/lean.h>`
-        ///   C ABI shim. The only path that fully ships today.
-        /// - `rust-native` (alias: `rust`) — Rust-native Lean
-        ///   impl via direct in-process Rust call. Currently
-        ///   deferred — `SPEC/rust-native-lean.md` §8.
-        /// - `rust-transpile` — OxiLean's
-        ///   `oxilean-codegen::rust_target_backend` lowers Lean
-        ///   source to a plain Rust crate at build time.
-        ///   Currently scaffold-only —
-        ///   `SPEC/rust-native-lean.md` §9.
-        ///
-        /// Exactly one value.
-        #[arg(long, value_parser = parse_impl_kind)]
-        r#impl: ImplKind,
     },
 
     /// Add leo4 integration to an EXISTING Cargo crate (in cwd
@@ -203,8 +193,8 @@ fn parse_impl_kind(s: &str) -> Result<ImplKind, String> {
 fn main() {
     let cli = Cli::parse();
     let res = match cli.cmd {
-        Cmd::Create { direction, dir, name, leo4_root, r#impl } => {
-            run_create(direction, dir, name, leo4_root, r#impl)
+        Cmd::Create { direction, dir, name, leo4_root } => {
+            run_create(direction, dir, name, leo4_root)
         }
         Cmd::Init { direction, dir, leo4_root, r#impl } => {
             run_init(direction, dir, leo4_root, r#impl)
@@ -249,8 +239,12 @@ fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
     }
 }
 
-/// Write the `<dir>/.leo4-impl` marker file. One line, no trailing
-/// newline-strip needed because `leo4 run` trims whitespace on read.
+/// **Legacy** — write the `<dir>/.leo4-impl` marker
+/// file. Post-OX6 the canonical runtime-impl selector
+/// is `<dir>/leo4.toml` (see `write_leo4_toml`); this
+/// marker stays around solely so existing projects
+/// keep parsing under `leo4 run` until they get
+/// migrated by `leo4 init` (chunk 4).
 fn write_impl_marker(dir: &Path, kind: &ImplKind) -> Result<(), String> {
     let p = dir.join(".leo4-impl");
     fs::write(&p, format!("{}\n", kind.marker_str()))
@@ -258,10 +252,24 @@ fn write_impl_marker(dir: &Path, kind: &ImplKind) -> Result<(), String> {
 }
 
 /// Read the `<dir>/.leo4-impl` marker if present.
+/// Legacy companion to `write_impl_marker`.
 fn read_impl_marker(dir: &Path) -> Option<ImplKind> {
     let p = dir.join(".leo4-impl");
     let raw = fs::read_to_string(&p).ok()?;
     parse_impl_kind(raw.trim()).ok()
+}
+
+/// Post-OX6 — write a fresh `<dir>/leo4.toml` with a
+/// single-impl scaffold. `kind` selects which runtime
+/// impl the scaffold targets; users can edit the file
+/// post-create to add more `[[impl]]` entries or
+/// switch kinds. Default kind for `leo4 create` is
+/// `mslean4` (the only fully-shipping path today —
+/// matches the historical `--impl mslean4` flow).
+fn write_leo4_toml(dir: &Path, kind: &str) -> Result<(), String> {
+    let cfg = Leo4Config { impls: vec![ImplEntry::new(kind)] };
+    let p = dir.join("leo4.toml");
+    fs::write(&p, cfg.render()).map_err(|e| format!("write {p:?}: {e}"))
 }
 
 // ─── `leo4 create` (new directory) ──────────────────────────────────
@@ -271,9 +279,7 @@ fn run_create(
     dir: PathBuf,
     name: Option<String>,
     leo4_root: Option<PathBuf>,
-    impl_kind: ImplKind,
 ) -> Result<(), String> {
-    check_impl_supported(&impl_kind)?;
     let dir = abs(&dir)?;
     if dir.exists() {
         let empty = fs::read_dir(&dir)
@@ -297,11 +303,16 @@ fn run_create(
         Direction::Forward => scaffold_forward_full(&dir, &project_name, &leo4_root_str)?,
         Direction::Reverse => scaffold_reverse_full(&dir, &project_name, &leo4_root_str)?,
     }
-    write_impl_marker(&dir, &impl_kind)?;
+    // Post-OX6 default impl is `mslean4` — the only
+    // fully-shipping path. Users wanting `rust-native`
+    // or `rust-transpile` edit `leo4.toml` post-create
+    // (and accept that those paths are scaffold-only /
+    // deferred per `SPEC/rust-native-lean.md` §8–9).
+    write_leo4_toml(&dir, ImplKind::Mslean4.marker_str())?;
     println!(
-        "leo4 create: {project_name} ({direction:?}, impl={}) → {dir:?}",
-        impl_kind.marker_str()
+        "leo4 create: {project_name} ({direction:?}, impl=mslean4) → {dir:?}"
     );
+    println!("  edit {}/leo4.toml to switch impl or add more", dir.display());
     println!("  next: cat {}/README.md", dir.display());
     Ok(())
 }
@@ -1228,5 +1239,58 @@ name = "x"
         ));
         fs::create_dir_all(&base).unwrap();
         base
+    }
+
+    // ─── Post-OX6 chunk 2: leo4 create writes leo4.toml ───
+
+    #[test]
+    fn write_leo4_toml_emits_valid_config_with_default_kind() {
+        let dir = tempdir();
+        write_leo4_toml(&dir, "mslean4").unwrap();
+        let raw = fs::read_to_string(dir.join("leo4.toml")).unwrap();
+        assert!(raw.contains("[[impl]]"), "{raw}");
+        assert!(raw.contains("kind = \"mslean4\""), "{raw}");
+        // Round-trip via the config parser to confirm
+        // the emitted TOML is valid + validates clean.
+        let cfg = crate::config::Leo4Config::parse_str(&raw)
+            .expect("emitted leo4.toml must reparse");
+        assert_eq!(cfg.impls.len(), 1);
+        assert_eq!(cfg.impls[0].kind, "mslean4");
+    }
+
+    #[test]
+    fn run_create_forward_writes_leo4_toml_not_leo4_impl_marker() {
+        let dir = tempdir().join("scaffold-fwd");
+        let leo4_root = tempdir();
+        // Synthesize a fake leo4 root just so the
+        // scaffold writers' path-substitution succeeds.
+        run_create(
+            Direction::Forward,
+            dir.clone(),
+            Some("scaffold-fwd".into()),
+            Some(leo4_root),
+        )
+        .expect("run_create must succeed");
+        assert!(dir.join("leo4.toml").exists(), "leo4.toml must be present");
+        assert!(
+            !dir.join(".leo4-impl").exists(),
+            "post-OX6 create must NOT write the legacy .leo4-impl marker"
+        );
+        let raw = fs::read_to_string(dir.join("leo4.toml")).unwrap();
+        assert!(raw.contains("kind = \"mslean4\""));
+    }
+
+    #[test]
+    fn run_create_reverse_writes_leo4_toml() {
+        let dir = tempdir().join("scaffold-rev");
+        let leo4_root = tempdir();
+        run_create(
+            Direction::Reverse,
+            dir.clone(),
+            Some("scaffold-rev".into()),
+            Some(leo4_root),
+        )
+        .expect("run_create must succeed");
+        assert!(dir.join("leo4.toml").exists());
     }
 }

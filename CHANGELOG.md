@@ -7,6 +7,35 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — Post-OX6 CLI refactor chunk 2: `leo4 create` writes `leo4.toml` (2026-05-24)
+
+`leo4 create` drops the required `--impl <kind>` flag.
+Runtime-impl selection is now a project property —
+post-create, the scaffold contains `leo4.toml` with a
+default single `[[impl]] kind = "mslean4"` entry.
+Users wanting `rust-native` / `rust-transpile` or
+multiple impls edit `leo4.toml` directly.
+
+**Why default = `mslean4`**: it's the only fully-
+shipping path today; the other two are scaffold-only /
+deferred per `SPEC/rust-native-lean.md` §8–9. Picking
+the deferred kinds at create-time would just push the
+"impl unsupported" diagnostic from the create step to
+the first `leo4 run` — the user-edit workflow surfaces
+it more clearly.
+
+New helper `write_leo4_toml(dir, kind)` uses the
+chunk-1 `Leo4Config::render()` so the emitted file
+round-trips through `parse_str` (verified by test).
+The legacy `write_impl_marker` / `read_impl_marker`
+helpers stay around — chunks 4-5 phase them out as
+`leo4 init` migrates existing projects and `leo4 run`
+prefers `leo4.toml`.
+
+Tests 30 → 33 (+3): write_leo4_toml_emits_valid_config_with_default_kind,
+run_create_forward_writes_leo4_toml_not_leo4_impl_marker,
+run_create_reverse_writes_leo4_toml.
+
 ### Added — Post-OX6 CLI refactor chunk 1: `leo4.toml` config module (2026-05-24)
 
 `leo4-cli::config` module — parser + validator for the
