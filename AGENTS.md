@@ -653,17 +653,24 @@ would be expensive to relitigate:
     snapshot (built ahead-of-time from Lean stdlib + leo4
     runtime) or pointing the CLI at the lake plugin's
     pre-elaborated `.olean` cache.
-  - **OX6 (NEW v1.0 RC blocker, locked 2026-05-22)**:
+  - **OX6 (v1.0 RC blocker, plan expanded 2026-05-22)**:
     PEG-based Lean 4 parser fork at
     `sibling/leo4-lean4-parse/`. Built from scratch using
     the `peg` crate; strict superset of `oxilean-parse`
     v0.1.2 where overlapping; AST shapes mirror upstream
-    for downstream interop. Decided after OX4's textual
-    approach hit its limits (binary operator precedence,
-    string interpolation, ctor name resolution all
-    needing real grammar work). Once OX6 lands, the OX4
-    textual pre-rewrites in `lean4_normalize` become
-    legacy.
+    for downstream interop.
+
+    **All ~25 sub-steps of OX6 are v1.0 RC mandatory**
+    (steps 1–10 grammar build-out, 11a–11l v1.0 RC-
+    critical surface gaps, 11m–11w surface-coverage tail
+    including DSL / macro / debug-command decls, 12
+    cross-check vs `oxilean-parse`, 13 leo4-oxilean-build
+    switchover). Steps 1–10b done at this point; the
+    expanded plan with 10c–13 is in ROADMAP.md OX6 entry.
+
+    Once step 13 lands the OX3 / OX4 textual rewrites
+    transition from "active dialect bridge" to "legacy
+    compatibility layer".
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

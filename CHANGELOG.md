@@ -7,6 +7,49 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — OX6 plan expanded to ~25 sub-steps, all v1.0 RC mandatory (2026-05-22)
+
+병익's directive (2026-05-22): rather than ship OX6 in
+the original 10-step form (which only covers the easy
+Lean 4 surface), expand the plan to cover *everything*
+needed for the real Lean 4 / Mathlib corpus, and treat
+**all** sub-steps as v1.0 RC blockers.
+
+Expanded plan (full list in `ROADMAP.md` OX6 entry):
+
+- Steps 1–10 (grammar build-out): scaffold, expression
+  grammar, if/match, lambda, structure/inductive,
+  attributes, multi-line types, do, string interpolation,
+  + quantifiers (9.5 inserted), + `Decl` enum split into
+  10a/b/c/d chunks (theorem/lemma/axiom + instance/class +
+  namespace/section/mutual + open/import/variable).
+- Steps 11a–11l (surface coverage critical): block /
+  doc comments, anonymous ctor `⟨…⟩`, modifier prefixes
+  (`partial`, `noncomputable`, `private`, `protected`,
+  `abbrev`), let-in expression, `by …` tactic block,
+  multi-line `do` statements, anonymous structure literal,
+  list literal, universe annotation `.{u, v}`, `@`
+  explicit args, `example` anonymous theorem, numeric +
+  string literal extensions.
+- Steps 11m–11w (surface tail): `if let` / `let-else`,
+  `match h : e with` scrutinee binding, pattern guards,
+  `(. + 1)` anonymous fn shorthand, Unicode operators,
+  `do for / while / until` loops, DSL declarations
+  (`notation` / `macro_rules` / `syntax` / `elab` /
+  `infix` / `prefix` / `postfix`), debug commands
+  (`#check` / `#eval` / `#print` / `#guard` /
+  `#guard_msgs`), doc-string semantic binding, `omit` /
+  `include`, `def f | 0 => …` pattern-matching def.
+- Step 12: cross-check against `oxilean-parse` on a
+  shared corpus (strict-superset invariant verification).
+- Step 13: `leo4-oxilean-build` switches default parser
+  from `oxilean_parse::Parser` to
+  `leo4_lean4_parse::parse_decls`. OX3 / OX4 textual
+  rewrites become legacy compatibility layer.
+
+Steps 1–10b done at this commit. Steps 10c–13 are the
+remaining v1.0 RC work for OX6.
+
 ### Added — OX6 step 10b: instance + class decls (2026-05-22)
 
 OX6 grammar roadmap step 10 — second chunk. Typeclass-

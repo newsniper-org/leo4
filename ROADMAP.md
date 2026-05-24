@@ -776,40 +776,102 @@ all wait for the v1.0 RC window or later.
   Tail items not split into separate ROADMAP entries —
   they live under OX4 until the gap closes.
 
-  **OX6 (NEW v1.0 RC blocker, locked 2026-05-22)** —
-  `leo4-lean4-parse` PEG-based Lean 4 parser. The OX4
-  textual approach is reaching its limits (binary
-  operator precedence, string interpolation, ctor name
-  resolution all need real grammar work, not textual
-  rewrites). Decided to fork: new sibling crate
-  `sibling/leo4-lean4-parse/` builds a PEG-based parser
-  from scratch using the `peg` crate. **Strict superset**
-  of `oxilean-parse` v0.1.2's accepted surface where
-  overlapping; AST shapes designed to mirror upstream so
-  downstream consumers (oxilean-elab, leo4-oxilean-build's
-  transpile pipeline) can swap parsers transparently.
+  **OX6 (v1.0 RC blocker, locked 2026-05-22; plan
+  expanded 2026-05-22 to cover the full surface needed
+  for the Lean 4 corpus)** — `leo4-lean4-parse` PEG-based
+  Lean 4 parser. The OX4 textual approach reached its
+  limits (operator precedence, string interpolation, ctor
+  name resolution all need real grammar work). Decided to
+  fork: new sibling crate `sibling/leo4-lean4-parse/`
+  builds a PEG-based parser from scratch using the `peg`
+  crate. **Strict superset** of `oxilean-parse` v0.1.2's
+  accepted surface where overlapping; AST shapes designed
+  to mirror upstream for downstream interop.
 
-  Scaffold landed 2026-05-22 — `def NAME [binders]+ [:
-  TYPE] := VALUE` with explicit / implicit / instance
-  binders + simple type / value expressions (bracket-
-  balanced raw text). Subsequent commits extend the
-  grammar one feature per step:
+  **All sub-steps below are mandatory for v1.0 RC** —
+  v1.0 RC ships only after the OX6 parser handles the
+  full Lean 4 corpus, oxilean-parse fallback is removed
+  for the transpile path, and leo4-oxilean-build runs on
+  OX6 by default.
 
-  1. Expression grammar with operator precedence
-  2. `if-then-else` + `match` arms with patterns
-  3. Lambda + `fun`
-  4. `structure` + `inductive` + `deriving`
-  5. Attribute lists
-  6. `do` notation
-  7. String interpolation
-  8. Full `Decl` enum
-  9. Cross-check against `oxilean-parse` on shared corpus
-  10. leo4-oxilean-build switches default parser to OX6
+  **Progress sub-steps** (each = one commit, ordered):
 
-  Once OX6 lands, the OX4 textual pre-rewrites in
-  `lean4_normalize` become legacy (still useful for the
-  `oxilean-parse` fallback path, but the OX6 parser
-  handles the surface natively).
+  ─── Grammar build-out (steps 1–10) ───
+  1. ✅ Scaffold + `def NAME [binders]+ [: TYPE] := VALUE`
+  2. ✅ Expression grammar with operator precedence
+  3. ✅ `if-then-else` + `match` arms with patterns
+  4. ✅ Lambda + `fun` / `λ`
+  5. ✅ `structure` + `inductive` + `deriving`
+  6. ✅ Attribute lists with args
+  7. ✅ Multi-line field types + layout-sensitive
+        parsing + full expression re-parse
+  8. ✅ `do` notation (single-line statements)
+  9. ✅ String interpolation `s!"…{x}…"`
+  9.5 ✅ Quantifiers `forall` / `∀` / `exists` / `∃`
+        (inserted at 병익's request)
+  10a. ✅ `theorem` / `lemma` / `axiom` decls + `=`
+        propositional equality
+  10b. ✅ `instance` + `class` decls
+  10c. ⏳ `namespace` + `section` + `mutual` blocks
+  10d. ⏳ `open` + `import` + `variable` decls
+
+  ─── Surface coverage fill-in (steps 11a–11l;
+       v1.0 RC mandatory) ───
+  11a. ⏳ Block comments `/- … -/` (nested) + doc
+       comments `/-- … -/`
+  11b. ⏳ Anonymous ctor `⟨a, b⟩` (Unicode angle brackets)
+  11c. ⏳ Modifier prefixes (`partial def`,
+       `noncomputable def`, `private def`,
+       `protected def`, `abbrev`)
+  11d. ⏳ let-in expression `let x := e; body`
+  11e. ⏳ `by …` tactic block (term-level entry into
+       tactic mode)
+  11f. ⏳ Multi-line `do` statements (`if` / `match` /
+       `let` spanning lines inside `do`)
+  11g. ⏳ Anonymous structure literal `{ x := 1, y := 2 }`
+  11h. ⏳ List literal `[1, 2, 3]`
+  11i. ⏳ Universe annotation `def foo.{u, v} : Sort u`
+  11j. ⏳ `@` explicit args (`@id Nat 0`)
+  11k. ⏳ `example : T := proof` (anonymous theorem)
+  11l. ⏳ Numeric literal extensions (`0x1F` hex,
+       `0b101` binary, `3.14` float, `1_000` separator),
+       extended string escapes (`\xHH`, `\u{…}`),
+       multiline strings `"""…"""`
+
+  ─── Surface coverage tail (steps 11m+; ALSO v1.0 RC
+       mandatory per 병익) ───
+  11m. ⏳ `if let pat := e then … else …` / `let-else`
+  11n. ⏳ `match h : e with …` (scrutinee binding)
+  11o. ⏳ Pattern guards (`| ctor h => …`)
+  11p. ⏳ `(. + 1)` anonymous fn shorthand
+  11q. ⏳ Unicode operators (`≤`, `≥`, `≠`, `×`, `÷`,
+       `∈`, `∉`, `∪`, `∩`, `⊆`)
+  11r. ⏳ `do for in`, `do while`, `do until` loops
+  11s. ⏳ DSL declarations: `notation`, `macro_rules`,
+       `syntax`, `elab`, `infix` / `infixl` / `infixr` /
+       `prefix` / `postfix`
+  11t. ⏳ Debug commands: `#check`, `#eval`, `#print`,
+       `#guard`, `#guard_msgs`
+  11u. ⏳ Doc strings `/-- … -/` semantic binding
+       (attaching to the next decl)
+  11v. ⏳ `omit` / `include` section-variable management
+  11w. ⏳ `def f | 0 => … | n+1 => …` pattern-matching
+       def
+
+  ─── Integration (steps 12–13) ───
+  12. ⏳ Cross-check against `oxilean-parse` on a shared
+        corpus (overlapping inputs must produce
+        equivalent ASTs).
+  13. ⏳ leo4-oxilean-build switches its default parser
+        from `oxilean_parse::Parser` to
+        `leo4_lean4_parse::parse_decls`. OX3/OX4 textual
+        pre-rewrites in `lean4_normalize` become legacy
+        (still kept for the optional `oxilean-parse`
+        fallback path, but OX6 handles the surface
+        natively).
+
+  Once step 13 lands the OX3 / OX4 work transitions from
+  "active dialect bridge" to "legacy compatibility layer".
 
   **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)** — elab
   env bootstrap. CLI's transpile path runs `elaborate_decl`
