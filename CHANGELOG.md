@@ -7,6 +7,39 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11s-b: notation / macro_rules / syntax / elab (2026-05-24)
+
+Four additional `DslKind` variants land via the new
+`dsl_multiline_decl` rule:
+
+- `Notation` — `notation:NN PATTERN => BODY`.
+- `MacroRules` — `macro_rules\n  | … => …\n  | … => …`.
+- `Syntax` — `syntax PATTERN : CATEGORY`.
+- `Elab` — `elab PATTERN : CATEGORY => BODY`.
+
+Body is captured raw across newlines until the next
+top-level decl boundary fires (a known decl keyword
+at a fresh line, `@[`, `#`, or EOF). The body grammar
+of each kind diverges from the term-level expr grammar
+— these decls extend Lean's parser itself — so raw
+capture is the appropriate v1-RC fidelity; downstream
+consumers needing inner structure implement per-kind
+handlers.
+
+`dsl_next_decl_starter` includes the full set of
+top-level keywords (def / theorem / … / fixity / DSL
+itself / example / mutual / omit / include) so two
+adjacent DSL blocks cleanly split.
+
+Tests 282 → 288 (+6): dsl_notation_single_line,
+dsl_macro_rules_multi_line, dsl_syntax_decl,
+dsl_elab_decl, dsl_two_notation_back_to_back,
+dsl_notation_then_def.
+
+clippy --all-targets -D warnings clean.
+
+**OX6 step 11s complete (11s-a + 11s-b combined).**
+
 ### Added — OX6 step 11s-a: fixity decls (infix / infixl / infixr / prefix / postfix) (2026-05-24)
 
 New `DeclKind::Dsl { kind: DslKind, raw: String }`

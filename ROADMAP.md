@@ -848,9 +848,10 @@ all wait for the v1.0 RC window or later.
   11q. ✅ Unicode operators (`≤`, `≥`, `≠`, `×`, `÷`,
        `∈`, `∉`, `∪`, `∩`, `⊆`)
   11r. ✅ `do for in`, `do while`, `do until` loops
-  11s. ⏳ DSL declarations: `notation`, `macro_rules`,
+  11s. ✅ DSL declarations: `notation`, `macro_rules`,
        `syntax`, `elab`, `infix` / `infixl` / `infixr` /
-       `prefix` / `postfix`
+       `prefix` / `postfix` (split into 11s-a fixity +
+       11s-b multi-line DSL commits)
   11t. ✅ Debug commands: `#check`, `#eval`, `#print`,
        `#guard`, `#guard_msgs`
   11u. ✅ Doc strings `/-- … -/` semantic binding
