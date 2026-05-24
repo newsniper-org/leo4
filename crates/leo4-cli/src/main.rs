@@ -83,6 +83,15 @@ enum Cmd {
         /// to `../leo4` (sibling layout).
         #[arg(long)]
         leo4_root: Option<PathBuf>,
+        /// Scaffold as a *subcrate* of an existing Cargo
+        /// workspace. The CLI searches upward from CWD
+        /// for the nearest `Cargo.toml` carrying a
+        /// `[workspace]` table, then registers the new
+        /// crate's directory in that workspace's
+        /// `members` array. Errors out clearly if no
+        /// workspace root is found above CWD.
+        #[arg(long, default_value_t = false)]
+        subcrate: bool,
     },
 
     /// Add leo4 integration to an EXISTING Cargo crate (in cwd
@@ -193,8 +202,8 @@ fn parse_impl_kind(s: &str) -> Result<ImplKind, String> {
 fn main() {
     let cli = Cli::parse();
     let res = match cli.cmd {
-        Cmd::Create { direction, dir, name, leo4_root } => {
-            run_create(direction, dir, name, leo4_root)
+        Cmd::Create { direction, dir, name, leo4_root, subcrate } => {
+            run_create(direction, dir, name, leo4_root, subcrate)
         }
         Cmd::Init { direction, dir, leo4_root, r#impl } => {
             run_init(direction, dir, leo4_root, r#impl)
@@ -279,8 +288,20 @@ fn run_create(
     dir: PathBuf,
     name: Option<String>,
     leo4_root: Option<PathBuf>,
+    subcrate: bool,
 ) -> Result<(), String> {
     let dir = abs(&dir)?;
+    // For --subcrate, pre-resolve the workspace root
+    // FIRST so we fail fast (before any filesystem
+    // writes) if no workspace exists above CWD.
+    let workspace_root = if subcrate {
+        Some(find_workspace_root(&std::env::current_dir().map_err(|e| {
+            format!("getcwd: {e}")
+        })?)?)
+    } else {
+        None
+    };
+
     if dir.exists() {
         let empty = fs::read_dir(&dir)
             .map_err(|e| format!("read_dir {dir:?}: {e}"))?
@@ -309,12 +330,199 @@ fn run_create(
     // (and accept that those paths are scaffold-only /
     // deferred per `SPEC/rust-native-lean.md` §8–9).
     write_leo4_toml(&dir, ImplKind::Mslean4.marker_str())?;
-    println!(
-        "leo4 create: {project_name} ({direction:?}, impl=mslean4) → {dir:?}"
-    );
+
+    if let Some(ws_root) = workspace_root {
+        register_in_workspace(&ws_root, &dir)?;
+        println!(
+            "leo4 create: {project_name} ({direction:?}, impl=mslean4, subcrate) → {dir:?}"
+        );
+        println!("  registered in workspace at {ws_root:?}");
+    } else {
+        println!(
+            "leo4 create: {project_name} ({direction:?}, impl=mslean4) → {dir:?}"
+        );
+    }
     println!("  edit {}/leo4.toml to switch impl or add more", dir.display());
     println!("  next: cat {}/README.md", dir.display());
     Ok(())
+}
+
+/// Search upward from `start_dir` for the nearest
+/// `Cargo.toml` that contains a `[workspace]` table.
+/// Errors with a clear message if none is found above
+/// CWD — `--subcrate` is meaningless without a host
+/// workspace.
+fn find_workspace_root(start_dir: &Path) -> Result<PathBuf, String> {
+    let mut cur: Option<&Path> = Some(start_dir);
+    while let Some(d) = cur {
+        let candidate = d.join("Cargo.toml");
+        if candidate.exists() {
+            let raw = fs::read_to_string(&candidate)
+                .map_err(|e| format!("read {candidate:?}: {e}"))?;
+            if has_workspace_table(&raw) {
+                return Ok(d.to_path_buf());
+            }
+        }
+        cur = d.parent();
+    }
+    Err(format!(
+        "--subcrate: no Cargo.toml with a [workspace] table found at or above {start_dir:?}. \
+         Re-run inside a workspace, or omit --subcrate to create a standalone crate."
+    ))
+}
+
+/// True iff `cargo_toml_src` contains a top-level
+/// `[workspace]` table header. Line-based check — too
+/// narrow to merit a full TOML parser, and matches the
+/// hand-rolled style of `read_cargo_pkg_name` already
+/// in this module.
+fn has_workspace_table(cargo_toml_src: &str) -> bool {
+    for line in cargo_toml_src.lines() {
+        let t = line.trim();
+        // Strip trailing comment.
+        let t = t.split('#').next().unwrap_or("").trim();
+        if t == "[workspace]" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Append the subcrate's path (workspace-relative) to
+/// the workspace `Cargo.toml`'s `[workspace] members`
+/// array. Idempotent — if the path is already present,
+/// the file is left unchanged. Hand-rolled append
+/// rather than a TOML round-trip so the user's
+/// existing formatting / comments are preserved.
+fn register_in_workspace(ws_root: &Path, subcrate_dir: &Path) -> Result<(), String> {
+    let ws_cargo = ws_root.join("Cargo.toml");
+    let raw = fs::read_to_string(&ws_cargo)
+        .map_err(|e| format!("read {ws_cargo:?}: {e}"))?;
+    let rel = subcrate_dir
+        .strip_prefix(ws_root)
+        .map_err(|_| {
+            format!(
+                "register_in_workspace: subcrate {subcrate_dir:?} is not under workspace root {ws_root:?}"
+            )
+        })?;
+    let rel_str = rel.to_string_lossy().replace('\\', "/");
+    let updated = inject_workspace_member(&raw, &rel_str)?;
+    if updated != raw {
+        fs::write(&ws_cargo, updated)
+            .map_err(|e| format!("write {ws_cargo:?}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Pure-string transformation: given the workspace
+/// `Cargo.toml` source, inject `member` into the
+/// `[workspace] members = […]` array if not already
+/// present. Two layouts supported:
+///
+/// - Inline:   `members = ["a", "b"]`
+/// - Multi-line:
+///   ```toml
+///   members = [
+///       "a",
+///       "b",
+///   ]
+///   ```
+///
+/// Returns the unchanged source when the member is
+/// already listed. Errors when no `[workspace]` table
+/// or no `members` key exists under it (the caller is
+/// expected to have validated `has_workspace_table`
+/// first, but the `members` key may genuinely be
+/// absent — in which case we synthesize an inline
+/// `members = ["…"]` line right after the
+/// `[workspace]` header).
+fn inject_workspace_member(src: &str, member: &str) -> Result<String, String> {
+    // Bail fast if the member is already mentioned.
+    // Quoted-form check — `"a"` won't match `"a/b"`
+    // because we look for the full quoted segment.
+    let quoted = format!("\"{member}\"");
+    let in_existing_members = src
+        .split("[workspace]")
+        .nth(1)
+        .and_then(|s| s.split("\n[").next())
+        .is_some_and(|tbl| tbl.contains(&quoted));
+    if in_existing_members {
+        return Ok(src.to_string());
+    }
+
+    // Find the `[workspace]` table header line.
+    let lines: Vec<&str> = src.lines().collect();
+    let ws_line = lines
+        .iter()
+        .position(|l| l.trim() == "[workspace]")
+        .ok_or_else(|| "inject_workspace_member: no [workspace] header".to_string())?;
+
+    // Within the workspace table (until next table
+    // header or EOF), find the `members` line.
+    let table_end = lines[ws_line + 1..]
+        .iter()
+        .position(|l| {
+            let t = l.trim();
+            t.starts_with('[') && t.ends_with(']') && !t.starts_with("[[")
+        })
+        .map_or(lines.len(), |i| ws_line + 1 + i);
+    let members_idx = lines[ws_line + 1..table_end]
+        .iter()
+        .position(|l| {
+            let t = l.trim_start();
+            t.starts_with("members") && t.contains('=')
+        })
+        .map(|i| ws_line + 1 + i);
+
+    let mut out: Vec<String> = lines.iter().map(|s| (*s).to_string()).collect();
+    if let Some(idx) = members_idx {
+        let line = &out[idx];
+        if line.contains('[') && line.contains(']') {
+            // Inline form: insert before the closing `]`.
+            let new = line.replacen(']', &format!(", \"{member}\"]"), 1);
+            // Tidy up `["a", , "b"]` and `[, "a"]`
+            // edge cases that arise when `[]` is empty.
+            let new = new.replace("[, ", "[").replace(", , ", ", ");
+            out[idx] = new;
+        } else {
+            // Multi-line form: find the closing `]`
+            // line; insert a new entry before it.
+            let close_rel = out[idx..]
+                .iter()
+                .position(|l| l.trim().starts_with(']'))
+                .ok_or_else(|| {
+                    "inject_workspace_member: multi-line members `[` without matching `]`".to_string()
+                })?;
+            let close_idx = idx + close_rel;
+            // Match the indentation of the previous
+            // non-comment, non-bracket entry.
+            let indent = out[idx + 1..close_idx]
+                .iter()
+                .rev()
+                .find_map(|l| {
+                    let trimmed = l.trim_start();
+                    if trimmed.starts_with('"') {
+                        Some(&l[..l.len() - trimmed.len()])
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("    ");
+            out.insert(close_idx, format!("{indent}\"{member}\","));
+        }
+    } else {
+        // No `members` line at all — synthesize one
+        // right after the `[workspace]` header.
+        out.insert(ws_line + 1, format!("members = [\"{member}\"]"));
+    }
+
+    let mut joined = out.join("\n");
+    // Preserve the trailing newline if the original
+    // had one.
+    if src.ends_with('\n') && !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    Ok(joined)
 }
 
 // ─── `leo4 init` (existing crate) ───────────────────────────────────
@@ -1269,6 +1477,7 @@ name = "x"
             dir.clone(),
             Some("scaffold-fwd".into()),
             Some(leo4_root),
+            false,
         )
         .expect("run_create must succeed");
         assert!(dir.join("leo4.toml").exists(), "leo4.toml must be present");
@@ -1280,6 +1489,147 @@ name = "x"
         assert!(raw.contains("kind = \"mslean4\""));
     }
 
+    // ─── Post-OX6 chunk 3: --subcrate ─────────────────────
+
+    #[test]
+    fn has_workspace_table_detects_top_level_header() {
+        assert!(has_workspace_table("[workspace]\nmembers = []\n"));
+        assert!(has_workspace_table("# comment\n[workspace]\nmembers = []\n"));
+        assert!(has_workspace_table("[package]\nname = \"foo\"\n\n[workspace]\nmembers = []\n"));
+    }
+
+    #[test]
+    fn has_workspace_table_rejects_package_only() {
+        assert!(!has_workspace_table("[package]\nname = \"foo\"\n"));
+        // `[workspace.dependencies]` is not the table
+        // header itself — must NOT match.
+        assert!(!has_workspace_table("[workspace.dependencies]\nfoo = \"1\"\n"));
+    }
+
+    #[test]
+    fn find_workspace_root_walks_upward() {
+        let root = tempdir();
+        fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+        let nested = root.join("a").join("b");
+        fs::create_dir_all(&nested).unwrap();
+        let found = find_workspace_root(&nested).expect("must find root");
+        assert_eq!(
+            found.canonicalize().unwrap(),
+            root.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn find_workspace_root_errors_when_absent() {
+        let dir = tempdir();
+        let err = find_workspace_root(&dir).expect_err("no workspace above must error");
+        assert!(err.contains("--subcrate"), "{err}");
+    }
+
+    #[test]
+    fn inject_workspace_member_inline_adds_entry() {
+        let src = "[workspace]\nmembers = [\"a\", \"b\"]\n";
+        let updated = inject_workspace_member(src, "c").unwrap();
+        assert!(updated.contains("\"c\""), "{updated}");
+        assert!(updated.contains("\"a\""), "{updated}");
+        assert!(updated.contains("\"b\""), "{updated}");
+    }
+
+    #[test]
+    fn inject_workspace_member_idempotent() {
+        let src = "[workspace]\nmembers = [\"a\", \"b\"]\n";
+        let once = inject_workspace_member(src, "a").unwrap();
+        // Already present → src unchanged.
+        assert_eq!(once, src);
+    }
+
+    #[test]
+    fn inject_workspace_member_multi_line_form() {
+        let src = "[workspace]\nmembers = [\n    \"a\",\n    \"b\",\n]\n";
+        let updated = inject_workspace_member(src, "c").unwrap();
+        assert!(updated.contains("    \"c\","), "{updated}");
+        // Order preserved — `c` lands before the
+        // closing `]` of the members array (i.e. the
+        // first `]` AFTER the `members = [` opener,
+        // not the `]` inside `[workspace]`).
+        let a_pos = updated.find("\"a\"").unwrap();
+        let c_pos = updated.find("\"c\"").unwrap();
+        let members_open = updated.find("members = [").unwrap();
+        let close_pos = members_open + updated[members_open..].find("\n]").unwrap();
+        assert!(a_pos < c_pos && c_pos < close_pos);
+    }
+
+    #[test]
+    fn inject_workspace_member_synthesises_when_no_members_key() {
+        let src = "[workspace]\nresolver = \"2\"\n";
+        let updated = inject_workspace_member(src, "x").unwrap();
+        assert!(updated.contains("members = [\"x\"]"), "{updated}");
+    }
+
+    #[test]
+    fn inject_workspace_member_empty_inline_array() {
+        let src = "[workspace]\nmembers = []\n";
+        let updated = inject_workspace_member(src, "x").unwrap();
+        // Should produce `["x"]` (no leading comma).
+        assert!(updated.contains("[\"x\"]"), "{updated}");
+    }
+
+    #[test]
+    fn run_create_subcrate_registers_in_workspace() {
+        let ws_root = tempdir();
+        fs::write(
+            ws_root.join("Cargo.toml"),
+            "[workspace]\nmembers = []\nresolver = \"2\"\n",
+        ).unwrap();
+
+        let subcrate_dir = ws_root.join("packages/foo");
+        let leo4_root = tempdir();
+
+        // run_create's --subcrate path calls
+        // find_workspace_root with CWD as the starting
+        // point. Use a CWD-scoped helper to drive it
+        // from inside ws_root.
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&ws_root).unwrap();
+        let result = run_create(
+            Direction::Forward,
+            subcrate_dir.clone(),
+            Some("foo".into()),
+            Some(leo4_root),
+            true, // subcrate
+        );
+        std::env::set_current_dir(prev_cwd).unwrap();
+        result.expect("--subcrate must succeed under workspace");
+
+        // leo4.toml lands in the subcrate dir.
+        assert!(subcrate_dir.join("leo4.toml").exists());
+
+        // Workspace Cargo.toml gained `packages/foo` in
+        // its members.
+        let ws_raw = fs::read_to_string(ws_root.join("Cargo.toml")).unwrap();
+        assert!(
+            ws_raw.contains("\"packages/foo\""),
+            "expected `packages/foo` in workspace members:\n{ws_raw}"
+        );
+    }
+
+    #[test]
+    fn run_create_subcrate_errors_outside_workspace() {
+        let non_ws = tempdir();
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&non_ws).unwrap();
+        let result = run_create(
+            Direction::Forward,
+            non_ws.join("standalone"),
+            Some("standalone".into()),
+            Some(tempdir()),
+            true,
+        );
+        std::env::set_current_dir(prev_cwd).unwrap();
+        let err = result.expect_err("--subcrate without workspace must error");
+        assert!(err.contains("--subcrate"), "{err}");
+    }
+
     #[test]
     fn run_create_reverse_writes_leo4_toml() {
         let dir = tempdir().join("scaffold-rev");
@@ -1289,6 +1639,7 @@ name = "x"
             dir.clone(),
             Some("scaffold-rev".into()),
             Some(leo4_root),
+            false,
         )
         .expect("run_create must succeed");
         assert!(dir.join("leo4.toml").exists());

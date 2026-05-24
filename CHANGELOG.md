@@ -7,6 +7,43 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Post-OX6 CLI refactor chunk 3: `leo4 create --subcrate` (2026-05-24)
+
+New `--subcrate` flag on `leo4 create`. When set, the
+CLI:
+
+1. Walks upward from CWD looking for the nearest
+   `Cargo.toml` carrying a top-level `[workspace]`
+   header. Errors out clearly when none exists above
+   CWD (`--subcrate` is meaningless without a host
+   workspace).
+2. Scaffolds the new crate as usual into the target
+   `dir`.
+3. Writes `leo4.toml` (chunk-2 default).
+4. Registers the new crate's workspace-relative path
+   in the workspace `Cargo.toml`'s `[workspace]
+   members` array. Idempotent — the file is left
+   unchanged if the entry already exists. Both inline
+   (`members = ["a", "b"]`) and multi-line forms are
+   handled; multi-line keeps the existing entry
+   indentation; the synthesised entry lands before the
+   closing `]`. If no `members` key exists under
+   `[workspace]`, a fresh inline `members = ["<path>"]`
+   line is synthesised right after the
+   `[workspace]` header.
+
+Workspace lookup happens **before** any scaffold
+filesystem writes, so a missing-workspace
+`--subcrate` invocation never half-creates the target
+directory.
+
+Tests 33 → 44 (+11): has_workspace_table_{detects,
+rejects}_*, find_workspace_root_{walks_upward,
+errors_when_absent}, inject_workspace_member_*
+(inline / idempotent / multi-line / synthesises /
+empty-inline), run_create_subcrate_{registers,
+errors_outside_workspace}.
+
 ### Changed — Post-OX6 CLI refactor chunk 2: `leo4 create` writes `leo4.toml` (2026-05-24)
 
 `leo4 create` drops the required `--impl <kind>` flag.
