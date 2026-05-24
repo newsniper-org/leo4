@@ -7,6 +7,31 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11t: debug / diagnostic # commands (2026-05-23)
+
+`DeclKind::HashCommand { cmd, raw_args }` accepts the
+Lean 4 debug top-level commands as first-class decls:
+
+- `#check expr` — type-print an expression.
+- `#eval expr` — evaluate at compile-time.
+- `#print name` — show a declaration's body / type.
+- `#guard expr` — assert a proposition.
+- `#guard_msgs (cfg) in` — diagnostic capture (the
+  trailing inner command lands as a *second*
+  `HashCommand` decl; the consumer reassembles if it
+  cares about the binding).
+
+`cmd` is the keyword without the `#` prefix; `raw_args`
+is the trimmed tail captured to end of line (the
+v1-RC scope deliberately keeps args raw rather than
+sub-parsing each per-command-specific grammar).
+
+Tests 238 → 243 (+5): hash_check_simple, hash_eval_simple,
+hash_print_simple, hash_guard_msgs,
+hash_command_mixed_with_def.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11q: Unicode operator surface (2026-05-23)
 
 `leo4-lean4-parse` accepts the canonical Lean 4 Unicode
