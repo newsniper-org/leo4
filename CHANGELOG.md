@@ -7,6 +7,43 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — OX6 step 13d: leo4-parser feature flipped ON by default (2026-05-24)
+
+The `leo4-parser` cargo feature is now in
+`default = ["leo4-parser"]`. `leo4-oxilean-build`
+consumers who run `cargo build` / `cargo test` /
+`cargo run` with no extra flags now go through the
+leo4-lean4-parse → leo4_translate path as the primary
+parser for `transpile_source_if_exported` /
+`transpile_source_to_unit` /
+`transpile_source_to_units`. oxilean-parse remains the
+fallback when translation hits
+`TranslateError::Unsupported`.
+
+**Opt-out**: consumers wanting the legacy-only
+behaviour can disable the feature:
+
+```toml
+leo4-oxilean-build = { version = "...", default-features = false }
+```
+
+Verified safe before the flip:
+- Lib-test count under feature on: 158 (was 158 in 13c).
+- Lib-test count under `--no-default-features`: 156.
+- `clippy --all-targets -D warnings` clean under BOTH
+  feature configurations (default + opt-out).
+
+**OX6 step 13 complete**. The OX3/OX4 textual pre-
+rewrites in `lean4_normalize` remain in the pipeline as
+the input filter to both parser paths — they're no
+longer the *primary* surface translator (leo4-lean4-parse
+handles surface directly), but they still help the
+oxilean fallback when triggered. Their removal becomes
+a post-v1-RC optimisation, not a v1.0 RC blocker.
+
+**OX6 entirely complete.** v1.0 RC parser-track blocker
+cleared.
+
 ### Added — OX6 step 13c: leo4-parser feature flag + transpile_source* wiring (2026-05-24)
 
 New `leo4-parser` cargo feature (default OFF) routes

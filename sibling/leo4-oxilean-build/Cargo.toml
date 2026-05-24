@@ -12,7 +12,13 @@ repository  = "https://github.com/Honey-Be/leo4"
 description = "Build-time transpiler from OxiLean Lean source → Rust crate, via `oxilean-codegen::rust_target_backend`. Sibling adapter to `leo4-oxilean` (runtime-dispatch); this one is the zero-runtime transpile path per `SPEC/rust-native-lean.md` §9. Scaffold — see `README.md` §Status."
 
 [features]
-default = []
+# OX6 step 13d (2026-05-24): `leo4-parser` flipped ON by
+# default. The leo4-lean4-parse → leo4_translate path is
+# now the primary parser for transpile_source*; oxilean-
+# parse stays as the fallback. Users wanting the legacy-
+# only behaviour can opt out via
+# `default-features = false`.
+default = ["leo4-parser"]
 # Forward leo4-abi's `nightly-floats` feature so the wrapper
 # synthesiser can recognise the half-precision / complex
 # carrier types (LeanF16, LeanBF16, LeanF128, LeanComplexF16x2,
