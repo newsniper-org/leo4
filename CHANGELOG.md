@@ -7,6 +7,25 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11g: anonymous structure literal `{ x := 1, y := 2 }` (2026-05-22)
+
+New `Expr::AnonStruct(Vec<(String, Expr)>)` variant +
+grammar atom for Lean 4 anonymous structure literals.
+Field order preserved in the AST (matters for some elab
+paths).
+
+Disambiguation with `{T : Type}` implicit binder: binder
+uses `:` (no `:=`); anon struct field uses `:=`. The
+anon-struct-literal rule explicitly looks for `:=` after
+the first ident, so the implicit-binder grammar in
+binder contexts is unaffected.
+
+Tests 160 → 165 (+5): two-fields, single-field, complex
+field expressions (BinOps), in def value position,
+implicit-binder regression guard.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11h: list literal `[1, 2, 3]` (2026-05-22)
 
 New `Expr::List(Vec<Expr>)` variant + grammar atom for
