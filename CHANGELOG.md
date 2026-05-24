@@ -7,6 +7,56 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 10d: open + import + variable decls (2026-05-22)
+
+OX6 grammar roadmap step 10 — fourth chunk. Three new
+top-level scope-management decls. **Step 10 complete**;
+the full `Decl` enum surface is now wired.
+
+**Surface coverage**:
+
+- `open Foo` / `open Foo Bar Baz` — opens namespaces.
+- `open Foo.Bar.Baz` — dotted namespace paths.
+- `open Foo (a b c)` — selective open (clause text in
+  `raw_tail`).
+- `open Foo renaming a → b, c → d` — renaming (clause
+  text in `raw_tail`).
+- `open Foo hiding x y` — hiding (clause text in
+  `raw_tail`).
+- `open scoped Foo` — Mathlib scoped opens (clause text
+  in `raw_tail`).
+- `import Foo.Bar.Baz` — single dotted path per import.
+- `variable (n : Nat)` / `variable {T : Type}` /
+  `variable [Inhabited T]` / mixed groups.
+
+**Open decl design**: rich Lean 4 `open` syntax
+(selective `(…)`, `renaming`, `hiding`, `scoped`) parses
+the leading namespace idents into `items: Vec<String>`
+and stops at the first clause-marker token, putting the
+rest into `raw_tail: String` for downstream re-parsing.
+v0 doesn't model the full `OpenItem` AST that
+`oxilean-parse` defines — sufficient for OX6's goal
+(getting the surface to parse without rejection).
+
+New `parse_open_line` helper (private to the grammar
+module) does the leading-idents / clause-marker split.
+
+Tests 134 → 148 (+14): open-single, open-multiple,
+open-dotted, open-selective-in-raw-tail, open-renaming-
+in-raw-tail, open-hiding-in-raw-tail, open-scoped-in-raw-
+tail, import-single-dotted, import-init-core, multiple-
+imports-each-own-decl, variable-explicit-binder,
+variable-implicit-binder, variable-multiple-binder-groups,
+import-open-variable-section-combo (e2e: 4-decl Lean 4
+source mixing import + open + section with inner
+variable + def).
+
+clippy --all-targets -D warnings clean.
+
+**OX6 step 10 (`Decl` enum) complete**. Remaining for
+v1.0 RC per ROADMAP: 11a-11l (surface critical),
+11m-11w (surface tail), 12 (cross-check), 13 (switchover).
+
 ### Added — OX6 step 10c: namespace + section + mutual blocks (2026-05-22)
 
 OX6 grammar roadmap step 10 — third chunk. Three new
