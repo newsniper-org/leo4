@@ -843,7 +843,7 @@ all wait for the v1.0 RC window or later.
   11m. ✅ `if let pat := e then … else …` (let-else
         deferred — not a Lean 4 term-mode form)
   11n. ✅ `match h : e with …` (scrutinee binding)
-  11o. ⏳ Pattern guards (`| ctor h => …`)
+  11o. ✅ Pattern guards (`| pat if cond => …`)
   11p. ✅ `(· + 1)` anonymous fn shorthand (`·` placeholder)
   11q. ✅ Unicode operators (`≤`, `≥`, `≠`, `×`, `÷`,
        `∈`, `∉`, `∪`, `∩`, `⊆`)
