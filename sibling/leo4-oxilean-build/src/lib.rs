@@ -212,6 +212,397 @@ pub const LEAN_MARSHAL_DERIVE: &str = "LeanMarshal";
 // binder groups so `(x : Vec (List Nat))` parses correctly.
 // Lines, string literals, and comments are honoured.
 
+/// Rewrite Lean 4's `inductive NAME [params] where | ctor1 |
+/// ctor2 …` into OxiLean's required
+/// `inductive NAME : Type | ctor1 : NAME | ctor2 : NAME …` form.
+///
+/// Two rewrites in tandem:
+/// 1. The `where` token on the inductive header line is
+///    replaced with `: Type`.
+/// 2. Each subsequent bare `| ctor` line (no inline `:`)
+///    has ` : NAME` appended so the ctor type is explicit.
+///
+/// The block ends at the next top-level decl keyword (without
+/// a leading `|`) or EOF.
+///
+/// Pass-through: ctor lines that already carry an explicit
+/// `:` annotation (`| node : Tree → Tree → Tree`); inductive
+/// decls already in OxiLean form (`inductive Foo : Type | ...`);
+/// `structure` / `class` decls (handled by the parser).
+#[must_use]
+pub fn rewrite_inductive_where(src: &str) -> String {
+    inductive_where_rewriter::rewrite(src)
+}
+
+mod inductive_where_rewriter {
+    pub fn rewrite(src: &str) -> String {
+        let mut out_lines: Vec<String> = Vec::new();
+        let mut in_block_name: Option<String> = None;
+        for raw in src.split_inclusive('\n') {
+            let line = raw.trim_end_matches('\n').trim_end_matches('\r');
+            let trimmed = line.trim_start();
+            // Block exit: next top-level decl keyword that
+            // isn't an inductive-ctor `|` line and isn't a
+            // blank line / comment.
+            if in_block_name.is_some()
+                && !trimmed.is_empty()
+                && !trimmed.starts_with('|')
+                && !trimmed.starts_with("--")
+                && !starts_with_indent(line)
+                && starts_with_decl_keyword(trimmed)
+            {
+                in_block_name = None;
+            }
+
+            // Detect `inductive NAME [params] where` line.
+            if let Some((name, rewritten)) = try_lift_header(line) {
+                out_lines.push(format!("{rewritten}\n"));
+                in_block_name = Some(name);
+                continue;
+            }
+
+            // In-block: annotate bare ctors.
+            if let Some(name) = &in_block_name
+                && let Some(annotated) = try_annotate_ctor(line, name)
+            {
+                out_lines.push(format!("{annotated}\n"));
+                continue;
+            }
+
+            out_lines.push(raw.to_string());
+        }
+        // Preserve trailing-newline behaviour.
+        out_lines.join("")
+    }
+
+    fn starts_with_indent(line: &str) -> bool {
+        line.starts_with(' ') || line.starts_with('\t')
+    }
+
+    fn starts_with_decl_keyword(s: &str) -> bool {
+        for kw in &[
+            "def", "theorem", "lemma", "axiom", "inductive",
+            "structure", "class", "instance", "namespace", "section",
+            "end", "open", "import", "variable", "macro", "syntax",
+            "elab", "abbrev",
+        ] {
+            if let Some(rest) = s.strip_prefix(kw)
+                && (rest.is_empty()
+                    || rest.starts_with(|c: char| c.is_whitespace() || c == '@'))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Detect an `inductive NAME [params] where` line + return
+    /// `(name, rewritten_line)` if matched.
+    fn try_lift_header(line: &str) -> Option<(String, String)> {
+        let trimmed = line.trim_start();
+        let rest = trimmed.strip_prefix("inductive")?;
+        if !rest.starts_with(|c: char| c.is_whitespace()) {
+            return None;
+        }
+        let rest = rest.trim_start();
+        // First whitespace-delimited token after `inductive`
+        // is the type name.
+        let name_end = rest
+            .find(|c: char| !is_ident_char(c))
+            .unwrap_or(rest.len());
+        let name = rest[..name_end].to_string();
+        if name.is_empty() {
+            return None;
+        }
+        // Must end (after optional trailing whitespace) with the
+        // `where` token.
+        let where_idx = line.rfind("where")?;
+        // Word-boundary check.
+        let before_ok = where_idx == 0
+            || line.as_bytes()[where_idx - 1].is_ascii_whitespace();
+        let after_end = where_idx + 5;
+        let after_ok = line[after_end..].chars().all(char::is_whitespace);
+        if !(before_ok && after_ok) {
+            return None;
+        }
+        let before = &line[..where_idx];
+        let rewritten = format!("{before}: Type");
+        Some((name, rewritten))
+    }
+
+    /// If `line` is a bare `| ctor` line (no payload annotation),
+    /// return the annotated form with ` : NAME` appended.
+    fn try_annotate_ctor(line: &str, ind_name: &str) -> Option<String> {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('|') {
+            return None;
+        }
+        let after_bar = trimmed[1..].trim_start();
+        // Already annotated.
+        if after_bar.contains(':') {
+            return None;
+        }
+        let ctor_end = after_bar
+            .find(|c: char| !is_ident_char(c))
+            .unwrap_or(after_bar.len());
+        let ctor = &after_bar[..ctor_end];
+        let rest = after_bar[ctor_end..].trim_end();
+        if ctor.is_empty() {
+            return None;
+        }
+        if !rest.is_empty() {
+            // Anything beyond the ctor name → likely a payload
+            // application without a `:`. Don't touch — user is
+            // probably using the long form.
+            return None;
+        }
+        let indent_end = line.len() - trimmed.len();
+        let indent = &line[..indent_end];
+        Some(format!("{indent}| {ctor} : {ind_name}"))
+    }
+
+    fn is_ident_char(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_' || c == '\''
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn pass_through_oxilean_form() {
+            let src = "inductive Color : Type | red : Color | green : Color | blue : Color";
+            assert_eq!(rewrite(src), src);
+        }
+
+        #[test]
+        fn rewrite_simple_inductive_where() {
+            let src = "inductive Color where\n  | red\n  | green\n  | blue\n";
+            let out = rewrite(src);
+            assert!(out.contains("inductive Color : Type"));
+            assert!(out.contains("| red : Color"));
+            assert!(out.contains("| green : Color"));
+            assert!(out.contains("| blue : Color"));
+        }
+
+        #[test]
+        fn preserve_existing_ctor_annotation() {
+            let src = "inductive Tree where\n  | leaf\n  | node : Tree -> Tree -> Tree\n";
+            let out = rewrite(src);
+            assert!(out.contains("| leaf : Tree"));
+            assert!(out.contains("| node : Tree -> Tree -> Tree"));
+        }
+
+        #[test]
+        fn pass_through_structure() {
+            let src = "structure Point where\n  x : Float\n  y : Float\n";
+            assert_eq!(rewrite(src), src);
+        }
+
+        #[test]
+        fn block_exit_on_next_decl() {
+            let src = "inductive Color where\n  | red\n  | green\ndef next : Nat := 1\n";
+            let out = rewrite(src);
+            assert!(out.contains("| red : Color"));
+            assert!(out.contains("| green : Color"));
+            // The def line is preserved unmodified.
+            assert!(out.contains("def next : Nat := 1"));
+        }
+
+        #[test]
+        fn idempotent() {
+            let src = "inductive C where\n  | x\n  | y\n";
+            let once = rewrite(src);
+            assert_eq!(once, rewrite(&once));
+        }
+    }
+}
+
+/// Strip Lean 4's `deriving …` clause from the end of a
+/// `structure` / `inductive` decl. OxiLean's parser doesn't
+/// support `deriving` syntax — the user-side `LeanMarshal`
+/// derives are synthesised by `leo4-oxilean-build` directly
+/// (per the `LeanMarshal` derive section of OX2).
+///
+/// Rewrites any line whose trimmed start is `deriving ` to a
+/// blank line.
+#[must_use]
+pub fn strip_deriving_clause(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for raw in src.split_inclusive('\n') {
+        let line = raw.trim_end_matches('\n').trim_end_matches('\r');
+        let trimmed = line.trim_start();
+        if let Some(after) = trimmed.strip_prefix("deriving")
+            && (after.is_empty() || after.starts_with(|c: char| c.is_whitespace()))
+        {
+            // Replace with a blank line of the same newline
+            // shape so line numbers stay aligned.
+            if raw.ends_with("\r\n") {
+                out.push_str("\r\n");
+            } else if raw.ends_with('\n') {
+                out.push('\n');
+            }
+            continue;
+        }
+        out.push_str(raw);
+    }
+    out
+}
+
+/// Strip the leading `.` from Lean 4's `.ctorName`
+/// auto-bound-namespace shorthand. OxiLean's parser rejects
+/// `.lt` in pattern / expr position (it expects a fully-
+/// qualified or in-scope name like `lt`, `Order.lt`).
+///
+/// Rule: a `.` is a `.ctorName` shorthand only if it has a
+/// boundary char (whitespace, `|`, `(`, `,`, `=`, `[`, `<`,
+/// `:`, `;`, `}`, `]`, or start-of-source) immediately
+/// before it AND an alphabetic ident byte immediately after.
+/// `foo.field` (projection) is preserved because `o` is an
+/// ident byte, not a boundary. `..` (range) is preserved
+/// because the second `.` isn't a boundary char.
+///
+/// Pass-through: contents of strings and comments.
+#[must_use]
+pub fn strip_ctor_dot_shorthand(src: &str) -> String {
+    ctor_dot_stripper::strip(src)
+}
+
+mod ctor_dot_stripper {
+    pub fn strip(src: &str) -> String {
+        let bytes = src.as_bytes();
+        let mut out = String::with_capacity(src.len());
+        let mut i = 0usize;
+        let mut chunk_start = 0usize;
+        let n = bytes.len();
+        while i < n {
+            // String literal — skip to matching `"`.
+            if bytes[i] == b'"' {
+                let mut j = i + 1;
+                while j < n && bytes[j] != b'"' {
+                    if bytes[j] == b'\\' && j + 1 < n {
+                        j += 2;
+                        continue;
+                    }
+                    j += 1;
+                }
+                if j < n {
+                    j += 1;
+                }
+                i = j;
+                continue;
+            }
+            // Line comment — skip to newline.
+            if i + 1 < n && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // Detect `.ident` after boundary char.
+            if bytes[i] == b'.'
+                && is_boundary_before(bytes, i)
+                && i + 1 < n
+                && is_ident_start(bytes[i + 1])
+            {
+                // Flush prior chunk verbatim, then skip the `.`.
+                out.push_str(&src[chunk_start..i]);
+                i += 1;
+                chunk_start = i;
+                continue;
+            }
+            i += 1;
+        }
+        out.push_str(&src[chunk_start..]);
+        out
+    }
+
+    fn is_ident_start(b: u8) -> bool {
+        b.is_ascii_alphabetic() || b == b'_'
+    }
+
+    fn is_boundary_before(bytes: &[u8], dot_idx: usize) -> bool {
+        if dot_idx == 0 {
+            return true;
+        }
+        let prev = bytes[dot_idx - 1];
+        matches!(
+            prev,
+            b' ' | b'\t' | b'\n' | b'\r' | b'|' | b'(' | b',' | b'='
+                | b'[' | b'<' | b':' | b';' | b'}' | b']'
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn strip_after_bar() {
+            assert_eq!(strip("| .lt => b"), "| lt => b");
+        }
+
+        #[test]
+        fn strip_after_paren() {
+            assert_eq!(strip("foo (.lt)"), "foo (lt)");
+        }
+
+        #[test]
+        fn strip_after_comma() {
+            assert_eq!(strip("[1, .lt, 3]"), "[1, lt, 3]");
+        }
+
+        #[test]
+        fn strip_at_start_of_source() {
+            assert_eq!(strip(".lt"), "lt");
+        }
+
+        #[test]
+        fn preserve_projection() {
+            // `foo.field` — `f` after `.` is alphabetic but
+            // `o` (ident byte) BEFORE the dot, so no strip.
+            assert_eq!(strip("foo.field"), "foo.field");
+        }
+
+        #[test]
+        fn preserve_range_double_dot() {
+            assert_eq!(strip("1..10"), "1..10");
+        }
+
+        #[test]
+        fn preserve_in_string() {
+            assert_eq!(strip("\"| .lt =>\""), "\"| .lt =>\"");
+        }
+
+        #[test]
+        fn preserve_in_comment() {
+            assert_eq!(strip("-- | .lt =>\n"), "-- | .lt =>\n");
+        }
+
+        #[test]
+        fn handles_multi_byte_after_dot() {
+            // `.한` — `한` is multi-byte non-ASCII, NOT
+            // `is_ident_start`; preserve.
+            assert_eq!(strip("| .한 =>"), "| .한 =>");
+        }
+
+        #[test]
+        fn idempotent() {
+            let src = "match c with\n| .lt => b\n| _   => a";
+            let once = strip(src);
+            assert_eq!(once, strip(&once));
+        }
+
+        #[test]
+        fn multi_line_match() {
+            let src = "match c with\n| .lt => b\n| _   => a";
+            let out = strip(src);
+            assert!(out.contains("| lt => b"));
+            assert!(out.contains("| _   => a"));
+        }
+    }
+}
+
 /// Strip arguments from each attribute inside `@[…]` lists.
 /// OxiLean's `Parser::parse_attribute_decl` v0.1.2 only takes
 /// bare idents inside the bracket list and rejects argument-
@@ -694,8 +1085,15 @@ mod header_binder_rewriter {
         };
 
         let fun_args = explicit_names.join(" ");
-        let rewritten =
-            format!("def {name}{univ_chunk} : {arrow_ty} := fun {fun_args} -> {val_chunk}");
+        // Trailing `\n` preserves the boundary between this
+        // decl and the next one; without it the next decl
+        // would land on the same line in the rewritten output
+        // (because val_end is *exactly* the next-decl
+        // keyword position, leaving no source chunk to bridge
+        // them).
+        let rewritten = format!(
+            "def {name}{univ_chunk} : {arrow_ty} := fun {fun_args} -> {val_chunk}\n"
+        );
         Some((rewritten, val_end))
     }
 
@@ -1016,14 +1414,17 @@ mod header_binder_rewriter {
 /// `lean4_compat` v0.1.2).
 #[must_use]
 pub fn lean4_normalize(src: &str) -> String {
-    // OX3: pre-rewrites BEFORE the lean4_compat textual passes
-    // (binder lift / attribute-arg strip both operate on
-    // syntactic structure the parser would otherwise reject
-    // outright; the lean4_compat layer can only fix-up already-
-    // valid-shape source).
+    // OX3 + OX4: pre-rewrites BEFORE the lean4_compat textual
+    // passes (binder lift / attribute-arg strip / ctor-dot
+    // shorthand all operate on syntactic structure the parser
+    // would otherwise reject outright; the lean4_compat layer
+    // can only fix-up already-valid-shape source).
     let after_attrs = strip_attribute_args(src);
-    let after_binders = rewrite_header_binders(&after_attrs);
-    let after_rewrite = Lean4TermRewriter::standard().rewrite(&after_binders);
+    let after_deriving = strip_deriving_clause(&after_attrs);
+    let after_ind = rewrite_inductive_where(&after_deriving);
+    let after_binders = rewrite_header_binders(&after_ind);
+    let after_dots = strip_ctor_dot_shorthand(&after_binders);
+    let after_rewrite = Lean4TermRewriter::standard().rewrite(&after_dots);
     Lean4SyntaxAdapter::adapt_all(&after_rewrite)
 }
 

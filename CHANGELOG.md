@@ -7,6 +7,80 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX4 partial: three more Lean 4 surface pre-rewrites (2026-05-22)
+
+OX4 partial progress. Three new textual pre-rewrites in
+`lean4_normalize`, plus one bugfix in `rewrite_header_binders`
+(was eating trailing newline before next decl):
+
+**`strip_ctor_dot_shorthand(src) -> String`** — strips the
+leading `.` from Lean 4's `.ctorName` auto-bound-namespace
+shorthand. `.lt` → `lt` only when preceded by a boundary
+char (`|`, `(`, `,`, `=`, `[`, etc. + whitespace); preserves
+`foo.field` projections and `..` ranges. UTF-8 safe. Strings
+and comments pass through.
+
+**`rewrite_inductive_where(src) -> String`** — lifts Lean
+4's `inductive NAME [params] where | ctor1 | ctor2 …` into
+OxiLean's required `inductive NAME : Type | ctor1 : NAME
+| ctor2 : NAME …`. Two paired rewrites: header `where` →
+`: Type`, and each bare `| ctor` line (no inline `:`) gets
+` : NAME` appended. Block exits on next top-level decl
+keyword. Preserves `| ctor : payload → NAME` lines that
+already carry annotations.
+
+**`strip_deriving_clause(src) -> String`** — removes
+`deriving Foo, Bar` lines entirely (replaced with blank
+lines preserving line-number alignment). leo4-oxilean-build
+synthesises the `LeanMarshal` impl itself per the OX2
+user-records path; OxiLean's parser doesn't accept the
+`deriving` keyword.
+
+**`rewrite_header_binders` bugfix**: previously the emitted
+`def NAME : T1 -> ... := fun ... -> body` had no trailing
+newline, causing the next decl to land on the same line in
+the rewritten output (because `val_end` is *exactly* the
+next-decl keyword position). Fixed by appending `\n` to
+the emitted decl.
+
+`lean4_normalize` pipeline now:
+
+```
+src
+ → strip_attribute_args        (OX3)
+ → strip_deriving_clause       (NEW — OX4)
+ → rewrite_inductive_where     (NEW — OX4)
+ → rewrite_header_binders      (OX3 — w/ trailing-\n fix)
+ → strip_ctor_dot_shorthand    (NEW — OX4)
+ → Lean4TermRewriter::standard
+ → Lean4SyntaxAdapter::adapt_all
+ → out
+```
+
+Tests 103 → 120 (+17 OX4 tests across the three new
+module-private test blocks: `.ctorName` strip in 9 forms,
+`inductive` rewrite in 5 forms, `deriving` strip path is
+covered by the pipeline tests).
+
+`tests/sample-lean/Sample.lean` parses successfully through
+the first ~88 lines now (previously stopped at line 23).
+Stops at line 89 on `==` operator (`if b == 0 then ...`)
+— next sub-gap.
+
+**Still pending in OX4** (deferred to follow-up commits
+under the same OX4 entry):
+
+- Binary operator notation (`==`, `+`, `<`, …): OxiLean's
+  `parse_expr` v0.1.2 doesn't recognise these; either
+  register them via the `NotationTable` API or lower
+  textually (`a == b` → `Eq.beq a b`).
+- String interpolation (`s!"…{x}…"`): no OxiLean parse
+  rule.
+- `Except` / `Option` term forms (`Except.ok` / `none`
+  ctor names).
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX3: Lean 4 header-binder lift + attribute-arg strip pre-rewrites (2026-05-22)
 
 OX3 v1.0 RC blocker resolved. Two new textual pre-rewrites

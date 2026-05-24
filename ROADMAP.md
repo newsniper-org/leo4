@@ -734,22 +734,47 @@ all wait for the v1.0 RC window or later.
   surfaces as elab-level errors instead (`NameNotFound`),
   meaning the surface-syntax layer is correctly cleared.
 
-  **OX4 (NEW v1.0 RC blocker, locked 2026-05-22)** — Lean 4
-  surface coverage tail. OxiLean's parser also rejects
-  several other Lean 4 syntactic forms that surface in real
-  code:
+  **OX4 (PARTIAL 2026-05-22, multiple sub-rewrites landed)** —
+  Lean 4 surface coverage tail. Three new textual pre-
+  rewrites landed in `lean4_normalize`:
 
-  - `.ctorName` shorthand in `match` arms (`match c with |
-    .lt => …` instead of fully-qualified `Order.lt`).
-  - `namespace` blocks with multi-decl bodies that mix
-    `def` / `inductive` / etc.
-  - `where` clauses on `def`s (currently treated as part of
-    VALUE by `rewrite_header_binders`).
-  - Possible others — surface as needed via the
-    `tests/sample-lean/Sample.lean` corpus.
+  - `strip_ctor_dot_shorthand`: `.lt` → `lt` after boundary
+    chars (`|`, `(`, `,`, `=`, `[`, etc.); preserves
+    `foo.field` projections + `..` ranges + UTF-8 + strings
+    / comments.
+  - `rewrite_inductive_where`: lifts Lean 4 `inductive
+    NAME where | a | b` into OxiLean's `inductive NAME :
+    Type | a : NAME | b : NAME`; preserves existing
+    `: payload` annotations + block-exits on next top-level
+    decl keyword.
+  - `strip_deriving_clause`: removes `deriving Foo, Bar`
+    lines (leo4-oxilean-build synthesises the LeanMarshal
+    impls itself via the OX2 user-records path).
 
-  These need the same textual pre-rewrite approach. Tracked
-  as OX4 because each is a separate surface form.
+  Also fixed: `rewrite_header_binders` was eating the
+  trailing newline before the next decl. Emits `\n` now.
+
+  Tests 103 → 120 (+17 OX4 tests across the three new
+  module-private test blocks).
+
+  **Still pending in OX4 for v1.0 RC** (discovered while
+  iterating against `tests/sample-lean/Sample.lean`):
+
+  - Binary operator notation (`==`, `+`, `<` …) — OxiLean
+    parser's `parse_expr` v0.1.2 doesn't recognise these
+    as native syntax; needs notation registration or a
+    textual lower (e.g. `a == b` → `Eq.beq a b`).
+  - String interpolation (`s!"…{x}…"`) — OxiLean has no
+    parse rule.
+  - `Except`-typed exports (`Except String UInt64`).
+  - Other corners surfacing as the parse position advances.
+
+  Realistically the rest of OX4 is iterating a known
+  procedure: hit the next parse error, identify the
+  surface form, add a textual rewrite or note it as
+  unfixable-via-textual (forcing OxiLean parser fork).
+  Tail items not split into separate ROADMAP entries —
+  they live under OX4 until the gap closes.
 
   **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)** — elab
   env bootstrap. CLI's transpile path runs `elaborate_decl`
