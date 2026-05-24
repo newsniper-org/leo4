@@ -7,6 +7,46 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 10b: instance + class decls (2026-05-22)
+
+OX6 grammar roadmap step 10 — second chunk. Typeclass-
+related decls now parse.
+
+**`instance` surface coverage**:
+
+- Anonymous: `instance : ToString Foo where toString := …`
+- Named: `instance addPair : Add Pair := wrap`
+- With instance binders: `instance [Inhabited T] : Inhabited
+  Pair where default := def_pair`
+- Two body forms: `where`-block (structure-style field
+  list) or `:= TERM`.
+
+**`class` surface coverage**:
+
+- No binders: `class Trivial where marker : Nat`
+- With type-level binders: `class Functor (f : Type ->
+  Type) where map : Nat`
+- `extends BASES`: `class Monad extends Functor where …`
+- `deriving Foo`: `class Foo where x : Nat deriving Repr`
+- Attribute prefix: `@[builtin_class] class Foo where …`
+
+**AST change**: `DeclKind::Class` gained a `binders:
+Vec<BinderGroup>` field to capture Lean 4's parametric
+class binders. Existing `Structure` decl stays binder-less
+(structures use field types directly; class methods use
+type-level params).
+
+Tests 114 → 124 (+10): instance-anonymous-where-form,
+instance-named-with-term-body, instance-with-instance-
+binder, instance-with-attr-prefix, class-no-binders,
+class-with-typed-binder, class-extends-other-class,
+class-with-deriving, class-with-attr-prefix, multi-decl-
+with-class-and-instance.
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step 10c: namespace + mutual.
+
 ### Added — OX6 step 9.5: quantifiers `forall` / `∀` / `exists` / `∃` (2026-05-22)
 
 Inserted between OX6 steps 9 and 10b at 병익's request:
