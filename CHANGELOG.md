@@ -7,6 +7,43 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 13b-4: Structure / Inductive / Class / Instance (2026-05-24)
+
+`leo4_translate` now covers the type-declaration family:
+
+- **`Structure { name, extends, fields, deriving }`** →
+  `OxDecl::Structure`. Each `StructField { name, ty }`
+  becomes an `OxFieldDecl { name, ty, default: None }`
+  (leo4 doesn't track per-field defaults today).
+  `deriving` info is dropped — oxilean carries it via a
+  separate `Derive { … }` decl shape.
+- **`Inductive { name, ty: Option<_>, ctors, deriving }`** →
+  `OxDecl::Inductive`. Missing `ty` defaults to
+  `Sort(Type)`. Bare ctors (no `: T` annotation)
+  synthesize their type as `Var(inductive_name)`.
+  Indices / non-varying params land empty (leo4 doesn't
+  yet distinguish; 13b-5 follow-up if needed).
+- **`Class { name, extends, fields, deriving }`** →
+  `OxDecl::ClassDecl` (binder-less; binders defer to
+  13b-5).
+- **`Instance { name, ty, body: InstanceBody::Where(_) }`** →
+  `OxDecl::InstanceDecl`. `class_name` is extracted by
+  walking down the App chain in `ty` to find the leftmost
+  `Ident` (so `Monad List` → class_name `"Monad"`).
+  `InstanceBody::Term(_)` defers to 13b-5.
+
+Tests 19 → 25 (+6): structure_basic_fields,
+structure_with_extends,
+inductive_with_bare_ctors_synthesizes_self_typed_ctors,
+class_basic, instance_where_form_extracts_class_name,
+instance_named_form. Workspace lib-test count 139 → 145.
+
+clippy --all-targets -D warnings clean (after
+`#[allow(clippy::too_many_lines)]` on the now-141-line
+`translate_decl_kind` — the variant explosion is
+inherent to the surface mapping; splitting would just
+push code into shallow per-variant helpers).
+
 ### Added — OX6 step 13b-3: BinOp / UnaryOp → App lowering (2026-05-24)
 
 `leo4_translate::translate_expr` now lowers binary and

@@ -37,12 +37,14 @@
 //! shim.
 
 use leo4_lean4_parse::{
-    BinderGroup as L4BinderGroup, BinderKind as L4BinderKind, Decl as L4Decl,
-    DeclKind as L4Kind, Expr as L4Expr, Literal as L4Lit,
+    BinderGroup as L4BinderGroup, BinderKind as L4BinderKind, Ctor as L4Ctor,
+    Decl as L4Decl, DeclKind as L4Kind, Expr as L4Expr,
+    InstanceBody as L4InstanceBody, Literal as L4Lit, StructField as L4Field,
 };
 use oxilean_parse::{
-    Binder as OxBinder, BinderKind as OxBinderKind, Decl as OxDecl,
-    Literal as OxLit, Located, SurfaceExpr as OxExpr,
+    Binder as OxBinder, BinderKind as OxBinderKind, Constructor as OxCtor,
+    Decl as OxDecl, FieldDecl as OxField, Literal as OxLit, Located, SortKind,
+    SurfaceExpr as OxExpr,
 };
 use oxilean_parse::span_util::dummy_span;
 
@@ -81,6 +83,7 @@ pub fn translate_decl(d: &L4Decl) -> Result<Located<OxDecl>, TranslateError> {
     Ok(Located::new(value, dummy_span()))
 }
 
+#[allow(clippy::too_many_lines)]
 fn translate_decl_kind(
     k: &L4Kind,
     univ_params: &[String],
@@ -143,11 +146,91 @@ fn translate_decl_kind(
         L4Kind::DefinitionByArms { .. } => {
             Err(TranslateError::Unsupported("DefinitionByArms (no oxilean equivalent)"))
         }
-        L4Kind::Example { .. } => Err(TranslateError::Unsupported("Example (lands in 13b-2)")),
-        L4Kind::Structure { .. } => Err(TranslateError::Unsupported("Structure (lands in 13b-4)")),
-        L4Kind::Class { .. } => Err(TranslateError::Unsupported("Class (lands in 13b-4)")),
-        L4Kind::Inductive { .. } => Err(TranslateError::Unsupported("Inductive (lands in 13b-4)")),
-        L4Kind::Instance { .. } => Err(TranslateError::Unsupported("Instance (lands in 13b-4)")),
+        L4Kind::Example { .. } => Err(TranslateError::Unsupported("Example (lands in 13b-5)")),
+        L4Kind::Structure { name, extends, fields, deriving: _ } => {
+            // `deriving` info has no place on
+            // oxilean's `Structure` variant — it surfaces
+            // via separate `Derive { … }` decls. The
+            // strict-superset translator drops it
+            // silently; the elab pipeline can re-emit
+            // `Derive` decls if downstream cares.
+            Ok(OxDecl::Structure {
+                name: name.clone(),
+                univ_params: univ_params.to_vec(),
+                extends: extends.clone(),
+                fields: translate_fields(fields)?,
+            })
+        }
+        L4Kind::Class { name, binders, extends, fields, deriving: _ } => {
+            if !binders.is_empty() {
+                return Err(TranslateError::Unsupported(
+                    "Class binders (lands in 13b-5)",
+                ));
+            }
+            Ok(OxDecl::ClassDecl {
+                name: name.clone(),
+                univ_params: univ_params.to_vec(),
+                extends: extends.clone(),
+                fields: translate_fields(fields)?,
+            })
+        }
+        L4Kind::Inductive { name, ty, ctors, deriving: _ } => {
+            // `ty` defaults to `Sort(Type)` when the
+            // source omits the annotation (`inductive
+            // Color where | red | green` style).
+            let ind_ty = match ty {
+                Some(t) => translate_expr_located(t)?,
+                None => Located::new(OxExpr::Sort(SortKind::Type), dummy_span()),
+            };
+            let ox_ctors = ctors
+                .iter()
+                .map(|c| translate_ctor(c, name))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(OxDecl::Inductive {
+                name: name.clone(),
+                univ_params: univ_params.to_vec(),
+                params: Vec::new(),
+                indices: Vec::new(),
+                ty: ind_ty,
+                ctors: ox_ctors,
+            })
+        }
+        L4Kind::Instance { name, binders, ty, body } => {
+            if !binders.is_empty() {
+                return Err(TranslateError::Unsupported(
+                    "Instance binders (lands in 13b-5)",
+                ));
+            }
+            // oxilean wants `class_name` as a separate
+            // field; in leo4 it lives at the head of the
+            // instance type's App chain (`Monad List` →
+            // head `Monad`).
+            let class_name = head_ident(ty).ok_or(TranslateError::Unsupported(
+                "Instance type with non-ident head (e.g. `(C ∘ D) X`)",
+            ))?;
+            let ox_ty = translate_expr_located(ty)?;
+            let defs = match body {
+                L4InstanceBody::Where(fields) => {
+                    fields
+                        .iter()
+                        .map(|f| {
+                            translate_expr_located(&f.ty).map(|e| (f.name.clone(), e))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                }
+                L4InstanceBody::Term(_) => {
+                    return Err(TranslateError::Unsupported(
+                        "Instance with single-term body (lands in 13b-5)",
+                    ));
+                }
+            };
+            Ok(OxDecl::InstanceDecl {
+                name: name.clone(),
+                class_name,
+                ty: ox_ty,
+                defs,
+            })
+        }
         L4Kind::Section { .. } => Err(TranslateError::Unsupported("Section (lands in 13b-5)")),
         L4Kind::Mutual { .. } => Err(TranslateError::Unsupported("Mutual (deferred)")),
         L4Kind::Open { .. } => Err(TranslateError::Unsupported("Open (lands in 13b-5)")),
@@ -210,6 +293,47 @@ fn wrap_lam(binders: &[OxBinder], inner: Located<OxExpr>) -> Located<OxExpr> {
         inner
     } else {
         Located::new(OxExpr::Lam(binders.to_vec(), Box::new(inner)), dummy_span())
+    }
+}
+
+/// Translate a list of leo4 `StructField`s into oxilean's
+/// `FieldDecl`s. leo4 doesn't track per-field default
+/// values today — `default: None` always.
+fn translate_fields(fields: &[L4Field]) -> Result<Vec<OxField>, TranslateError> {
+    fields
+        .iter()
+        .map(|f| {
+            Ok(OxField {
+                name: f.name.clone(),
+                ty: translate_expr_located(&f.ty)?,
+                default: None,
+            })
+        })
+        .collect()
+}
+
+/// Translate a leo4 inductive `Ctor` into oxilean's
+/// `Constructor`. A bare ctor (`| red`) has `ty: None` in
+/// leo4 — the ctor's type is the inductive itself, so we
+/// synthesize `Var(inductive_name)` to satisfy oxilean's
+/// required `ty: Located<SurfaceExpr>` field.
+fn translate_ctor(c: &L4Ctor, inductive_name: &str) -> Result<OxCtor, TranslateError> {
+    let ty = match &c.ty {
+        Some(t) => translate_expr_located(t)?,
+        None => Located::new(OxExpr::Var(inductive_name.to_string()), dummy_span()),
+    };
+    Ok(OxCtor { name: c.name.clone(), ty })
+}
+
+/// Walk the head of an `Expr::App` chain to find the
+/// leftmost `Ident` — used to extract the class name from
+/// an instance type (`Monad List` → `"Monad"`).
+fn head_ident(e: &L4Expr) -> Option<String> {
+    match e {
+        L4Expr::Ident(s) => Some(s.clone()),
+        L4Expr::App(f, _) => head_ident(f),
+        L4Expr::Paren(inner) => head_ident(inner),
+        _ => None,
     }
 }
 
@@ -550,6 +674,100 @@ mod tests {
             panic!("expected outer App");
         };
         assert!(matches!(rhs_c.value, OxExpr::Var(ref s) if s == "c"));
+    }
+
+    // ─── 13b-4: Structure / Inductive / Class / Instance ───
+
+    #[test]
+    fn structure_basic_fields() {
+        let src = "structure Point where\n  x : Nat\n  y : Nat";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-4 supports Structure").value;
+        match d {
+            OxDecl::Structure { name, fields, .. } => {
+                assert_eq!(name, "Point");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name, "x");
+                assert_eq!(fields[1].name, "y");
+                assert!(matches!(fields[0].ty.value, OxExpr::Var(ref s) if s == "Nat"));
+            }
+            other => panic!("expected Structure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn structure_with_extends() {
+        let src = "structure Point3D extends Point where\n  z : Nat";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Structure { extends, .. } = d else { panic!("expected Structure") };
+        assert_eq!(extends, vec!["Point".to_string()]);
+    }
+
+    #[test]
+    fn inductive_with_bare_ctors_synthesizes_self_typed_ctors() {
+        let src = "inductive Color where\n  | red\n  | green\n  | blue";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-4 supports Inductive").value;
+        match d {
+            OxDecl::Inductive { name, ctors, ty, .. } => {
+                assert_eq!(name, "Color");
+                assert_eq!(ctors.len(), 3);
+                assert_eq!(ctors[0].name, "red");
+                // Bare ctors synthesize ty as Var(inductive_name).
+                assert!(matches!(ctors[0].ty.value, OxExpr::Var(ref s) if s == "Color"));
+                // No explicit Sort annotation → defaults to Sort(Type).
+                assert!(matches!(ty.value, OxExpr::Sort(SortKind::Type)));
+            }
+            other => panic!("expected Inductive, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn class_basic() {
+        let src = "class Foo where\n  bar : Nat";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-4 supports Class").value;
+        match d {
+            OxDecl::ClassDecl { name, fields, .. } => {
+                assert_eq!(name, "Foo");
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "bar");
+            }
+            other => panic!("expected ClassDecl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn instance_where_form_extracts_class_name() {
+        // `instance : Monad List where` — head of `Monad List`
+        // is the class name `Monad`.
+        let src = "instance : Monad List where\n  pure : a";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("13b-4 supports Instance").value;
+        match d {
+            OxDecl::InstanceDecl { name, class_name, defs, .. } => {
+                assert!(name.is_none());
+                assert_eq!(class_name, "Monad");
+                assert_eq!(defs.len(), 1);
+                assert_eq!(defs[0].0, "pure");
+            }
+            other => panic!("expected InstanceDecl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn instance_named_form() {
+        let src = "instance natOrd : Ord Nat where\n  compare : a";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        match d {
+            OxDecl::InstanceDecl { name, class_name, .. } => {
+                assert_eq!(name.as_deref(), Some("natOrd"));
+                assert_eq!(class_name, "Ord");
+            }
+            other => panic!("expected InstanceDecl, got {other:?}"),
+        }
     }
 
     #[test]
