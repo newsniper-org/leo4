@@ -7,6 +7,66 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 6: attribute lists with args (2026-05-22)
+
+OX6 grammar roadmap step 6. Attribute prefix `@[…]` on
+decls now parses natively, including OxiLean-rejected
+forms with arguments.
+
+**Shape**:
+
+```rust
+pub struct Decl {
+    pub attrs: Vec<Attribute>,        // NEW field
+    pub kind: DeclKind,
+}
+
+pub struct Attribute {
+    pub name: String,
+    pub raw_args: String,             // raw text, possibly ""
+}
+```
+
+Surface coverage:
+
+- `@[simp]` — bare ident.
+- `@[simp, ext, inline]` — comma list.
+- `@[leo4_specialize_when scalar ∧ ord]` — with args
+  (raw-preserved).
+- `@[leo4_export, leo4_specialize_when scalar ∧ ord]` —
+  mixed bare + with-args in one list.
+- `@[Foo.bar]` — dotted attribute names.
+- Prefix attaches to any decl kind (`def` / `structure` /
+  `inductive`).
+
+The `raw_args` field holds everything after the attribute
+name up to the next `,` or `]` (whitespace trimmed). v0
+doesn't sub-parse arguments because Lean 4's attribute-arg
+grammar is per-attribute (`@[simp]` takes nothing,
+`@[builtin_attribute "name" "doc"]` takes string-literal
+args, etc.) — downstream consumers re-parse `raw_args`
+themselves.
+
+This makes OX3's `strip_attribute_args` textual pre-rewrite
+redundant once OX6 is the default parser (the args land in
+the AST instead of being stripped).
+
+Inner decl rules construct `Decl { attrs: vec![], kind: … }`;
+a new `decl()` wrapper rule reads an optional `attribute_list()`
+prefix and attaches it. Existing 62 tests pass unchanged
+(no test inspected the new `attrs` field).
+
+Tests 62 → 71 (+9): single-bare-ident, comma-list-bare,
+with-args-preserved, mix-bare-and-args, attaches-to-structure,
+attaches-to-inductive, no-attr-yields-empty, multi-decl-per-
+decl-attrs, dotted-attr-name.
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: multi-line field types + layout-sensitive
+parsing + full expression re-parse for `StructField.ty`
+and `Ctor.ty` (currently raw `String`).
+
 ### Added — OX6 step 5: `structure` + `inductive` + `deriving` (2026-05-22)
 
 OX6 grammar roadmap step 5. Three new `Decl` variants
