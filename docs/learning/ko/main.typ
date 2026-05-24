@@ -313,3 +313,65 @@ leo4 개발은 phase 사다리를 따릅니다. 각 기능이 어느 phase 에�
 - `LEO4-DESIGN.md` 는 모든 아키텍처 결정과 그 근거를 담음.
 
 리포지토리가 단일 source of truth. 나머지는 모두 주석.
+
+= 업데이트 — 2026-05-24
+
+v0.1.0 cut 이후 진행된 변경 사항 압축 정리.
+
+- *OX6 — PEG 기반 Lean 4 parser (완료)*.
+  `sibling/leo4-lean4-parse` 가 `leo4-oxilean-build`
+  내의 textual pre-rewrite chain (OX3/OX4) 을 대체.
+  AST shape 은 `oxilean-parse` v0.1.2 와 mirror 되며
+  v0.1.2 의 accepted surface 에 대한 strict superset.
+  rust-transpile pipeline 에서 이전에 거부되던 Lean 4
+  surface (블록 / 문서 주석, Unicode 연산자
+  `≤ ≥ ≠ × ÷ ∈`, `if let` / `match h : e with` /
+  pattern guard, anonymous fn `(· + 1)`, DSL 선언
+  `notation` / `macro_rules` / `syntax` / `elab`,
+  equational `def | pat =>`, …) 모두 elab 가능.
+
+- *OX5 — elab env bootstrap (완료)*.
+  rust-transpile 경로의 elaborator 가 더 이상
+  `NameNotFound("UInt64")` 로 실패하지 않음. OxiLean
+  전용 사용자는 `leo4-oxilean-build` 외에 *아무것도*
+  설치할 필요 없음 — `oxilean_kernel::init_builtin_env`
+  와 leo4 측 augmentation (sized integer, float, Char)
+  이 in-process 로 env 를 채움.
+
+- *Post-OX6 CLI refactor — `leo4.toml`*. `leo4 create`
+  와 `leo4 init` 에서 `--impl <kind>` flag 제거. 모든
+  scaffold 된 프로젝트는 runtime impl 을 선언하는
+  `leo4.toml` 을 가짐. 다중 `[[impl]]` 항목 허용
+  (출력 경로 disjoint 강제). `leo4 create --subcrate`
+  는 새 crate 를 둘러싼 workspace 의 `members` 배열에
+  자동 등록. `leo4 init` 은 레거시 `.leo4-impl`
+  marker 를 자동 migrate.
+
+- *C5 — musl Tier 1+ (v1.0 RC 필수)*. Linux
+  `*-linux-musl*` target 은 `leo4-mslean4` runtime
+  및 `lake` 호출이 없는 path 에 대해 지원
+  (rust-transpile end-to-end, scaffold-only CLI
+  commands, 모든 pure-Rust crate). 코드 측 별도
+  branch 불필요. Arch 의 `musl-clang` wrapper 가
+  freestanding header 를 누락하는 quirk 는
+  `leo4-rust-bridge` 의 `build.rs` 가 자동 fix.
+  `*-linux-android*` (C6) 는 동일 path scope 으로
+  v1.x defer.
+
+- *Leo4.Platform layer*. `lake/Leo4/Leo4/Platform.lean`
+  은 첫 leo4-Lean OS 추상화 layer. 이전에
+  `Leo4.Build` 에 hardcode 되어 있던 `.so` /
+  `.dylib` / `.dll` 선택과 POSIX-only `-Wl,-rpath`
+  발행을 중앙화.
+
+- *Windows IPC worker side*. Phase 9-4c 의 미완료
+  half 가 land. `leo4-rust-worker` 의
+  `open_windows_pipe` 가 dispatcher 의 named pipe 를
+  `CreateFileW` 로 open 하며 spawn race 에 대한
+  retry 포함. `x86_64-pc-windows-gnullvm`
+  cross-compile clean.
+
+2026-05-24 이전에 learning material 을 통독한
+독자라면 아키텍처 결정은 변하지 않았음 — 이 업데이트는
+어떤 RC blocker 가 land 했고 어떤 user-visible
+surface 가 확장되었는지를 기록.

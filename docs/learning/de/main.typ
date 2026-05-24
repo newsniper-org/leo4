@@ -354,3 +354,73 @@ Für den täglichen Bezug:
 
 Das Repository ist die einzige Wahrheitsquelle. Alles andere
 ist Kommentar.
+
+= Update — 2026-05-24
+
+Zusammengefasste Übersicht der Änderungen nach dem
+v0.1.0-Cut.
+
+- *OX6 — PEG-basierter Lean-4-Parser (abgeschlossen)*.
+  `sibling/leo4-lean4-parse` ersetzt die textuelle
+  Pre-Rewrite-Kette (OX3/OX4) in
+  `leo4-oxilean-build`. AST-Formen spiegeln
+  `oxilean-parse` v0.1.2 wider; eine strikte
+  Obermenge dessen akzeptierter Surface. Lean-4-Formen,
+  die die rust-transpile-Pipeline zuvor ablehnte
+  (Block- / Doc-Kommentare, Unicode-Operatoren
+  `≤ ≥ ≠ × ÷ ∈`, `if let` / `match h : e with` /
+  Pattern Guards, anonyme Fn `(· + 1)`,
+  DSL-Deklarationen `notation` / `macro_rules` /
+  `syntax` / `elab`, equationales `def | pat =>`, …)
+  elaborieren jetzt.
+
+- *OX5 — Elab-Env-Bootstrap (abgeschlossen)*. Der
+  Elaborator der rust-transpile-Pfade scheitert
+  nicht mehr an `NameNotFound("UInt64")`. Der reine
+  OxiLean-Nutzer installiert *nichts* über
+  `leo4-oxilean-build` hinaus —
+  `oxilean_kernel::init_builtin_env` plus eine
+  kleine leo4-seitige Ergänzung (Größen-Integer,
+  Floats, Char) füllt die Env in-process.
+
+- *Post-OX6 CLI-Refactor — `leo4.toml`*. `leo4 create`
+  und `leo4 init` haben das Flag `--impl <kind>`
+  abgeschafft. Jedes neu erzeugte Projekt enthält
+  eine `leo4.toml`, die Runtime-Implementierungen
+  deklariert. Mehrere `[[impl]]`-Einträge sind
+  erlaubt; disjunkte Output-Pfade werden beim Parsen
+  erzwungen. `leo4 create --subcrate` registriert das
+  neue Crate im `members`-Array des umgebenden
+  Workspaces. `leo4 init` migriert das alte
+  `.leo4-impl`-Marker automatisch.
+
+- *C5 — musl Tier 1+ (v1.0-RC-Pflicht)*. Die Linux-
+  Ziele `*-linux-musl*` werden für Pfade ohne
+  `leo4-mslean4`-Runtime und ohne `lake`-Aufruf
+  unterstützt (rust-transpile end-to-end,
+  scaffold-only CLI-Befehle, alle pure-Rust-Crates).
+  Im leo4-Quelltext sind keine per-target-Zweige
+  nötig. Eine Host-Eigenheit (Archs `musl-clang`-
+  Wrapper, dem freistehende Header fehlen) wird vom
+  `build.rs` von `leo4-rust-bridge` automatisch
+  behoben. `*-linux-android*` (C6) auf v1.x
+  verschoben, mit demselben Pfad-Scope.
+
+- *Leo4.Platform-Layer*. `lake/Leo4/Leo4/Platform.lean`
+  ist die erste leo4-Lean-OS-Abstraktionsschicht.
+  Sie zentralisiert die `.so` / `.dylib` / `.dll`-
+  Wahl und die POSIX-only `-Wl,-rpath`-Ausgabe, die
+  bislang in `Leo4.Build` hartkodiert war.
+
+- *Windows-IPC, Worker-Seite*. Die fehlende Hälfte
+  von Phase 9-4c ist da; `open_windows_pipe` von
+  `leo4-rust-worker` öffnet die Named Pipe des
+  Dispatchers über `CreateFileW`, mit Retry gegen
+  das Spawn-Race. Cross-Compile sauber unter
+  `x86_64-pc-windows-gnullvm`.
+
+Wer das Lernmaterial vor dem 2026-05-24 vollständig
+gelesen hat: keine Architekturentscheidung hat sich
+geändert — das Update protokolliert nur, welche RC-
+Blocker gelandet sind und welche user-visible Surface
+sich erweitert hat.

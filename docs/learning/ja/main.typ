@@ -318,3 +318,65 @@ leo4 開発は phase ラダーに従います。各機能がどの phase 由来
   捉える。
 
 リポジトリが唯一の真実の源。それ以外はすべて注釈です。
+
+= 更新 — 2026-05-24
+
+v0.1.0 cut 以降の変更を圧縮してまとめたもの。
+
+- *OX6 — PEG 方式の Lean 4 parser (完了)*。
+  `sibling/leo4-lean4-parse` が `leo4-oxilean-build`
+  内の textual pre-rewrite chain (OX3/OX4) を置き換え。
+  AST shape は `oxilean-parse` v0.1.2 を mirror し、
+  v0.1.2 の accepted surface に対する strict
+  superset。rust-transpile pipeline が以前は拒否
+  していた Lean 4 surface (ブロック / ドキュメント
+  コメント、Unicode 演算子 `≤ ≥ ≠ × ÷ ∈`、`if let` /
+  `match h : e with` / pattern guard、anonymous fn
+  `(· + 1)`、DSL 宣言 `notation` / `macro_rules` /
+  `syntax` / `elab`、equational `def | pat =>`、…)
+  がすべて elab 可能に。
+
+- *OX5 — elab env bootstrap (完了)*。
+  rust-transpile 経路の elaborator は
+  `NameNotFound("UInt64")` で失敗しなくなった。
+  OxiLean 専用ユーザは `leo4-oxilean-build` 以外
+  *何も* 追加で入れる必要なし —
+  `oxilean_kernel::init_builtin_env` と leo4 側の
+  augmentation (sized int、float、Char) が in-process
+  で env を埋める。
+
+- *Post-OX6 CLI refactor — `leo4.toml`*。`leo4 create`
+  と `leo4 init` から `--impl <kind>` フラグを撤去。
+  scaffold されたプロジェクトはすべて、runtime impl を
+  宣言する `leo4.toml` を持つ。複数の `[[impl]]`
+  項目可 (出力パスが disjoint であることは parse 時に
+  強制)。`leo4 create --subcrate` は新 crate を周囲の
+  workspace の `members` 配列に自動登録。`leo4 init`
+  は legacy `.leo4-impl` marker を自動 migrate。
+
+- *C5 — musl Tier 1+ (v1.0 RC 必須)*。Linux の
+  `*-linux-musl*` ターゲットは、`leo4-mslean4`
+  ランタイムと `lake` 呼び出しを含まない path
+  (rust-transpile end-to-end、scaffold 専用 CLI、
+  すべての pure-Rust crate) で対応。コード側に
+  per-target 分岐は不要。Arch の `musl-clang` wrapper
+  が freestanding header を欠落させる quirk は
+  `leo4-rust-bridge` の `build.rs` で自動 fix。
+  `*-linux-android*` (C6) は同 path scope で v1.x 送り。
+
+- *Leo4.Platform layer*。`lake/Leo4/Leo4/Platform.lean`
+  は最初の leo4-Lean OS 抽象化 layer。これまで
+  `Leo4.Build` に hardcode されていた `.so` /
+  `.dylib` / `.dll` の選択と POSIX 限定の
+  `-Wl,-rpath` 出力を中央化。
+
+- *Windows IPC worker 側*。Phase 9-4c の未完了 half
+  が land。`leo4-rust-worker` の `open_windows_pipe`
+  が dispatcher の named pipe を `CreateFileW` で
+  open し、spawn race に対する retry も含む。
+  `x86_64-pc-windows-gnullvm` cross-compile clean。
+
+2026-05-24 以前にこの learning material を通読した
+読者にとってアーキテクチャ判断は変わっていない —
+今回の更新は、どの RC blocker が land し、どの
+user-visible surface が拡張されたかの記録。

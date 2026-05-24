@@ -16,6 +16,23 @@ Current siblings:
   with concrete host import bindings and
   `futures::executor::block_on`-driven async dispatch behind a
   sync user-facing API.
+- **`leo4-lean4-parse/`** (2026-05-22 → 2026-05-24) — OX6 PEG-based
+  Lean 4 parser built from scratch with the `peg` crate. Strict
+  superset of `oxilean-parse` v0.1.2's accepted surface. AST
+  shapes mirror upstream for downstream interop. 289 tests
+  (288 lib + 1 integration cross-check against `oxilean-parse`
+  on a shared corpus). All ~25 sub-steps landed; replaces the
+  OX3/OX4 textual pre-rewrite chain in `leo4-oxilean-build`.
+- **`leo4-oxilean-build/`** — OxiLean transpile path (the
+  `rust-transpile` impl kind in `leo4.toml`). Pipeline:
+  parse via leo4-lean4-parse → translate to oxilean's `Decl`
+  via the `leo4_translate` module → elab against
+  `leo4_env_bootstrap::bootstrap_env()` (OxiLean
+  `init_builtin_env` + leo4 boundary primitives, **zero
+  lake/lean overhead**) → lower via `oxilean_codegen::to_lcnf`
+  → emit a Rust crate. `leo4-parser` cargo feature (default
+  ON since 2026-05-24) selects the new path;
+  `--no-default-features` falls back to oxilean-parse-direct.
 - **`mathlib-bridge-test/`** — Lake package pulling Mathlib +
   `Leo4`. Type-checks every `Leo4.MathlibBridge.*` module
   end-to-end. Mathlib's cold build is 1-2 hours, so this isn't on

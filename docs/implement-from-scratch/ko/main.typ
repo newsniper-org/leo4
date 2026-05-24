@@ -1019,3 +1019,125 @@ C-호출 가능 헬퍼(`leo4_marshal_Rat_dec` / `leo4_marshal_Rat_enc`)를 통�
 이유를 설명한다.
 
 즐거운 해킹.
+
+= 업데이트 — 2026-05-24
+
+reference checkout 이 2026-05-24 이후라면 구현 순서가 몇
+부분 바뀜. core architecture 변경 0 — 모두 원래 phase
+ladder 가 TODO 로 열거하던 v1.0-RC gap 들을 닫는 작업.
+
+== OX6: PEG 기반 Lean 4 parser 를 sibling crate 로
+
+`leo4-oxilean-build` 내 OX3 / OX4 textual pre-rewrite
+chain (`lean4_normalize` 등) 은 임시방편이었고
+operator precedence / string interpolation / ctor name
+resolution 모두 진짜 grammar 작업이 필요했음.
+`sibling/leo4-lean4-parse/` 에 `peg` crate 로 sibling
+구축. `def NAME … := VALUE` 부터 시작, PEG 의
+`precedence!` 로 expression precedence, 이후 Lean 4
+surface form 들을 하나씩 (총 약 25 sub-step) 쌓아 올림.
+AST shape 은 `oxilean-parse` v0.1.2 를 mirror — 이미
+`oxilean_parse::Decl` 을 consume 하던 downstream 코드는
+rewrite 가 아니라 translator (`leo4-oxilean-build` 내
+`leo4_translate` module) 만 새로 얻음.
+
+integration test (`tests/oxilean_cross_check.rs`) 로
+공유 corpus 에서 두 parser 동시 실행 — `oxilean-parse`
+가 받는 모든 입력은 `leo4-lean4-parse` 도 받아야 하며
+decl 수 + 이름 + kind tag 가 일치해야 함.
+
+`leo4-oxilean-build` 의 `[features]` 를 뒤집어
+`leo4-parser` 를 `default` 에 넣음. oxilean-parse-direct
+는 `TranslateError::Unsupported` 발생 시 fallback
+(oxilean 대응이 없는 `Dsl`, `HashCommand`,
+`DefinitionByArms` 등).
+
+== OX5-oxi: elab env bootstrap
+
+rust-transpile pipeline 의 `transpile_source_to_unit`
+는 `Environment::new()` 로
+`oxilean_elab::elaborate_decl(&env, &decl)` 호출. 그래서
+파싱 성공한 `def x : UInt64 := 0` 도
+`NameNotFound("UInt64")` 로 실패. fix:
+`leo4-oxilean-build` 의 `leo4_env_bootstrap` module 이
+`oxilean_kernel::init_builtin_env` (Bool / Unit /
+Empty / Nat / String / Eq / Prod / List + 공리 + Nat
+arithmetic) 호출 후 leo4 가 필요로 하는 boundary
+primitive (OxiLean 이 ship 하지 않는 `UInt8..128`,
+`Int8..128`, `Float32`, `Float64`, `Char`) 를
+`Declaration::Axiom { ty: Sort 1, … }` 로 augment.
+
+augmentation 목록은 `LEO4_PRIMITIVE_TYPES: &[&str]` 에
+single-source. OxiLean upstream 이 augmentation 이름
+중 하나를 ship 하기 시작하면 (silent
+`DuplicateDeclaration` 유발) 시끄럽게 fail 하도록
+`oxilean_kernel::builtin::all_builtin_names()` 와
+교차 점검하는 regression-guard test 추가.
+
+== OX5-msl: 확인된 no-op
+
+mslean4 backend (lean.h + libleanshared) 로 leo4 를
+빌드하는 경우 OX5 문제 재발 안 함 — lake plugin 이
+Lean 자체 elaborator 를 `import Lean` 컨텍스트에서
+돌리므로 `UInt64` / `+` 는 construction-by-default 로
+visible. split 의 mslean4 half 는 문서적 artefact 일
+뿐 code 작업 아님. code audit
+(`grep -rn 'Environment::new\|elaborate_decl'`) 으로
+모든 call site 가 `sibling/leo4-oxilean-build` 안에
+있음을 확인.
+
+== Post-OX6 CLI refactor
+
+leo4 CLI 의 `create` / `init` 의 `--impl <kind>` flag
+가 per-(sub)crate `leo4.toml` 파일로 이전. `Leo4Config`
+parser (TOML, `[[impl]]` arrays-of-tables) 구축,
+disjoint output path validation. `create` 에
+`--subcrate` 추가 — 위로 올라가며 가장 가까운
+`[workspace]` Cargo.toml 을 찾아 새 crate 를 그
+`members` 배열에 등록 (inline + multi-line 둘 다,
+idempotent). `init` 은 3-way precedence 획득:
+기존 `leo4.toml` → 손대지 않음; legacy `.leo4-impl`
+marker → migrate + delete; 둘 다 없음 → default
+`[[impl]] kind = "mslean4"`. `run` 은 4-way precedence
+로 impl 해석: `leo4.toml + --impl` (selector) → 첫
+`[[impl]]` → legacy marker → hard error.
+
+== C5: musl Tier 1+ (no-mslean4-no-lake paths)
+
+host 가 glibc 인데 OxiLean 전용 transpile path 용
+static musl binary 를 ship 하고 싶다면, leo4 source 변경
+0. audit verified: 14 workspace crates 가
+`--target x86_64-unknown-linux-musl` 에서 out-of-box
+clean; 2 (`leo4-rust-bridge`, `leo4-wasm`) 는 host
+musl C toolchain (`musl-clang` 또는 `musl-gcc`) 필요.
+Arch 의 `musl-clang` wrapper 는 packaging quirk —
+`-nostdinc` 를 패스하고 clang 의 freestanding-header
+path 를 복원하지 않음. `leo4-rust-bridge` 의 `build.rs`
+가 wrapper 자동 감지 후
+`-isystem $(clang -print-resource-dir)/include` 추가
+→ `<stdatomic.h>` 해결. 다른 toolchain 에서는 no-op.
+
+== Leo4.Platform Lean layer
+
+`lake/Leo4/Leo4/Build.lean` 내 OS-PORTABILITY ledger
+3 개 항목 (`.so` 확장자 hardcode, `-Wl,-rpath` 도처에,
+`-shared` flag) 이 새 `lake/Leo4/Leo4/Platform.lean`
+module 로 이동 — `dynlibExt`, `dynlibPrefix`,
+`isPlatformDynlib`, `stemOfDynlib`, `linkRpath?`,
+`defaultShimSuffix`. `Build.lean` 의 `collectLibDir`
+와 `linkShared` 는 hardcode literal 대신 helper 를
+consume. OS-PORTABILITY 정책: 새 per-OS branch 는
+이 module 안으로.
+
+== Windows IPC worker side
+
+`leo4-rust-worker` 의 `open_ipc_channel` Windows branch
+는
+`"Windows named-pipe IPC not yet implemented"` 를
+반환하는 stub 이었음. 채우기:
+`std::fs::OpenOptions::new().read(true).write(true).open(pipe_path)`
+(내부적으로 `CreateFileW`) 가 dispatcher 의
+`CreateNamedPipeA` / `ConnectNamedPipe` 의 client-side
+counterpart. dispatcher 가 OS 에 pipe 이름을 register
+하기 전에 worker 가 spawn 되는 좁은 race 에 대비해
+10x linear backoff retry.

@@ -1044,3 +1044,130 @@ native ターゲット、消費者が必要とする時の schema-idl
 設計がそこに落ち着いた理由を説明している。
 
 Happy hacking.
+
+= 更新 — 2026-05-24
+
+参照 checkout が 2026-05-24 以降であれば、実装順序の一部が
+変わっている。コアアーキテクチャは無変更 — どれも元の
+phase ladder が TODO として列挙していた v1.0-RC ギャップ
+を埋める作業。
+
+== OX6: PEG 方式の Lean 4 parser を sibling crate として構築
+
+`leo4-oxilean-build` 内の OX3 / OX4 textual pre-rewrite
+chain (`lean4_normalize` 等) は暫定対応で、operator
+precedence / string interpolation / ctor 名解決などは
+本物の grammar 作業が必要だった。
+`sibling/leo4-lean4-parse/` に `peg` crate で sibling
+を構築。`def NAME … := VALUE` から始め、PEG の
+`precedence!` で式の優先度、その後 Lean 4 surface
+form を 1 つずつ (合計約 25 sub-step) 積み上げる。
+AST shape は `oxilean-parse` v0.1.2 を mirror —
+`oxilean_parse::Decl` を消費していた下流コードは
+rewrite ではなく translator (`leo4-oxilean-build` 内の
+`leo4_translate` module) を新たに得るだけ。
+
+integration test (`tests/oxilean_cross_check.rs`) で
+共有 corpus 上で両 parser を走らせ — `oxilean-parse`
+が受け入れる入力はすべて `leo4-lean4-parse` も受け
+入れ、decl 数 + 名前 + kind tag が一致しなければ
+ならない。
+
+`leo4-oxilean-build` の `[features]` を反転して
+`leo4-parser` を `default` に。`TranslateError::Unsupported`
+発生時 (oxilean 対応のない `Dsl`, `HashCommand`,
+`DefinitionByArms` 等) は oxilean-parse-direct が
+fallback。
+
+== OX5-oxi: elab env bootstrap
+
+rust-transpile pipeline の `transpile_source_to_unit`
+は `Environment::new()` で
+`oxilean_elab::elaborate_decl(&env, &decl)` を呼んで
+いた。パースには成功した `def x : UInt64 := 0` でも
+`NameNotFound("UInt64")` で失敗。fix:
+`leo4-oxilean-build` の `leo4_env_bootstrap` module が
+`oxilean_kernel::init_builtin_env` (Bool / Unit /
+Empty / Nat / String / Eq / Prod / List + 公理 + Nat
+arithmetic) を呼び、続けて leo4 が必要とする境界
+primitive (OxiLean が ship しない `UInt8..128`,
+`Int8..128`, `Float32`, `Float64`, `Char`) を
+`Declaration::Axiom { ty: Sort 1, … }` として
+augment。
+
+augmentation 一覧は `LEO4_PRIMITIVE_TYPES: &[&str]` に
+single-source 化。OxiLean upstream が augmentation
+名のどれかを ship し始めた場合 (silent
+`DuplicateDeclaration` を引き起こす) に大声で fail
+するよう、`oxilean_kernel::builtin::all_builtin_names()`
+と突き合わせる regression-guard test を追加。
+
+== OX5-msl: 確認済み no-op
+
+mslean4 backend (lean.h + libleanshared) で leo4 を
+ビルドする場合、OX5 問題は再発しない — lake plugin が
+Lean 自身の elaborator を `import Lean` コンテキストで
+走らせるため、`UInt64` / `+` は構築上 visible。split
+の mslean4 半分は文書上の artefact であり、コード作業
+ではない。code audit
+(`grep -rn 'Environment::new\|elaborate_decl'`) により
+すべての call site が `sibling/leo4-oxilean-build` 内
+にあることを確認。
+
+== Post-OX6 CLI refactor
+
+leo4 CLI の `create` / `init` の `--impl <kind>`
+フラグが per-(sub)crate `leo4.toml` ファイルに移行。
+`Leo4Config` parser (TOML, `[[impl]]` arrays-of-tables)
+を構築し、disjoint output path の検証付き。`create`
+に `--subcrate` を追加 — 上方向に走査し最も近い
+`[workspace]` Cargo.toml を見つけ、新 crate をその
+`members` 配列に登録 (inline + multi-line 両方,
+idempotent)。`init` は 3-way precedence を取得:
+既存の `leo4.toml` → 触らない; legacy `.leo4-impl`
+marker → migrate + delete; いずれもなし → default
+`[[impl]] kind = "mslean4"`。`run` は 4-way
+precedence で impl を解決:
+`leo4.toml + --impl` (selector) → 最初の `[[impl]]`
+→ legacy marker → hard error。
+
+== C5: musl Tier 1+ (no-mslean4-no-lake paths)
+
+host が glibc で OxiLean 専用 transpile path 用に
+静的 musl バイナリを ship したい場合、leo4 source
+変更は 0。audit 検証済: 14 workspace crate が
+`--target x86_64-unknown-linux-musl` で out-of-box
+clean; 2 (`leo4-rust-bridge`, `leo4-wasm`) は host
+musl C toolchain (`musl-clang` または `musl-gcc`) が
+必要。Arch の `musl-clang` wrapper には packaging
+quirk があり、`-nostdinc` を渡して clang の
+freestanding-header path を復元しない。
+`leo4-rust-bridge` の `build.rs` が wrapper を自動
+検出し
+`-isystem $(clang -print-resource-dir)/include` を
+追加 → `<stdatomic.h>` 解決。他の toolchain では
+no-op。
+
+== Leo4.Platform Lean layer
+
+`lake/Leo4/Leo4/Build.lean` 内の OS-PORTABILITY
+ledger の 3 項目 (`.so` 拡張子の hardcode,
+`-Wl,-rpath` 散在, `-shared` フラグ) が新 module
+`lake/Leo4/Leo4/Platform.lean` へ移動 — `dynlibExt`,
+`dynlibPrefix`, `isPlatformDynlib`, `stemOfDynlib`,
+`linkRpath?`, `defaultShimSuffix`。`Build.lean` の
+`collectLibDir` と `linkShared` は hardcode 文字列
+ではなく helper を consume。OS-PORTABILITY ポリシー:
+新しい per-OS 分岐はこの module に。
+
+== Windows IPC worker 側
+
+`leo4-rust-worker` の `open_ipc_channel` Windows 分岐
+は `"Windows named-pipe IPC not yet implemented"` を
+返す stub だった。埋める:
+`std::fs::OpenOptions::new().read(true).write(true).open(pipe_path)`
+(裏で `CreateFileW`) が dispatcher の
+`CreateNamedPipeA` / `ConnectNamedPipe` の
+client-side counterpart。OS にパイプ名が register
+される前に worker が spawn される狭い race に対し
+10x linear backoff retry を入れる。

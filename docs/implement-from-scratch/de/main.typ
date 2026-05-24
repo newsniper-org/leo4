@@ -1172,3 +1172,145 @@ dort benennen jeden Schritt und erklären, warum das Design
 dort gelandet ist, wo es ist.
 
 Happy hacking.
+
+= Update — 2026-05-24
+
+Wenn Ihr Referenz-Checkout nach dem 2026-05-24 datiert,
+hat sich die Implementierungsreihenfolge an einigen
+Stellen verschoben. Keine dieser Änderungen verändert
+die Kernarchitektur; sie schließen alle v1.0-RC-Lücken,
+die der ursprüngliche Phasen-Ladder als TODO führte.
+
+== OX6: PEG-basierter Lean-4-Parser als Sibling-Crate
+
+Die OX3 / OX4 textuelle Pre-Rewrite-Kette in
+`leo4-oxilean-build` (`lean4_normalize` & Co.) war ein
+Notbehelf und stieß an ihre Grenzen — Operator-Precedence,
+String-Interpolation, Ctor-Namensauflösung verlangten
+echte Grammatikarbeit. Eine Sibling-Crate unter
+`sibling/leo4-lean4-parse/` mit der `peg`-Crate
+aufbauen. Mit `def NAME … := VALUE` beginnen, die
+Ausdrucks-Precedence über PEGs `precedence!` ergänzen,
+dann Lean-4-Surface-Formen einzeln (~25 Sub-Steps
+insgesamt) aufschichten. AST-Formen spiegeln
+`oxilean-parse` v0.1.2 — Downstream-Code, der
+`oxilean_parse::Decl` schon konsumiert, bekommt einen
+Translator (`leo4_translate`-Modul in
+`leo4-oxilean-build`) statt eines Rewrites.
+
+Mit einem Integrationstest
+(`tests/oxilean_cross_check.rs`) verifizieren, der
+beide Parser über ein gemeinsames Corpus laufen lässt
+— jede Eingabe, die `oxilean-parse` akzeptiert, muss
+auch `leo4-lean4-parse` mit übereinstimmender
+Decl-Anzahl + Name + Kind-Tag akzeptieren.
+
+`leo4-oxilean-build`s `[features]`-Tabelle so
+umstellen, dass `leo4-parser` in `default` steht;
+oxilean-parse-direct bleibt als Fallback, wenn
+`TranslateError::Unsupported` zuschlägt (Varianten wie
+`Dsl`, `HashCommand`, `DefinitionByArms` ohne
+oxilean-Äquivalent).
+
+== OX5-oxi: Elab-Env-Bootstrap
+
+`transpile_source_to_unit` der rust-transpile-Pipeline
+rief `oxilean_elab::elaborate_decl(&env, &decl)` mit
+`Environment::new()` auf. Selbst ein erfolgreich
+geparstes `def x : UInt64 := 0` scheiterte dann an
+`NameNotFound("UInt64")`. Fix: ein
+`leo4_env_bootstrap`-Modul in `leo4-oxilean-build`,
+das `oxilean_kernel::init_builtin_env` (Bool / Unit /
+Empty / Nat / String / Eq / Prod / List + Axiome +
+Nat-Arithmetik) aufruft und dann mit den
+Grenzprimitiven ergänzt, die leo4 braucht und OxiLean
+nicht ausliefert (`UInt8..128`, `Int8..128`,
+`Float32`, `Float64`, `Char`) — als
+`Declaration::Axiom { ty: Sort 1, … }`.
+
+Die Augmentationsliste lebt in
+`LEO4_PRIMITIVE_TYPES: &[&str]` als Single-Source. Mit
+einem Regression-Guard-Test gegen
+`oxilean_kernel::builtin::all_builtin_names()`
+absichern, damit es laut scheitert, falls OxiLean
+upstream einen der Augmentationsnamen mitliefert (sonst
+stiller `DuplicateDeclaration`).
+
+== OX5-msl: bestätigt no-op
+
+Beim Bauen von leo4 mit dem mslean4-Backend (lean.h +
+libleanshared) tritt das OX5-Problem nicht auf — das
+Lake-Plugin lässt Leans eigenen Elaborator in einem
+`import Lean`-Kontext laufen, so dass `UInt64` / `+`
+konstruktiv sichtbar sind. Die mslean4-Hälfte des
+Splits ist ein Dokumentationsartefakt, keine
+Codearbeit. Die Code-Auditierung
+(`grep -rn 'Environment::new\|elaborate_decl'`) zeigt,
+dass jede Aufrufstelle in `sibling/leo4-oxilean-build`
+liegt.
+
+== Post-OX6 CLI-Refactor
+
+Das Flag `--impl <kind>` der leo4-CLI bei `create` und
+`init` wandert in eine per-(sub)crate-Datei
+`leo4.toml`. Einen `Leo4Config`-Parser bauen (TOML,
+`[[impl]]`-Arrays-of-Tables) mit Validierung
+disjunkter Output-Pfade. `--subcrate` zu `create`
+hinzufügen, das nach oben nach der nächsten
+`[workspace]`-Cargo.toml sucht und das neue Crate
+in deren `members`-Array einträgt (sowohl inline als
+auch mehrzeiliges Array, idempotent). `init` bekommt
+eine 3-Wege-Priorität: vorhandenes `leo4.toml` →
+unangetastet; Legacy-`.leo4-impl`-Marker → migrieren
++ Marker löschen; keins → Standard
+`[[impl]] kind = "mslean4"`. `run` löst das
+Ziel-Impl mit 4-Wege-Priorität auf:
+`leo4.toml + --impl` (Selektor) → erster `[[impl]]`
+→ Legacy-Marker → harter Fehler.
+
+== C5: musl Tier 1+ (no-mslean4-no-lake Pfade)
+
+Wenn der Host glibc ist, Sie aber ein statisches
+musl-Binary für den OxiLean-only-Transpile-Pfad
+ausliefern wollen, muss nichts an leo4s Quellcode
+geändert werden. Audit-verifiziert: 14
+Workspace-Crates bauen unter
+`--target x86_64-unknown-linux-musl` out-of-box
+sauber; 2 (`leo4-rust-bridge`, `leo4-wasm`)
+benötigen eine musl-C-Toolchain auf dem Host
+(`musl-clang` oder `musl-gcc`). Archs
+`musl-clang`-Wrapper hat eine Paketierungs-
+Eigenheit — er gibt `-nostdinc` weiter, ohne den
+Freistanding-Header-Pfad von Clang wiederherzustellen.
+Die `build.rs` von `leo4-rust-bridge` erkennt den
+Wrapper automatisch und ergänzt
+`-isystem $(clang -print-resource-dir)/include`, so
+dass `<stdatomic.h>` aufgelöst wird. No-op für jede
+andere Toolchain.
+
+== Leo4.Platform-Lean-Layer
+
+Drei Einträge des OS-PORTABILITY-Ledgers innerhalb
+von `lake/Leo4/Leo4/Build.lean` (.so-Extension
+hartkodiert, `-Wl,-rpath` überall, `-shared`-Flag)
+wandern in ein neues Modul
+`lake/Leo4/Leo4/Platform.lean` — `dynlibExt`,
+`dynlibPrefix`, `isPlatformDynlib`, `stemOfDynlib`,
+`linkRpath?`, `defaultShimSuffix`. `Build.lean`s
+`collectLibDir` und `linkShared` konsumieren die
+Helfer statt hartkodierter Literale. OS-PORTABILITY-
+Politik: neue per-OS-Zweige gehören in dieses Modul.
+
+== Windows-IPC Worker-Seite
+
+Der Windows-Zweig von `open_ipc_channel` in
+`leo4-rust-worker` war ein Stub, der
+`"Windows named-pipe IPC not yet implemented"`
+zurückgab. Ausfüllen:
+`std::fs::OpenOptions::new().read(true).write(true).open(pipe_path)`
+(unter der Haube `CreateFileW`) ist das clientseitige
+Pendant zu `CreateNamedPipeA` / `ConnectNamedPipe`
+des Dispatchers. Einen 10×-Retry mit linearem
+Backoff für das schmale Rennen einbauen, in dem der
+Worker-Prozess startet, bevor der Dispatcher den
+Pipe-Namen beim OS registriert hat.
