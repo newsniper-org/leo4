@@ -7,6 +7,24 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11h: list literal `[1, 2, 3]` (2026-05-22)
+
+New `Expr::List(Vec<Expr>)` variant + grammar atom for
+Lean 4 list literals. Empty `[]`, single / multi-element,
+arbitrary expressions as elements, nesting all work.
+
+Disambiguation with `[Ord T]` instance binders: binders
+use their own grammar (called only in def signature /
+lambda binder positions); list literal lives in `atom()`
+(called only in expr positions). No ambiguity.
+
+Tests 154 → 160 (+6): empty list, three nats, mixed
+expressions, nested lists, list in def value position,
+instance-binder-still-works (regression guard for the
+binder/list disambiguation).
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11a: block + doc comments (2026-05-22)
 
 OX6 grammar roadmap step 11a — Lean 4 block comments
