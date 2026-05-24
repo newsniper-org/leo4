@@ -7,6 +7,27 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11q: Unicode operator surface (2026-05-23)
+
+`leo4-lean4-parse` accepts the canonical Lean 4 Unicode
+operator forms at the same precedence levels as their
+ASCII spellings:
+
+- **Comparison level**: `≤` (≡ `<=`), `≥` (≡ `>=`),
+  `≠` (≡ `!=`), `∈` (membership), `∉` (non-membership),
+  `⊆` (subset).
+- **Multiplicative level**: `×` (≡ `*`), `÷` (≡ `/`),
+  `∪` (union), `∩` (intersection).
+
+Each surfaces as `Expr::BinOp(op, …)` preserving the
+exact Unicode symbol so downstream consumers can
+distinguish ASCII vs Unicode forms when needed.
+
+Tests 230 → 238 (+8): unicode_op_{le, ge, ne, times,
+div, membership, subset, set_ops}.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11l: numeric + string literal extensions (2026-05-22)
 
 `Literal` enum gained a `Float(String)` variant + the
