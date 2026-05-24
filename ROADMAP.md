@@ -861,9 +861,14 @@ all wait for the v1.0 RC window or later.
        def
 
   ─── Integration (steps 12–13) ───
-  12. ⏳ Cross-check against `oxilean-parse` on a shared
-        corpus (overlapping inputs must produce
-        equivalent ASTs).
+  12. ✅ Cross-check against `oxilean-parse` on a shared
+        corpus (strict-superset invariant: every input
+        oxilean-parse accepts, leo4-lean4-parse also
+        accepts with matching decl count + name + kind
+        tag). Lives at `sibling/leo4-lean4-parse/tests/
+        oxilean_cross_check.rs`. Field-level expr
+        equivalence intentionally skipped (representation
+        shapes diverge by design).
   13. ⏳ leo4-oxilean-build switches its default parser
         from `oxilean_parse::Parser` to
         `leo4_lean4_parse::parse_decls`. OX3/OX4 textual

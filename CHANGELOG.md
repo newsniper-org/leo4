@@ -7,6 +7,46 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 12: oxilean-parse v0.1.2 cross-check (2026-05-24)
+
+`sibling/leo4-lean4-parse/tests/oxilean_cross_check.rs`
+enforces the strict-superset invariant from the OX6
+charter: every source `oxilean-parse` v0.1.2 accepts,
+`leo4-lean4-parse` must also accept, the two parsers
+must agree on decl count, and each corresponding decl
+pair must share a name (per oxilean's `Decl::name()`
+contract) and a compatible kind tag.
+
+**What is NOT asserted**: AST field-level equivalence
+at the expression level — the two parsers have
+intentionally divergent internal shapes (our
+`Expr::BinOp("+", …)` vs upstream's
+`App(App(Plus, lhs), rhs)`), so a structural
+comparison would test representation choice, not
+semantics. Decl-level identity (name + kind tag) is
+the contract consumers of `leo4-oxilean-build` rely
+on.
+
+**Skip mechanism**: sources that `oxilean-parse`
+rejects are silently skipped (printed to stderr).
+This is the "strict" half of the invariant —
+`leo4-lean4-parse`'s surface extensions (e.g. the
+`structure ... where`-form, `inductive ... where`-form,
+or multi-binder def `def f (a : T) (b : T)`) are not
+expected to round-trip through upstream.
+
+Initial corpus: 9 cases covering def, theorem, axiom,
+namespace, structure, inductive, import, multi-decl
+sources. The corpus expands as new shared-surface
+constructs land.
+
+Dev-deps: adds `oxilean-parse = "0.1.2"` (pulls
+`oxilean-kernel` transitively). Production deps
+unchanged — the cross-check is build-time only.
+
+clippy --all-targets -D warnings clean. Lib tests
+unchanged at 288; integration test count 0 → 1.
+
 ### Added — OX6 step 11s-b: notation / macro_rules / syntax / elab (2026-05-24)
 
 Four additional `DslKind` variants land via the new
