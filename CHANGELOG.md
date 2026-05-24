@@ -7,6 +7,55 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11f: multi-line do statement values (2026-05-22)
+
+Step 8's `do` notation supported only single-line
+statement values (`text:$((!"\n" [_])+)`). Step 11f
+extends keyword-prefix statements (`let` / `return` /
+`pure`) to accept *multi-line* value expressions:
+
+```lean
+def main : IO Nat := do
+  let x := if cond then
+      1
+    else
+      2
+  return x
+```
+
+The let-value `if cond then 1 else 2` spans three
+lines; the new `do_keyword_stmt_boundary` rule waits
+for the next keyword-prefix statement (`let` /
+`return` / `pure` at the start of a fresh line) or
+the broader do-block end (`top_level_decl_starter` /
+EOF) before stopping the capture.
+
+**Bare expression statements stay single-line** —
+detecting the boundary between two consecutive bare-
+expr statements on separate lines without column-
+tracking is genuinely ambiguous in PEG; v0 takes the
+safe single-line interpretation. (Bare expr-statement
+sequences in real do-blocks are rare anyway —
+typically users have at least one `let` / `return` /
+`pure` separator.)
+
+Surface coverage gained:
+
+- `let x := if … then … else …` with multi-line
+  if-then-else value.
+- `let x ← if … then … else …` with multi-line
+  bind value.
+- `return if … then … else …` with multi-line return
+  value.
+- `let r := match … with | A => 1 | B => 2` with
+  multi-line match value.
+
+Tests 212 → 217 (+5). Step 8's existing multi-stmt-mix
+fixture still parses correctly under the new boundary
+rule (regression-guarded).
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11e: `by …` tactic block (2026-05-22)
 
 New `Expr::By(Vec<String>)` variant + grammar atom for
