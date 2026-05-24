@@ -96,7 +96,13 @@ enum Cmd {
 
     /// Add leo4 integration to an EXISTING Cargo crate (in cwd
     /// or `--dir`). Edits `Cargo.toml`, writes `build.rs` /
-    /// `lean/` only if absent.
+    /// `lean/` / `leo4.toml` only if absent.
+    ///
+    /// Runtime impl selection lives in the scaffolded
+    /// `leo4.toml`. If a project already carries the
+    /// legacy `.leo4-impl` marker (pre-Post-OX6), the
+    /// CLI auto-migrates it into a fresh `leo4.toml`
+    /// and deletes the marker.
     Init {
         direction: Direction,
         /// Target directory containing a `Cargo.toml`. Defaults
@@ -105,10 +111,6 @@ enum Cmd {
         dir: Option<PathBuf>,
         #[arg(long)]
         leo4_root: Option<PathBuf>,
-        /// Lean implementation to target (same semantics as
-        /// `leo4 create --impl`). Required.
-        #[arg(long, value_parser = parse_impl_kind)]
-        r#impl: ImplKind,
     },
 
     /// Build + run the project end-to-end. Detects direction
@@ -205,8 +207,8 @@ fn main() {
         Cmd::Create { direction, dir, name, leo4_root, subcrate } => {
             run_create(direction, dir, name, leo4_root, subcrate)
         }
-        Cmd::Init { direction, dir, leo4_root, r#impl } => {
-            run_init(direction, dir, leo4_root, r#impl)
+        Cmd::Init { direction, dir, leo4_root } => {
+            run_init(direction, dir, leo4_root)
         }
         Cmd::Run { direction, iface, leo4_root, dir, r#impl, args } => {
             run_run(direction, iface, leo4_root, dir, r#impl, args)
@@ -251,9 +253,11 @@ fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
 /// **Legacy** — write the `<dir>/.leo4-impl` marker
 /// file. Post-OX6 the canonical runtime-impl selector
 /// is `<dir>/leo4.toml` (see `write_leo4_toml`); this
-/// marker stays around solely so existing projects
-/// keep parsing under `leo4 run` until they get
-/// migrated by `leo4 init` (chunk 4).
+/// marker is no longer written by `create` or `init`,
+/// but the helper stays around so tests can synthesise
+/// legacy projects and validate the chunk-4 migration
+/// path.
+#[allow(dead_code)]
 fn write_impl_marker(dir: &Path, kind: &ImplKind) -> Result<(), String> {
     let p = dir.join(".leo4-impl");
     fs::write(&p, format!("{}\n", kind.marker_str()))
@@ -531,9 +535,7 @@ fn run_init(
     direction: Direction,
     dir: Option<PathBuf>,
     leo4_root: Option<PathBuf>,
-    impl_kind: ImplKind,
 ) -> Result<(), String> {
-    check_impl_supported(&impl_kind)?;
     let dir = match dir {
         Some(d) => abs(&d)?,
         None => std::env::current_dir()
@@ -546,19 +548,6 @@ fn run_init(
         ));
     }
 
-    // If a marker already exists, require it to match — switching
-    // impls mid-project is not a workflow we support.
-    if let Some(existing) = read_impl_marker(&dir) {
-        if existing != impl_kind {
-            return Err(format!(
-                "init: {dir:?} already carries `.leo4-impl = {}` but you passed `--impl {}`. \
-                 Switching impls is not supported; remove `.leo4-impl` manually to override.",
-                existing.marker_str(),
-                impl_kind.marker_str(),
-            ));
-        }
-    }
-
     let pkg_name = read_cargo_pkg_name(&cargo_toml)
         .unwrap_or_else(|| dir_basename(&dir));
     let leo4_root_str = resolve_leo4_root(leo4_root);
@@ -567,13 +556,79 @@ fn run_init(
         Direction::Forward => integrate_forward(&dir, &pkg_name, &leo4_root_str)?,
         Direction::Reverse => integrate_reverse(&dir, &pkg_name, &leo4_root_str)?,
     }
-    write_impl_marker(&dir, &impl_kind)?;
-    println!(
-        "leo4 init: integrated {direction:?} scaffold (impl={}) into {dir:?}",
-        impl_kind.marker_str()
-    );
+
+    // Decide the final `leo4.toml` state via the three-way
+    // precedence: existing leo4.toml > legacy .leo4-impl
+    // marker > default (mslean4). `init` is idempotent
+    // for the modern case — an existing leo4.toml is
+    // left untouched.
+    let migration = ensure_leo4_toml_with_migration(&dir)?;
+    match migration {
+        MigrationOutcome::AlreadyPresent => {
+            println!(
+                "leo4 init: integrated {direction:?} scaffold into {dir:?}; existing leo4.toml left untouched"
+            );
+        }
+        MigrationOutcome::MigratedFromLegacyMarker(kind) => {
+            println!(
+                "leo4 init: integrated {direction:?} scaffold into {dir:?}; migrated legacy .leo4-impl ({}) → leo4.toml",
+                kind
+            );
+        }
+        MigrationOutcome::WroteDefault => {
+            println!(
+                "leo4 init: integrated {direction:?} scaffold (impl=mslean4) into {dir:?}"
+            );
+        }
+    }
     println!("  Cargo.toml extended; lean/ + (forward) build.rs created if absent.");
+    println!("  edit {}/leo4.toml to switch impl or add more", dir.display());
     Ok(())
+}
+
+/// Outcome categories for the `leo4.toml` state after
+/// `leo4 init` runs — surfaced in the post-init
+/// summary line so the user can tell which path was
+/// taken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MigrationOutcome {
+    /// The directory already had a `leo4.toml` —
+    /// nothing was written.
+    AlreadyPresent,
+    /// No `leo4.toml`, but a legacy `.leo4-impl`
+    /// marker was found. Marker → `leo4.toml`
+    /// conversion happened + marker was deleted.
+    MigratedFromLegacyMarker(String),
+    /// No `leo4.toml` and no legacy marker. A default
+    /// `[[impl]] kind = "mslean4"` config was written.
+    WroteDefault,
+}
+
+/// Three-way precedence for the `leo4.toml` state
+/// after `init`:
+///
+/// 1. **Existing `leo4.toml`**: untouched. Init is
+///    idempotent for the modern case.
+/// 2. **Legacy `.leo4-impl` marker present**: migrate
+///    its kind into a fresh `leo4.toml`, then delete
+///    the marker. (Per the user's chunk-4 decision —
+///    auto-migrate.)
+/// 3. **Neither present**: write the default
+///    `[[impl]] kind = "mslean4"` config.
+fn ensure_leo4_toml_with_migration(dir: &Path) -> Result<MigrationOutcome, String> {
+    if dir.join("leo4.toml").exists() {
+        return Ok(MigrationOutcome::AlreadyPresent);
+    }
+    if let Some(legacy) = read_impl_marker(dir) {
+        let kind = legacy.marker_str().to_string();
+        write_leo4_toml(dir, &kind)?;
+        let marker = dir.join(".leo4-impl");
+        fs::remove_file(&marker)
+            .map_err(|e| format!("remove {marker:?}: {e}"))?;
+        return Ok(MigrationOutcome::MigratedFromLegacyMarker(kind));
+    }
+    write_leo4_toml(dir, ImplKind::Mslean4.marker_str())?;
+    Ok(MigrationOutcome::WroteDefault)
 }
 
 fn integrate_forward(dir: &Path, name: &str, leo4_root: &str) -> Result<(), String> {
@@ -1628,6 +1683,116 @@ name = "x"
         std::env::set_current_dir(prev_cwd).unwrap();
         let err = result.expect_err("--subcrate without workspace must error");
         assert!(err.contains("--subcrate"), "{err}");
+    }
+
+    // ─── Post-OX6 chunk 4: leo4 init migration ─────────────
+
+    #[test]
+    fn ensure_leo4_toml_already_present_is_no_op() {
+        let dir = tempdir();
+        // User-authored config with two impls.
+        let pre_existing = r#"
+[[impl]]
+kind = "mslean4"
+out  = "out/m"
+
+[[impl]]
+kind = "rust-transpile"
+out  = "out/rt"
+"#;
+        fs::write(dir.join("leo4.toml"), pre_existing).unwrap();
+        let outcome = ensure_leo4_toml_with_migration(&dir).unwrap();
+        assert_eq!(outcome, MigrationOutcome::AlreadyPresent);
+        // Untouched — same bytes as we wrote.
+        let after = fs::read_to_string(dir.join("leo4.toml")).unwrap();
+        assert_eq!(after, pre_existing);
+    }
+
+    #[test]
+    fn ensure_leo4_toml_migrates_legacy_marker_and_deletes_it() {
+        let dir = tempdir();
+        // Synthesize a legacy project: `.leo4-impl` only.
+        write_impl_marker(&dir, &ImplKind::Mslean4).unwrap();
+        assert!(dir.join(".leo4-impl").exists());
+
+        let outcome = ensure_leo4_toml_with_migration(&dir).unwrap();
+        assert_eq!(
+            outcome,
+            MigrationOutcome::MigratedFromLegacyMarker("mslean4".to_string())
+        );
+        assert!(dir.join("leo4.toml").exists(), "leo4.toml must be created");
+        assert!(
+            !dir.join(".leo4-impl").exists(),
+            "legacy .leo4-impl marker must be deleted post-migration"
+        );
+        // Round-trip via parser to confirm the migrated
+        // config is valid.
+        let cfg = crate::config::Leo4Config::load_from_dir(&dir).unwrap();
+        assert_eq!(cfg.impls.len(), 1);
+        assert_eq!(cfg.impls[0].kind, "mslean4");
+    }
+
+    #[test]
+    fn ensure_leo4_toml_migrates_rust_native_marker() {
+        let dir = tempdir();
+        write_impl_marker(&dir, &ImplKind::RustNative).unwrap();
+        let outcome = ensure_leo4_toml_with_migration(&dir).unwrap();
+        assert_eq!(
+            outcome,
+            MigrationOutcome::MigratedFromLegacyMarker("rust-native".to_string())
+        );
+    }
+
+    #[test]
+    fn ensure_leo4_toml_writes_default_when_nothing_present() {
+        let dir = tempdir();
+        let outcome = ensure_leo4_toml_with_migration(&dir).unwrap();
+        assert_eq!(outcome, MigrationOutcome::WroteDefault);
+        let cfg = crate::config::Leo4Config::load_from_dir(&dir).unwrap();
+        assert_eq!(cfg.impls[0].kind, "mslean4");
+    }
+
+    #[test]
+    fn run_init_idempotent_on_existing_leo4_toml() {
+        let dir = tempdir();
+        // Pre-existing project state: Cargo.toml + leo4.toml.
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"existing\"\nversion = \"0.1.0\"\n",
+        ).unwrap();
+        let pre_existing = r#"[[impl]]
+kind = "rust-transpile"
+"#;
+        fs::write(dir.join("leo4.toml"), pre_existing).unwrap();
+
+        let leo4_root = tempdir();
+        run_init(Direction::Forward, Some(dir.clone()), Some(leo4_root))
+            .expect("run_init must succeed");
+
+        // leo4.toml left untouched — kind is still
+        // `rust-transpile`, NOT the default mslean4.
+        let cfg = crate::config::Leo4Config::load_from_dir(&dir).unwrap();
+        assert_eq!(cfg.impls[0].kind, "rust-transpile");
+    }
+
+    #[test]
+    fn run_init_migrates_legacy_marker_project() {
+        let dir = tempdir();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"legacy\"\nversion = \"0.1.0\"\n",
+        ).unwrap();
+        write_impl_marker(&dir, &ImplKind::Mslean4).unwrap();
+
+        let leo4_root = tempdir();
+        run_init(Direction::Forward, Some(dir.clone()), Some(leo4_root))
+            .expect("run_init must succeed");
+
+        assert!(dir.join("leo4.toml").exists());
+        assert!(
+            !dir.join(".leo4-impl").exists(),
+            "init must delete the legacy marker"
+        );
     }
 
     #[test]

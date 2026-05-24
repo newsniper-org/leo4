@@ -7,6 +7,46 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Changed — Post-OX6 CLI refactor chunk 4: `leo4 init` writes / migrates `leo4.toml` (2026-05-24)
+
+`leo4 init` drops the required `--impl <kind>` flag.
+Post-init `leo4.toml` state follows a three-way
+precedence (the chunk-4 "auto-migrate" decision):
+
+1. **Existing `leo4.toml`**: untouched. Init is
+   idempotent for the modern case — re-running on a
+   project that's already on `leo4.toml` doesn't
+   clobber multi-impl configs.
+2. **Legacy `.leo4-impl` marker present** (pre-Post-
+   OX6 project): the marker's kind is migrated into a
+   fresh `leo4.toml`, then the marker is deleted.
+3. **Neither present**: default `[[impl]] kind =
+   "mslean4"` config is written.
+
+Outcome surfaces in the post-init summary line so the
+user can tell which path was taken
+(`MigrationOutcome::{AlreadyPresent,
+MigratedFromLegacyMarker(kind), WroteDefault}`).
+
+The `check_impl_supported` call is gone from the init
+path — `leo4 run` still gates unsupported kinds at
+build time, so an init writing a deferred-kind config
+is now allowed (the diagnostic surfaces when the
+user actually tries to build).
+
+`write_impl_marker` survives as `#[allow(dead_code)]`
+so the chunk-4 migration tests can synthesise legacy
+projects + validate the migration path. Production
+code never writes the marker anymore.
+
+Tests 44 → 50 (+6):
+ensure_leo4_toml_already_present_is_no_op,
+ensure_leo4_toml_migrates_legacy_marker_and_deletes_it,
+ensure_leo4_toml_migrates_rust_native_marker,
+ensure_leo4_toml_writes_default_when_nothing_present,
+run_init_idempotent_on_existing_leo4_toml,
+run_init_migrates_legacy_marker_project.
+
 ### Added — Post-OX6 CLI refactor chunk 3: `leo4 create --subcrate` (2026-05-24)
 
 New `--subcrate` flag on `leo4 create`. When set, the
