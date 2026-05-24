@@ -631,18 +631,28 @@ would be expensive to relitigate:
     impl). Rust-keyword field / variant names raw-ident-
     escaped. Wire form byte-compatible with
     `#[derive(LeanMarshal)]`.
-  - **OX3 (NEW v1.0 RC blocker, locked 2026-05-22)**:
-    Lean 4 header-binder syntax. OxiLean's parser only
-    accepts `def f : T → R := fun x → body` (body-lambda
-    form), not the Lean 4 standard `def f (x : T) : R :=
-    body`. `oxilean-elab::lean4_compat` v0.1.2 is textual
-    only — it doesn't lift header binders. Discovered
-    during OX1 step b's e2e smoke; v1.0 RC needs an
-    AST-level adapter ABOVE the parser (pre-rewrite header
-    binders into body lambdas before tokenising, or
-    fork the parser to accept the surface form natively).
-    Real Lean code uses header binders constantly so this
-    is non-optional. Pinned in ROADMAP.md as OX3.
+  - **OX3 (CLOSED 2026-05-22)**: Lean 4 header-binder
+    syntax + attribute-arg strip. Two textual pre-rewrites
+    landed in `lean4_normalize`: `rewrite_header_binders`
+    lifts `def NAME (binders) : T := body` →
+    `def NAME : T1 → … → T := fun args → body`;
+    `strip_attribute_args` reduces `@[attr arg1 arg2]` →
+    `@[attr]`. Both are UTF-8 safe + idempotent. E2E parse
+    verified against `tests/sample-lean/Sample.lean`.
+  - **OX4 (NEW v1.0 RC blocker, locked 2026-05-22)**:
+    Lean 4 surface coverage tail. OxiLean's parser also
+    rejects `.ctorName` match shorthand, `namespace` blocks
+    mixing decl kinds, `def` `where` clauses, and possibly
+    other syntactic forms surfacing in real code. Same
+    textual-pre-rewrite approach as OX3.
+  - **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)**:
+    elab env bootstrap. CLI's transpile path elaborates in
+    an empty `Environment::new()`, so even successfully-
+    parsed code fails on `NameNotFound("UInt64")` /
+    `NameNotFound("+")`. v1.0 RC needs either a baked env
+    snapshot (built ahead-of-time from Lean stdlib + leo4
+    runtime) or pointing the CLI at the lake plugin's
+    pre-elaborated `.olean` cache.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

@@ -7,6 +7,89 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX3: Lean 4 header-binder lift + attribute-arg strip pre-rewrites (2026-05-22)
+
+OX3 v1.0 RC blocker resolved. Two new textual pre-rewrites
+in `lean4_normalize` so the OxiLean parser accepts more
+real-world Lean 4 surface syntax:
+
+**`rewrite_header_binders(src) -> String`** — character-
+level scanner with bracket balancing lifts Lean 4
+header-binder `def`s into OxiLean's body-lambda dialect:
+
+```
+def add (a b : UInt64) : UInt64 := a + b
+                ↓
+def add : UInt64 -> UInt64 -> UInt64 := fun a b -> a + b
+```
+
+Coverage:
+- Multi-name binder groups (`(a b c : T)` → 3 args).
+- Multi-group binders (`(a : T) (b : U)` → 2 args).
+- Implicit `{T : Type}` / instance `[Ord T]` binders
+  stripped from the header (auto-bound by elaborator).
+- Universe params `.{u, v}` preserved verbatim.
+- Nested-bracket types (`List (Option Nat)`) walk via
+  bracket-balanced reader.
+- Pass-through: `theorem`, `structure`, `inductive`,
+  `instance`, `class` decls; def's already without binders;
+  def's inside strings or comments.
+- Idempotent.
+
+**`strip_attribute_args(src) -> String`** — reduces each
+`@[…]` list entry to its first ident, since OxiLean's
+`Parser::parse_attribute_decl` v0.1.2 only accepts bare
+idents and rejects args:
+
+```
+@[leo4_export, leo4_specialize_when scalar ∧ ord]
+                ↓
+@[leo4_export, leo4_specialize_when]
+```
+
+UTF-8 safe (multi-byte chars in source like `←` /
+`∧` preserved). Pass-through for `@[…]` inside strings
+or comments. Idempotent.
+
+`lean4_normalize` pipeline now:
+
+```
+src
+ → strip_attribute_args      (NEW — OX3)
+ → rewrite_header_binders    (NEW — OX3)
+ → Lean4TermRewriter::standard
+ → Lean4SyntaxAdapter::adapt_all
+ → out
+```
+
+Tests 86 → 103 lib (+17 OX3 tests across the two new
+module-private test blocks: pass-through, single binder,
+multi-name binder, multi-group, implicit-stripping,
+structure / theorem untouched, multi-decl, idempotence,
+nested-bracket type, def-in-string protection; attribute
+strip pass-through, single-arg, comma-list, string /
+comment protection, idempotence).
+
+E2E parse verified against `tests/sample-lean/Sample.lean`:
+what was previously a parser-reject `UnexpectedToken {
+expected: [":="], got: LParen }` and `UnexpectedToken {
+expected: ["]"], got: Ident("scalar") }` now both surface
+as elab-level `NameNotFound` errors — meaning the surface-
+syntax layer is correctly cleared and the remaining gap
+is the elab env (tracked as OX5).
+
+Three follow-up v1.0 RC blockers opened in ROADMAP:
+
+- **OX4**: Lean 4 surface coverage tail (`.ctorName`
+  match shorthand, `namespace` blocks, `where` clauses on
+  def, etc.). Same textual-pre-rewrite approach.
+- **OX5**: elab env bootstrap. CLI runs elab in an empty
+  `Environment::new()`, so `UInt64` / `+` etc. don't
+  resolve. Needs either a baked env snapshot or pointing
+  the CLI at the lake plugin's `.olean` cache.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX1 step b: lake plugin auto-invocation of `leo4-oxilean-build` (2026-05-22)
 
 OX1 step b — wiring lake plugin to drive

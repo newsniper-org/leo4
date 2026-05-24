@@ -710,17 +710,56 @@ all wait for the v1.0 RC window or later.
   the `tests/sample-lean/Sample.lean` fixture (manifest is
   produced with all 60+ instantiation mangled names).
 
-  **OX3 (NEW v1.0 RC blocker)** — Lean 4 header-binder
-  syntax. `oxilean-elab::lean4_compat` v0.1.2 is textual
-  only; OxiLean's parser rejects
-  `def f (x : T) : R := body` (header binders) and only
-  accepts the body-lambda form `def f : T → R := fun x → body`.
-  Real-world Lean code uses header binders constantly, so
-  v1.0 RC needs an AST-level adapter ABOVE the parser:
-  either pre-rewrite header binders into body lambdas
-  before tokenising, or fork the parser to accept the
-  header-binder form natively. Discovered during the OX1
-  step b e2e smoke against `tests/sample-lean/Sample.lean`.
+  **OX3 (DONE 2026-05-22)** — Lean 4 header-binder syntax
+  + attribute-arg strip. Two new textual pre-rewrites in
+  `lean4_normalize`:
+
+  - `rewrite_header_binders(src)`: lifts
+    `def NAME (a b : T1) (c : T2) : R := body` into
+    `def NAME : T1 → T1 → T2 → R := fun a b c → body`.
+    Character-level scanner with bracket balancing.
+    Implicit `{T : Type}` and instance `[Ord T]` binders are
+    stripped from the head (they're auto-bound). Pass-through
+    for `theorem` / `structure` / `inductive` / def's
+    already without binders / def's inside strings or
+    comments. Idempotent.
+  - `strip_attribute_args(src)`: reduces
+    `@[leo4_specialize_when scalar ∧ ord]` to
+    `@[leo4_specialize_when]`. OxiLean's parser only
+    accepts bare idents in `@[…]` lists, not arg-bearing
+    attributes. UTF-8 safe (multi-byte chars preserved).
+
+  E2E parse-pass verified — what was previously a parser-
+  reject error on `tests/sample-lean/Sample.lean` now
+  surfaces as elab-level errors instead (`NameNotFound`),
+  meaning the surface-syntax layer is correctly cleared.
+
+  **OX4 (NEW v1.0 RC blocker, locked 2026-05-22)** — Lean 4
+  surface coverage tail. OxiLean's parser also rejects
+  several other Lean 4 syntactic forms that surface in real
+  code:
+
+  - `.ctorName` shorthand in `match` arms (`match c with |
+    .lt => …` instead of fully-qualified `Order.lt`).
+  - `namespace` blocks with multi-decl bodies that mix
+    `def` / `inductive` / etc.
+  - `where` clauses on `def`s (currently treated as part of
+    VALUE by `rewrite_header_binders`).
+  - Possible others — surface as needed via the
+    `tests/sample-lean/Sample.lean` corpus.
+
+  These need the same textual pre-rewrite approach. Tracked
+  as OX4 because each is a separate surface form.
+
+  **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)** — elab
+  env bootstrap. CLI's transpile path runs `elaborate_decl`
+  in an empty `Environment::new()`, so even successfully-
+  parsed code fails on `NameNotFound("UInt64")` /
+  `NameNotFound("+")`. The CLI needs to populate the env
+  with the Lean stdlib + leo4 runtime decls before elab.
+  Option (a): bake an env snapshot built ahead-of-time;
+  Option (b): point the CLI at a pre-elaborated `.olean`
+  cache the lake plugin produced.
 - **OX2** Marshallable matrix expansion (locked 2026-05-22,
   carrier-types layer landed 2026-05-22).
   Built-ins now covered by `synthesize_canonical_wrapper`:

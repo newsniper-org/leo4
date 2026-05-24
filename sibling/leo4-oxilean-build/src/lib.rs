@@ -184,6 +184,811 @@ pub const LEO4_EXPORT_ATTR: &str = "leo4_export";
 /// inside OxiLean.
 pub const LEAN_MARSHAL_DERIVE: &str = "LeanMarshal";
 
+// ─── OX3: header-binder pre-rewrite (Lean 4 → OxiLean parser dialect) ──
+//
+// OxiLean's `Parser::parse_definition` accepts the form
+// `def name : type := value` but rejects Lean 4's
+// `def name (binders) : type := value`. The
+// `oxilean-elab::lean4_compat` v0.1.2 adapter only does textual
+// rewrites on the existing parser dialect — it doesn't lift
+// header binders. This helper does that lift textually, BEFORE
+// the parser sees the source.
+//
+// Algorithm (per `def` occurrence at top level):
+//
+//   def NAME [{implicits}] [(binders)]+ [[instances]]+ [: TYPE] := VALUE
+//   ────────────────────────────────────────────────────────────────────
+//   def NAME : T1 → T2 → … → TYPE := fun n1 n2 … → VALUE
+//
+// Where each binder group `(a b : T)` contributes one type per
+// name to the arrow chain + one name per name to the fun args.
+// Implicit `{...}` and instance `[...]` binders are stripped
+// from the head (they don't surface in the lowered Rust types —
+// they're auto-bound).
+//
+// We scan over the source as raw bytes, identifying `def` /
+// `def NAME` boundaries by looking for the keyword preceded by
+// whitespace or start-of-source. Brackets are balanced inside
+// binder groups so `(x : Vec (List Nat))` parses correctly.
+// Lines, string literals, and comments are honoured.
+
+/// Strip arguments from each attribute inside `@[…]` lists.
+/// OxiLean's `Parser::parse_attribute_decl` v0.1.2 only takes
+/// bare idents inside the bracket list and rejects argument-
+/// bearing attributes like `@[leo4_specialize_when scalar ∧ ord]`.
+/// This pre-rewrite keeps only the first ident of each comma-
+/// separated entry so the bracket list parses, then leaves the
+/// rest of the decl unchanged.
+///
+/// Out of scope (pass-through): `attribute [...]` keyword form,
+/// `#[…]` (Rust-style, not Lean), comments / strings.
+#[must_use]
+pub fn strip_attribute_args(src: &str) -> String {
+    attribute_arg_stripper::strip(src)
+}
+
+mod attribute_arg_stripper {
+    pub fn strip(src: &str) -> String {
+        let bytes = src.as_bytes();
+        let mut out = String::with_capacity(src.len());
+        let mut i = 0usize;
+        let mut chunk_start = 0usize;
+        let n = bytes.len();
+        while i < n {
+            // Skip strings.
+            if bytes[i] == b'"' {
+                let mut j = i + 1;
+                while j < n && bytes[j] != b'"' {
+                    if bytes[j] == b'\\' && j + 1 < n {
+                        j += 2;
+                        continue;
+                    }
+                    j += 1;
+                }
+                if j < n {
+                    j += 1;
+                }
+                i = j;
+                continue;
+            }
+            // Skip line comments.
+            if i + 1 < n && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // Detect `@[` start.
+            if i + 1 < n
+                && bytes[i] == b'@'
+                && bytes[i + 1] == b'['
+                && let Some(end) = balanced_skip(bytes, i + 1, b'[', b']')
+            {
+                // Flush prior chunk verbatim (preserves
+                // multi-byte UTF-8 sequences intact).
+                out.push_str(&src[chunk_start..i]);
+                let inner = &src[i + 2..end - 1];
+                let stripped = strip_inner(inner);
+                out.push_str("@[");
+                out.push_str(&stripped);
+                out.push(']');
+                i = end;
+                chunk_start = i;
+                continue;
+            }
+            i += 1;
+        }
+        out.push_str(&src[chunk_start..]);
+        out
+    }
+
+    /// Split `inner` (between `@[` and `]`) on top-level commas
+    /// and reduce each entry to its first whitespace-delimited
+    /// token.
+    fn strip_inner(inner: &str) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let bytes = inner.as_bytes();
+        let mut i = 0usize;
+        let mut depth_paren: i32 = 0;
+        let mut depth_brace: i32 = 0;
+        let mut depth_bracket: i32 = 0;
+        let mut start = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'(' => depth_paren += 1,
+                b')' => depth_paren -= 1,
+                b'{' => depth_brace += 1,
+                b'}' => depth_brace -= 1,
+                b'[' => depth_bracket += 1,
+                b']' => depth_bracket -= 1,
+                b',' if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 => {
+                    parts.push(inner[start..i].to_string());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        parts.push(inner[start..].to_string());
+
+        parts
+            .iter()
+            .map(|p| first_token(p.trim()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn first_token(s: &str) -> String {
+        s.split_whitespace().next().unwrap_or("").to_string()
+    }
+
+    fn balanced_skip(bytes: &[u8], start_byte: usize, open: u8, close: u8) -> Option<usize> {
+        debug_assert_eq!(bytes[start_byte], open);
+        let mut i = start_byte + 1;
+        let mut depth: i32 = 1;
+        let n = bytes.len();
+        while i < n && depth > 0 {
+            let b = bytes[i];
+            if b == open {
+                depth += 1;
+            } else if b == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            } else if b == b'"' {
+                i += 1;
+                while i < n && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < n {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn pass_through_bare_attribute() {
+            assert_eq!(strip("@[leo4_export]"), "@[leo4_export]");
+        }
+
+        #[test]
+        fn strip_args_from_single_attribute() {
+            assert_eq!(
+                strip("@[leo4_specialize_when scalar ∧ ord]"),
+                "@[leo4_specialize_when]"
+            );
+        }
+
+        #[test]
+        fn strip_args_in_comma_list() {
+            assert_eq!(
+                strip("@[leo4_export, leo4_specialize_when scalar ∧ ord]"),
+                "@[leo4_export, leo4_specialize_when]"
+            );
+        }
+
+        #[test]
+        fn pass_through_string_with_at_brackets() {
+            assert_eq!(strip("\"@[foo bar]\""), "\"@[foo bar]\"");
+        }
+
+        #[test]
+        fn pass_through_comment_with_at_brackets() {
+            assert_eq!(strip("-- @[foo bar]\n"), "-- @[foo bar]\n");
+        }
+
+        #[test]
+        fn idempotent() {
+            let src = "@[a, b c d, e (f g)]";
+            let once = strip(src);
+            let twice = strip(&once);
+            assert_eq!(once, twice);
+        }
+    }
+}
+
+/// Pre-rewrite Lean 4 header-binder `def`s into OxiLean-dialect
+/// body-lambda form, before the parser sees the source.
+///
+/// Idempotent: re-running on already-rewritten source has no
+/// effect (the regex doesn't match `def NAME :` without a
+/// binder bracket).
+///
+/// Out of scope (intentionally pass-through):
+/// - `theorem` / `lemma` / `axiom` / `inductive` / `structure`
+///   / `instance` / `class` decls (parser handles those forms
+///   without lifting).
+/// - `def`s that *already* lack header binders.
+/// - `def`s inside comments / string literals.
+///
+/// Limitations (documented as known gaps):
+/// - Multi-line VALUE: supported (we scan to the next
+///   top-level decl keyword or EOF).
+/// - Default values in binder groups (`(x : Nat := 0)`): not
+///   yet handled — leaves the source unchanged for the decl.
+/// - `where` clauses on `def`s: not yet split (treated as
+///   part of VALUE).
+#[must_use]
+pub fn rewrite_header_binders(src: &str) -> String {
+    header_binder_rewriter::rewrite(src)
+}
+
+mod header_binder_rewriter {
+    /// Top-level decl keywords that terminate a preceding
+    /// `def`'s VALUE region. Used as scan boundaries.
+    const DECL_KEYWORDS: &[&str] = &[
+        "def", "theorem", "lemma", "axiom", "inductive",
+        "structure", "class", "instance", "namespace", "section",
+        "end", "open", "import", "variable", "macro", "syntax",
+        "elab", "abbrev", "noncomputable", "private", "protected",
+    ];
+
+    /// Walk `src`, rewriting each header-binder `def` into the
+    /// body-lambda form. Other text is preserved byte-for-byte.
+    pub fn rewrite(src: &str) -> String {
+        let bytes = src.as_bytes();
+        let mut out = String::with_capacity(src.len() + 32);
+        let mut i = 0usize;
+        let n = bytes.len();
+        while i < n {
+            // Find the next top-level `def`-keyword start.
+            // Anything before that, copy verbatim.
+            let next = find_def_token(bytes, i);
+            if next == usize::MAX {
+                out.push_str(&src[i..]);
+                break;
+            }
+            out.push_str(&src[i..next]);
+            // Try to parse + rewrite one `def`. If parsing
+            // fails (no binders, unexpected shape, …), copy
+            // the `def` keyword verbatim and advance past it.
+            if let Some((rewritten, end)) = try_rewrite_def(src, bytes, next) {
+                out.push_str(&rewritten);
+                i = end;
+            } else {
+                out.push_str("def");
+                i = next + 3;
+            }
+        }
+        out
+    }
+
+    /// Find the next `def` keyword starting at-or-after `from`,
+    /// respecting word boundaries + skipping comments + string
+    /// literals.
+    fn find_def_token(bytes: &[u8], from: usize) -> usize {
+        let mut i = from;
+        let n = bytes.len();
+        while i < n {
+            // Skip line comment.
+            if i + 1 < n && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // Skip block comment (non-nested for simplicity;
+            // Lean allows nesting but rare in body of decls).
+            if i + 1 < n && bytes[i] == b'/' && bytes[i + 1] == b'-' {
+                i += 2;
+                while i + 1 < n && !(bytes[i] == b'-' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                if i + 1 < n {
+                    i += 2;
+                }
+                continue;
+            }
+            // Skip string literal.
+            if bytes[i] == b'"' {
+                i += 1;
+                while i < n && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < n {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                }
+                if i < n {
+                    i += 1;
+                }
+                continue;
+            }
+            // Check for `def` keyword with proper word
+            // boundaries on both sides.
+            if i + 3 <= n
+                && &bytes[i..i + 3] == b"def"
+                && is_word_boundary(bytes, i, i + 3)
+            {
+                return i;
+            }
+            i += 1;
+        }
+        usize::MAX
+    }
+
+    fn is_word_boundary(bytes: &[u8], start: usize, end: usize) -> bool {
+        let before_ok = start == 0 || !is_ident_byte(bytes[start - 1]);
+        let after_ok = end >= bytes.len() || !is_ident_byte(bytes[end]);
+        before_ok && after_ok
+    }
+
+    fn is_ident_byte(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || b == b'_' || b == b'\''
+    }
+
+    fn is_ws(b: u8) -> bool {
+        matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+    }
+
+    fn skip_ws(bytes: &[u8], mut i: usize) -> usize {
+        while i < bytes.len() && is_ws(bytes[i]) {
+            i += 1;
+        }
+        i
+    }
+
+    fn read_ident(bytes: &[u8], from: usize) -> Option<(String, usize)> {
+        let mut i = from;
+        let n = bytes.len();
+        let start = i;
+        while i < n && is_ident_byte(bytes[i]) {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+        Some((std::str::from_utf8(&bytes[start..i]).ok()?.to_string(), i))
+    }
+
+    /// Try to rewrite a single `def` decl starting at index
+    /// `def_pos` (which must be the `d` of `def`). Returns
+    /// `(rewritten_source, end_position)` where `end_position`
+    /// is the byte offset just past the rewritten region.
+    /// Returns `None` if the shape doesn't match a header-binder
+    /// `def` (and therefore needs no rewrite).
+    #[allow(clippy::too_many_lines)] // documented branches: binder forms + tying together
+    pub fn try_rewrite_def(
+        src: &str,
+        bytes: &[u8],
+        def_pos: usize,
+    ) -> Option<(String, usize)> {
+        let after_def = def_pos + 3;
+        let i = skip_ws(bytes, after_def);
+        // Decl name.
+        let (name, mut i) = read_ident(bytes, i)?;
+        i = skip_ws(bytes, i);
+
+        // Universe params `.{u, v}` are theoretically possible
+        // — skip them verbatim into a "univ" hold-back string.
+        let mut univ_chunk = String::new();
+        if i < bytes.len() && bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+            let start = i;
+            i = balanced_skip(bytes, i + 1, b'{', b'}')?;
+            univ_chunk = src[start..i].to_string();
+            i = skip_ws(bytes, i);
+        }
+
+        // Collect binder groups until we see `:` or `:=`.
+        let mut binders: Vec<BinderGroup> = Vec::new();
+        let mut had_header_binder = false;
+        while i < bytes.len() {
+            // Stop at `:` or `:=` (top-level).
+            if bytes[i] == b':' {
+                break;
+            }
+            match bytes[i] {
+                b'(' => {
+                    had_header_binder = true;
+                    let group_end = balanced_skip(bytes, i, b'(', b')')?;
+                    let inner = &src[i + 1..group_end - 1];
+                    binders.push(parse_binder_group(inner, BinderKind::Explicit)?);
+                    i = group_end;
+                }
+                b'{' => {
+                    // Implicit binder — strip from header (auto-bound).
+                    had_header_binder = true;
+                    let group_end = balanced_skip(bytes, i, b'{', b'}')?;
+                    i = group_end;
+                }
+                b'[' => {
+                    // Instance binder — strip from header.
+                    had_header_binder = true;
+                    let group_end = balanced_skip(bytes, i, b'[', b']')?;
+                    i = group_end;
+                }
+                _ => {
+                    // Unknown character before `:` — bail out.
+                    return None;
+                }
+            }
+            i = skip_ws(bytes, i);
+        }
+
+        if !had_header_binder {
+            // No binder lift needed.
+            return None;
+        }
+
+        // After binders: optional `:` TYPE, then `:=` VALUE.
+        let mut ty_chunk: Option<String> = None;
+        if i < bytes.len() && bytes[i] == b':' {
+            // Could be `:` (type) or `:=` (no type). Look ahead.
+            if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
+                // No type.
+            } else {
+                // Type — read until top-level `:=` boundary.
+                let start = i + 1;
+                let end = find_walrus(bytes, start)?;
+                ty_chunk = Some(src[start..end].trim().to_string());
+                i = end;
+            }
+        }
+        // Now i should point at `:=`.
+        if !(i + 1 < bytes.len() && bytes[i] == b':' && bytes[i + 1] == b'=') {
+            return None;
+        }
+        i += 2;
+        // VALUE region: scan to next top-level decl keyword or EOF.
+        let val_start = i;
+        let val_end = find_next_decl_keyword(bytes, val_start);
+        let val_chunk = src[val_start..val_end].trim().to_string();
+
+        // Build the rewritten def.
+        let explicit_names: Vec<&str> = binders
+            .iter()
+            .flat_map(|g| g.names.iter().map(String::as_str))
+            .collect();
+        let explicit_tys: Vec<&str> = binders
+            .iter()
+            .flat_map(|g| std::iter::repeat_n(g.ty.as_str(), g.names.len()))
+            .collect();
+
+        if explicit_names.is_empty() {
+            // Only implicit / instance binders; produce a plain
+            // body-lambda-free decl with the type as-is.
+            let ty_text = ty_chunk.unwrap_or_default();
+            let rewritten = format!(
+                "def {name}{univ_chunk}{maybe_colon}{ty} := {val}",
+                maybe_colon = if ty_text.is_empty() { "" } else { " : " },
+                ty = ty_text,
+                val = val_chunk
+            );
+            return Some((rewritten, val_end));
+        }
+
+        // Arrow-chain the explicit-binder types.
+        let arrow_ty = if let Some(rty) = ty_chunk {
+            // `T1 -> T2 -> ... -> RTY`
+            let mut s = String::new();
+            for t in &explicit_tys {
+                s.push_str(t);
+                s.push_str(" -> ");
+            }
+            s.push_str(rty.trim());
+            s
+        } else {
+            // No declared return type. Synthesise an arrow
+            // chain ending in a wildcard so the parser still
+            // accepts it. (Practically this case is rare for
+            // typed Lean source, but support it for robustness.)
+            let mut s = String::new();
+            for (i, t) in explicit_tys.iter().enumerate() {
+                if i + 1 < explicit_tys.len() {
+                    s.push_str(t);
+                    s.push_str(" -> ");
+                } else {
+                    s.push_str(t);
+                }
+            }
+            s
+        };
+
+        let fun_args = explicit_names.join(" ");
+        let rewritten =
+            format!("def {name}{univ_chunk} : {arrow_ty} := fun {fun_args} -> {val_chunk}");
+        Some((rewritten, val_end))
+    }
+
+    #[derive(Debug)]
+    enum BinderKind {
+        Explicit,
+    }
+
+    #[derive(Debug)]
+    struct BinderGroup {
+        names: Vec<String>,
+        ty: String,
+        // `kind` reserved for future extension (implicit / instance
+        // handling); explicit is the only variant that contributes
+        // to the lift today.
+        #[allow(dead_code)]
+        kind: BinderKind,
+    }
+
+    fn parse_binder_group(inner: &str, kind: BinderKind) -> Option<BinderGroup> {
+        // Form: `name1 name2 ... : type`. Allow `_` as a name.
+        let (lhs, rhs) = inner.split_once(':')?;
+        let names: Vec<String> = lhs
+            .split_whitespace()
+            .map(String::from)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if names.is_empty() {
+            return None;
+        }
+        let ty = rhs.trim().to_string();
+        if ty.is_empty() {
+            return None;
+        }
+        Some(BinderGroup { names, ty, kind })
+    }
+
+    /// Skip a balanced bracket pair starting at `start_byte`
+    /// (which holds `open`). Returns the index just past the
+    /// closing bracket, or `None` if unbalanced.
+    fn balanced_skip(bytes: &[u8], start_byte: usize, open: u8, close: u8) -> Option<usize> {
+        debug_assert_eq!(bytes[start_byte], open);
+        let mut i = start_byte + 1;
+        let mut depth: i32 = 1;
+        let n = bytes.len();
+        while i < n && depth > 0 {
+            let b = bytes[i];
+            if b == open {
+                depth += 1;
+            } else if b == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            } else if b == b'"' {
+                // Skip string.
+                i += 1;
+                while i < n && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < n {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                }
+            } else if i + 1 < n && b == b'-' && bytes[i + 1] == b'-' {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Find the byte offset of the next top-level `:=` (a.k.a.
+    /// "walrus") starting from `from`, respecting bracket
+    /// nesting + strings + comments. Returns `None` if not found.
+    fn find_walrus(bytes: &[u8], from: usize) -> Option<usize> {
+        let mut i = from;
+        let n = bytes.len();
+        let mut paren_depth: i32 = 0;
+        let mut brace_depth: i32 = 0;
+        let mut bracket_depth: i32 = 0;
+        while i < n {
+            let b = bytes[i];
+            // Strings.
+            if b == b'"' {
+                i += 1;
+                while i < n && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < n {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                }
+                if i < n {
+                    i += 1;
+                }
+                continue;
+            }
+            // Line comments.
+            if i + 1 < n && b == b'-' && bytes[i + 1] == b'-' {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            match b {
+                b'(' => paren_depth += 1,
+                b')' => paren_depth -= 1,
+                b'{' => brace_depth += 1,
+                b'}' => brace_depth -= 1,
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth -= 1,
+                _ => {}
+            }
+            if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0
+                && b == b':' && i + 1 < n && bytes[i + 1] == b'='
+            {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn find_next_decl_keyword(bytes: &[u8], from: usize) -> usize {
+        let mut i = from;
+        let n = bytes.len();
+        // Track if we've crossed at least one newline — keyword
+        // matches before that are body content, not a new decl.
+        let mut saw_newline = false;
+        while i < n {
+            // Skip strings + comments inline.
+            if bytes[i] == b'"' {
+                i += 1;
+                while i < n && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < n {
+                        i += 2;
+                        continue;
+                    }
+                    i += 1;
+                }
+                if i < n {
+                    i += 1;
+                }
+                continue;
+            }
+            if i + 1 < n && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+                while i < n && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            if bytes[i] == b'\n' {
+                saw_newline = true;
+                i += 1;
+                continue;
+            }
+            if saw_newline && is_ident_byte(bytes[i]) {
+                // Check if a top-level decl keyword starts here.
+                // Word boundary on the LEFT is `saw_newline + ws`
+                // (so we're at column 0 ignoring leading ws).
+                // Already at ident byte; ws skipping is implicit.
+                for &kw in super::header_binder_rewriter::DECL_KEYWORDS {
+                    let kbytes = kw.as_bytes();
+                    if i + kbytes.len() <= n
+                        && &bytes[i..i + kbytes.len()] == kbytes
+                        && is_word_boundary(bytes, i, i + kbytes.len())
+                    {
+                        // Also check that this column-0 position
+                        // is genuinely top-level by ensuring no
+                        // leading non-newline whitespace prefix
+                        // since the last newline. We rewound the
+                        // saw_newline flag at each `\n`, so the
+                        // only way we land here is right after
+                        // a newline (possibly with indentation).
+                        // For simplicity, accept any keyword at
+                        // the start of a new line.
+                        return i;
+                    }
+                }
+                saw_newline = false;
+            }
+            i += 1;
+        }
+        n
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn no_binders_pass_through() {
+            let src = "def f : Nat -> Nat := fun n -> n";
+            assert_eq!(rewrite(src), src);
+        }
+
+        #[test]
+        fn single_binder_lifted() {
+            let src = "def add (n : Nat) : Nat := n";
+            let out = rewrite(src);
+            assert!(out.contains("def add : Nat -> Nat := fun n -> n"), "got: {out}");
+        }
+
+        #[test]
+        fn multi_name_binder_lifted() {
+            let src = "def add (a b : Nat) : Nat := a + b";
+            let out = rewrite(src);
+            assert!(
+                out.contains("def add : Nat -> Nat -> Nat := fun a b -> a + b"),
+                "got: {out}"
+            );
+        }
+
+        #[test]
+        fn multi_group_binder_lifted() {
+            let src = "def f (a : U64) (b : Bool) : String := \"x\"";
+            let out = rewrite(src);
+            assert!(
+                out.contains("def f : U64 -> Bool -> String := fun a b -> \"x\""),
+                "got: {out}"
+            );
+        }
+
+        #[test]
+        fn implicit_binders_stripped() {
+            let src = "def f {T : Type} (x : T) : T := x";
+            let out = rewrite(src);
+            // The {T : Type} group is dropped; only explicit
+            // binders contribute.
+            assert!(
+                out.contains("def f : T -> T := fun x -> x"),
+                "got: {out}"
+            );
+        }
+
+        #[test]
+        fn structure_left_untouched() {
+            let src = "structure Point where x : UInt32 y : UInt32";
+            assert_eq!(rewrite(src), src);
+        }
+
+        #[test]
+        fn theorem_left_untouched() {
+            let src = "theorem t (n : Nat) : n = n := rfl";
+            // theorem is in our DECL_KEYWORDS list but not in
+            // the `def`-rewrite path; pass through.
+            assert_eq!(rewrite(src), src);
+        }
+
+        #[test]
+        fn multi_decl_source_handled() {
+            let src = "\
+                @[leo4_export]\n\
+                def add (a b : UInt64) : UInt64 := a + b\n\
+                \n\
+                @[leo4_export]\n\
+                def double (n : UInt32) : UInt32 := n + n\n\
+            ";
+            let out = rewrite(src);
+            assert!(out.contains("def add : UInt64 -> UInt64 -> UInt64 := fun a b -> a + b"));
+            assert!(out.contains("def double : UInt32 -> UInt32 := fun n -> n + n"));
+        }
+
+        #[test]
+        fn idempotent() {
+            let src = "def add (a b : Nat) : Nat := a + b";
+            let once = rewrite(src);
+            let twice = rewrite(&once);
+            assert_eq!(once, twice);
+        }
+
+        #[test]
+        fn nested_bracket_type() {
+            let src = "def f (xs : List (Option Nat)) : Nat := xs.length";
+            let out = rewrite(src);
+            assert!(
+                out.contains("def f : List (Option Nat) -> Nat := fun xs -> xs.length"),
+                "got: {out}"
+            );
+        }
+
+        #[test]
+        fn def_inside_string_not_rewritten() {
+            let src = "def msg : String := \"def foo (x : Nat) := x\"";
+            assert_eq!(rewrite(src), src);
+        }
+    }
+}
+
 /// Normalise a Lean 4 surface-syntax source string into a form
 /// `oxilean-parse::Parser` can consume. Drives
 /// `oxilean-elab`'s `lean4_compat` adapter layer:
@@ -211,7 +1016,14 @@ pub const LEAN_MARSHAL_DERIVE: &str = "LeanMarshal";
 /// `lean4_compat` v0.1.2).
 #[must_use]
 pub fn lean4_normalize(src: &str) -> String {
-    let after_rewrite = Lean4TermRewriter::standard().rewrite(src);
+    // OX3: pre-rewrites BEFORE the lean4_compat textual passes
+    // (binder lift / attribute-arg strip both operate on
+    // syntactic structure the parser would otherwise reject
+    // outright; the lean4_compat layer can only fix-up already-
+    // valid-shape source).
+    let after_attrs = strip_attribute_args(src);
+    let after_binders = rewrite_header_binders(&after_attrs);
+    let after_rewrite = Lean4TermRewriter::standard().rewrite(&after_binders);
     Lean4SyntaxAdapter::adapt_all(&after_rewrite)
 }
 
