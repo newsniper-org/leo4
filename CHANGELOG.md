@@ -7,6 +7,41 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11e: `by …` tactic block (2026-05-22)
+
+New `Expr::By(Vec<String>)` variant + grammar atom for
+Lean 4's term-level entry into tactic mode (`theorem t :
+T := by rfl`). Each `String` is the raw text of one
+tactic; splitting honours both `;` (single-line sequenced)
+and newlines (multi-line block).
+
+**Why raw `String`?** Tactic mode is its own DSL with
+its own grammar (`exact e`, `apply f`, `intro x`, `simp
+[…]`, `rw […]`, `<;>`, `try`, `repeat`, dozens more). v0
+captures the textual form so the surrounding surface
+parses cleanly; tactic AST sub-parsing is a future step
+beyond OX6.
+
+Surface coverage:
+
+- `:= by exact True.intro` (single tactic inline)
+- `:= by intro x; exact x` (semicolon-sequenced)
+- `:= by\n  intro x\n  exact x` (multi-line block)
+- `:= by simp [Nat.add_comm, Nat.zero_add]` (brackets in
+  raw text preserved)
+- `:= by` (empty block — yields `Expr::By(vec![])`)
+- `:= by trivial` inside `example` decls
+
+**Boundary**: the `by`-block region ends at the next
+top-level decl keyword on a fresh line OR EOF. Multi-decl
+sources where `by\n  …\ndef next := …` parse correctly —
+the `by` block doesn't eat the next `def`.
+
+`by` added to the keyword exclusion list so it doesn't
+parse as a bare ident.
+
+Tests 205 → 212 (+7). clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11d: let-in expression (2026-05-22)
 
 New `Expr::Let { name, ty, value, body }` variant +
