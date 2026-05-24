@@ -7,6 +7,59 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 8: `do` notation (2026-05-22)
+
+OX6 grammar roadmap step 8. Lean 4's `do` notation parses
+natively as `Expr::Do(Vec<DoStmt>)` — a sequenced block of
+monadic / pure statements.
+
+**AST**:
+
+```rust
+pub enum DoStmt {
+    Bind   { name: String, value: Expr },  // let x ← e / let x <- e
+    Let    { name: String, value: Expr },  // let x := e
+    Return(Expr),                          // return e / pure e
+    Expr(Expr),                            // bare expr stmt
+}
+```
+
+`return` and `pure` collapse to the same `Return` variant
+— semantically distinct in some Lean 4 monads but the
+elaborator can re-disambiguate from context; keeping the
+AST narrow.
+
+Surface coverage:
+
+- `do return e` (single-line do block).
+- `do let x ← readLn` / `do let x <- readLn` (ASCII +
+  Unicode bind arrow).
+- `do let y := 42` (pure let).
+- `do IO.println "hello"` (bare expression statement).
+- Multi-statement blocks: each statement on its own line
+  (v0). Statement boundary = `\n + horizontal ws +
+  !top-level-decl`; the block stops cleanly at the next
+  top-level decl keyword so it doesn't eat the next `def`.
+
+Each statement's expression text is captured to end-of-line
+and sub-parsed via `parse_expr_text` (the OX6 step 7
+pattern); failures fall back to `Expr::Raw(text)` per the
+never-panic-on-weird-text invariant.
+
+Multi-line statement bodies + embedded `if` / `match`
+statements inside `do` blocks are a follow-up (the v0
+assumes line-aligned statements).
+
+Tests 79 → 87 (+8): single-return, pure-collapsed-to-return,
+let-bind-dash, let-bind-unicode-arrow, let-pure, bare-expr-
+stmt, block-ends-at-top-level-decl (do block doesn't eat
+the next `def`), multi-stmt-mix (Bind + Let + Return in
+one block).
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step: string interpolation `s!"…{x}…"`.
+
 ### Added — OX6 step 7: multi-line field types + layout-sensitive parsing + full expr re-parse (2026-05-22)
 
 OX6 grammar roadmap step 7. Closes the OX6 step 5
