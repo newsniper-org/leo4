@@ -7,6 +7,38 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 11d: let-in expression (2026-05-22)
+
+New `Expr::Let { name, ty, value, body }` variant +
+grammar atom for Lean 4's pure (non-monadic) let-binding
+in expression position. The monadic `let x ← e` inside
+`do` blocks lives in `DoStmt::Bind`.
+
+Surface coverage:
+
+- `let x := 1; x` (semicolon separator)
+- `let x : Nat := 1; x` (with type annotation)
+- `let x := 1\n x + 1` (newline separator)
+- Complex value expressions: `let s := a + b; s * 2`
+- Nested let chains: `let x := 1; let y := 2; x + y`
+- Use in def body: `def f : Nat := let n := 10; n * n`
+
+`ty` is `Option<Box<Expr>>` (boxed to keep `Expr` size
+finite given the recursive Option). Value text is
+captured up to the separator (`;` or newline) and sub-
+parsed via the existing `parse_expr_text` helper;
+fallback to `Expr::Raw` for unparseable text.
+
+Multi-line value bodies (`let x := \n  big_value`) are
+not yet supported in v0 — single-line value before the
+separator.
+
+Tests 199 → 205 (+6): simple-semicolon, with-type-
+annotation, newline-separator, complex-value-expr,
+nested-let-chain, let-in-def-body.
+
+clippy --all-targets -D warnings clean.
+
 ### Added — OX6 step 11k: `example` anonymous theorem (2026-05-22)
 
 New `DeclKind::Example { binders, ty, proof }` variant
