@@ -7,6 +7,61 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6: `leo4-lean4-parse` PEG-based Lean 4 parser scaffold (2026-05-22)
+
+OX6 — new v1.0 RC blocker tackled via fork-from-scratch.
+The OX4 textual approach was reaching its limits (binary
+operator precedence, string interpolation, ctor name
+resolution all need real grammar work). Decided to fork
+the parser entirely.
+
+**New sibling crate** `sibling/leo4-lean4-parse/`:
+
+- PEG-based grammar via the `peg` crate (Apache-2.0
+  compatible with leo4's MIT-OR-Apache-2.0 dual license).
+- **Strict superset** of `oxilean-parse` v0.1.2's
+  accepted surface where overlapping; AST shapes mirror
+  upstream so downstream consumers (oxilean-elab,
+  leo4-oxilean-build's transpile pipeline) can swap
+  parsers transparently.
+- Built from scratch (no source copied from
+  `oxilean-parse`); the AST type *signatures* match for
+  interop but the grammar is original PEG work.
+
+v0 scaffold (this commit):
+
+- `def NAME [binders]+ [: TYPE] := VALUE` with explicit
+  `(...)`, implicit `{...}`, named-instance `[name : T]`,
+  and anonymous-instance `[T]` binders.
+- Simple type / value expressions as bracket-balanced raw
+  text (subsequent commits replace this with proper
+  application / arrow / Pi grammar).
+- Line comments + whitespace handling.
+- 10 unit tests covering: empty source, single binder,
+  multi-name binder, implicit + instance binders, no type
+  annotation, multi-def source, nested bracket type,
+  line comments, parse-error → `LeanError(DECODE_ERROR)`.
+
+clippy --all-targets -D warnings clean.
+
+**Roadmap** (each = one commit):
+
+1. Expression grammar with operator precedence
+2. `if-then-else` + `match` arms with patterns
+3. Lambda + `fun`
+4. `structure` + `inductive` + `deriving`
+5. Attribute lists
+6. `do` notation
+7. String interpolation
+8. Full `Decl` enum
+9. Cross-check against `oxilean-parse` on shared corpus
+10. leo4-oxilean-build switches default parser to OX6
+
+Once OX6 lands, the OX4 textual pre-rewrites in
+`lean4_normalize` become legacy (still useful for the
+`oxilean-parse` fallback path, but the OX6 parser
+handles the surface natively).
+
 ### Added — OX4 partial: three more Lean 4 surface pre-rewrites (2026-05-22)
 
 OX4 partial progress. Three new textual pre-rewrites in

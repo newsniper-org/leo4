@@ -776,6 +776,41 @@ all wait for the v1.0 RC window or later.
   Tail items not split into separate ROADMAP entries —
   they live under OX4 until the gap closes.
 
+  **OX6 (NEW v1.0 RC blocker, locked 2026-05-22)** —
+  `leo4-lean4-parse` PEG-based Lean 4 parser. The OX4
+  textual approach is reaching its limits (binary
+  operator precedence, string interpolation, ctor name
+  resolution all need real grammar work, not textual
+  rewrites). Decided to fork: new sibling crate
+  `sibling/leo4-lean4-parse/` builds a PEG-based parser
+  from scratch using the `peg` crate. **Strict superset**
+  of `oxilean-parse` v0.1.2's accepted surface where
+  overlapping; AST shapes designed to mirror upstream so
+  downstream consumers (oxilean-elab, leo4-oxilean-build's
+  transpile pipeline) can swap parsers transparently.
+
+  Scaffold landed 2026-05-22 — `def NAME [binders]+ [:
+  TYPE] := VALUE` with explicit / implicit / instance
+  binders + simple type / value expressions (bracket-
+  balanced raw text). Subsequent commits extend the
+  grammar one feature per step:
+
+  1. Expression grammar with operator precedence
+  2. `if-then-else` + `match` arms with patterns
+  3. Lambda + `fun`
+  4. `structure` + `inductive` + `deriving`
+  5. Attribute lists
+  6. `do` notation
+  7. String interpolation
+  8. Full `Decl` enum
+  9. Cross-check against `oxilean-parse` on shared corpus
+  10. leo4-oxilean-build switches default parser to OX6
+
+  Once OX6 lands, the OX4 textual pre-rewrites in
+  `lean4_normalize` become legacy (still useful for the
+  `oxilean-parse` fallback path, but the OX6 parser
+  handles the surface natively).
+
   **OX5 (NEW v1.0 RC blocker, locked 2026-05-22)** — elab
   env bootstrap. CLI's transpile path runs `elaborate_decl`
   in an empty `Environment::new()`, so even successfully-
