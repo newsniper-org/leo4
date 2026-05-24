@@ -46,7 +46,7 @@ A per-*path* (not per-crate) tier policy split, locked
 
   | Distro family | Path |
   |---|---|
-  | Archlinux | `pacman -S musl clang` (provides `musl-gcc` + `musl-clang`) |
+  | Archlinux | `pacman -S musl clang` (provides `musl-gcc` + `musl-clang`). **Quirk auto-fixed**: Arch's `musl-clang` wrapper uses `-nostdinc` and only `-isystem`s `/usr/lib/musl/include` — clang's freestanding headers (`stdatomic.h`, `stddef.h`, …) are NOT in the include path. `shim/leo4_rust_bridge.c` includes `<stdatomic.h>`. `leo4-rust-bridge`'s `build.rs` auto-detects `musl-clang` and appends `-isystem $(clang -print-resource-dir)/include` so the build succeeds out of the box. Verified 2026-05-24 with `clang 22.1.3-2` / `musl 1.2.6-1.1` — both `musl-clang` and `musl-gcc` produce clean builds + green tests. |
   | Debian / Ubuntu | `apt-get install musl-tools clang` (same pair) |
   | Alpine | native musl libc — question moot |
   | OpenWRT | musl is the default libc since 2015 — question moot |

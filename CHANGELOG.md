@@ -7,6 +7,32 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Fixed — leo4-rust-bridge build.rs auto-fixes Arch `musl-clang` `stdatomic.h` miss (2026-05-24)
+
+Arch Linux's `musl-clang` wrapper passes `-nostdinc`
+and only `-isystem`s `/usr/lib/musl/include`, dropping
+clang's freestanding headers (`stdatomic.h`,
+`stddef.h`, `stdint.h`, …) from the include path.
+`shim/leo4_rust_bridge.c:53` includes `<stdatomic.h>`,
+so the build failed with `'stdatomic.h' file not found`
+on Arch + `CC_x86_64_unknown_linux_musl=musl-clang`.
+
+`leo4-rust-bridge`'s `build.rs` now auto-detects the
+`musl-clang` wrapper (by checking the resolved
+compiler ends with `musl-clang`) and appends
+`-isystem $(clang -print-resource-dir)/include` so the
+freestanding headers are visible again. No-op on
+every other toolchain — `musl-gcc`, native clang,
+gcc, msvc all pass through unchanged.
+
+Verified 2026-05-24 with `clang 22.1.3-2` /
+`musl 1.2.6-1.1`: `cargo build` + `cargo test`
+green under both `musl-clang` and `musl-gcc`.
+
+`OS-PORTABILITY.md` §0.1 Archlinux row updated to
+reflect "auto-fixed" status (was "Caveat: use
+musl-gcc").
+
 ### Added — Leo4.Platform: linker / dynlib OS abstraction layer (2026-05-24)
 
 New `lake/Leo4/Leo4/Platform.lean` — first leo4-Lean
