@@ -7,6 +7,52 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — OX6 step 9.5: quantifiers `forall` / `∀` / `exists` / `∃` (2026-05-22)
+
+Inserted between OX6 steps 9 and 10b at 병익's request:
+proper quantifier support — both critical for dependent
+types and proof signatures, ubiquitous in Lean 4 corpus.
+
+**AST**: two new `Expr` variants sharing lambda's
+`LamBinder` shape (untyped names or typed groups):
+
+```rust
+Forall(Vec<LamBinder>, Box<Expr>),   // forall x, body / ∀ x, body
+Exists(Vec<LamBinder>, Box<Expr>),   // exists x, body / ∃ x, body
+```
+
+Lean 4 surface:
+
+- `forall x, P x` / `∀ x, P x` — universal
+- `exists x, P x` / `∃ x, P x` — existential
+- `forall (n : Nat), P n` (typed binder)
+- `forall x y z, P x y z` (multi-binder)
+- `forall {T : Type}, T -> T` (implicit binder, dependent
+  arrow body)
+- `forall x, exists y, x = y` (nested quantifiers — body
+  takes the full expression grammar)
+
+Body separator is `,` (not `=>` / `->`); the body
+expression takes the full-precedence parser so nested
+quantifiers / arrows / `=` all work inside.
+
+The `axiom_simple` test from step 10a was restored to
+its original form (`axiom em : forall p, p`) now that the
+parser handles it.
+
+Tests 104 → 114 (+10): forall-untyped, forall-unicode-∀,
+forall-typed, forall-multi-binder, forall-implicit,
+exists-untyped, exists-unicode-∃, exists-typed,
+theorem-with-forall-in-signature (e2e: `theorem id_eq :
+forall x, x = x := fun x => rfl`), nested-quantifiers.
+
+`forall` / `exists` added to the keyword exclusion list
+so they don't accidentally parse as bare idents.
+
+clippy --all-targets -D warnings clean.
+
+Next OX6 step 10b: instance + class.
+
 ### Added — OX6 step 10a: theorem + lemma + axiom decls (2026-05-22)
 
 OX6 grammar roadmap step 10 — first chunk of the
