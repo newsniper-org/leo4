@@ -62,21 +62,24 @@ fn cli_missing_manifest_arg_exits_usage_error() {
 }
 
 #[test]
-fn cli_skip_path_emits_dispatcher_only() {
-    let dir = tmp_dir("skip");
+fn cli_pure_mode_emits_pub_fn_for_every_def() {
+    // Pure mode (option A, default since 2026-05-25):
+    // every top-level `def` lands as `pub fn` in the
+    // emitted crate's src/lib.rs. No @[leo4_export]
+    // filter — pure mode has no dispatcher to query
+    // for the tag.
+    let dir = tmp_dir("pure_basic");
     let out_dir = dir.join("crate");
-    let lean = dir.join("Skip.lean");
+    let lean = dir.join("Helper.lean");
     let manifest = dir.join("manifest.txt");
 
     write_file(&lean, "def helper : Nat -> Nat := fun n -> n\n");
     write_file(
         &manifest,
         &format!(
-            "crate_name=skip_pkg\n\
-             schema_hash=0000000000000\n\
-             leo4_abi_dep=\"0.1\"\n\
+            "crate_name=pure_basic_pkg\n\
              out_dir={}\n\
-             source={} abc_a\n",
+             source={}\n",
             out_dir.display(),
             lean.display()
         ),
@@ -91,24 +94,26 @@ fn cli_skip_path_emits_dispatcher_only() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "CLI must succeed on skip path; exit={:?} stderr={stderr}",
+        "CLI must succeed; exit={:?} stderr={stderr}",
         output.status.code()
     );
-    assert!(stderr.contains("skip"));
-    assert!(stderr.contains("0 units, 1 skipped"));
 
     // Verify emitted files.
-    let manifest_path = out_dir.join("Cargo.toml");
+    let cargo_path = out_dir.join("Cargo.toml");
     let lib_path = out_dir.join("src").join("lib.rs");
-    assert!(manifest_path.exists(), "Cargo.toml must exist");
+    assert!(cargo_path.exists(), "Cargo.toml must exist");
     assert!(lib_path.exists(), "src/lib.rs must exist");
 
+    let cargo_text = std::fs::read_to_string(&cargo_path).expect("read Cargo.toml");
+    // Pure mode invariant: no leo4-abi / no dispatcher dep.
+    assert!(!cargo_text.contains("leo4-abi"), "Cargo.toml must not pull leo4-abi");
+    assert!(!cargo_text.contains("[dependencies]"), "Cargo.toml must have no deps");
+
     let lib_text = std::fs::read_to_string(&lib_path).expect("read lib.rs");
-    // Even with zero exports, the dispatcher is emitted with
-    // only its default arm — the consumer still gets a
-    // usable `Leo4OxileanProc`.
-    assert!(lib_text.contains("Leo4OxileanProc"));
-    assert!(lib_text.contains("unknown_function(mangled)"));
+    // The def lands as a pub fn; no dispatcher / no mangling.
+    assert!(lib_text.contains("fn helper"), "lib.rs missing helper fn");
+    assert!(!lib_text.contains("Leo4OxileanProc"), "pure mode emits no dispatcher");
+    assert!(!lib_text.contains("leo4_call"), "pure mode emits no canonical entry");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -178,28 +183,33 @@ fn cli_rejects_bogus_manifest_field() {
 }
 
 #[test]
-fn cli_multi_decl_form_with_binds() {
-    let dir = tmp_dir("multi");
+fn cli_pure_mode_ignores_legacy_bind_lines_and_emits_all_defs() {
+    // Pure mode silently ignores legacy manifest fields
+    // (`schema_hash=`, `leo4_abi_dep=`, `bind=`, the
+    // single-decl form's mangled suffix). Multiple `def`s
+    // in one source all land as `pub fn` regardless of
+    // any @[leo4_export] tag. Type-only decls
+    // (`structure`/`inductive`) are NOT emitted today —
+    // pure mode is fn-only in v0.
+    let dir = tmp_dir("pure_multi");
     let out_dir = dir.join("crate");
     let lean = dir.join("MultiDecl.lean");
     let manifest = dir.join("manifest.txt");
 
-    // Two type-only decls + one untagged decl. No fn decls
-    // means the binds map can stay empty.
     write_file(
         &lean,
-        "@[leo4_export] structure Point where x : UInt32 y : UInt32\n\
-         structure Untagged where z : UInt32\n\
-         @[leo4_export] inductive Color : Type | Red : Color | Green : Color\n",
+        "def first : Nat -> Nat := fun n -> n\n\
+         def second : Nat -> Nat := fun n -> n\n",
     );
     write_file(
         &manifest,
         &format!(
-            "crate_name=multi_pkg\n\
+            "crate_name=pure_multi_pkg\n\
              schema_hash=ababababababa\n\
              leo4_abi_dep=\"0.1\"\n\
              out_dir={}\n\
-             source={}\n",
+             source={}\n\
+             bind=first=ignored_mangled\n",
             out_dir.display(),
             lean.display()
         ),
@@ -213,18 +223,18 @@ fn cli_multi_decl_form_with_binds() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "multi-decl form must succeed; stderr={stderr}"
+        "pure mode must succeed; stderr={stderr}"
     );
+    // Note message about legacy canonical fields being ignored.
+    assert!(
+        stderr.contains("canonical-mode fields"),
+        "expected legacy-fields note in stderr; got:\n{stderr}"
+    );
+
     let lib = std::fs::read_to_string(out_dir.join("src").join("lib.rs"))
         .expect("read lib.rs");
-    // Both tagged decls land in the emitted crate.
-    assert!(lib.contains("pub struct Point {"), "lib.rs missing Point");
-    assert!(lib.contains("pub enum Color {"), "lib.rs missing Color");
-    // Untagged decl is NOT emitted.
-    assert!(
-        !lib.contains("pub struct Untagged"),
-        "Untagged should be skipped"
-    );
+    assert!(lib.contains("fn first"), "lib.rs missing `first`");
+    assert!(lib.contains("fn second"), "lib.rs missing `second`");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -281,23 +291,25 @@ fn cli_bind_after_single_source_rejected() {
 
 #[test]
 fn cli_reports_transpile_error_with_nonzero_exit() {
-    // Empty env can't resolve `Nat` — elab fails. CLI must
-    // surface this as exit code 1 (transpile failure), not 2
-    // (usage), and must NOT emit a crate.
+    // Reference to an undefined identifier — elab fails
+    // even with the OX5-oxi bootstrapped env. CLI must
+    // surface this as exit code 1 (transpile failure),
+    // not 2 (usage), and must NOT emit a crate.
     let dir = tmp_dir("elab_err");
     let out_dir = dir.join("crate");
     let lean = dir.join("Bad.lean");
     let manifest = dir.join("manifest.txt");
 
-    write_file(&lean, "@[leo4_export] def f : Nat -> Nat := fun n -> n\n");
+    write_file(
+        &lean,
+        "def f : TypeDefinitelyNotInBootstrappedEnv -> Nat := fun n -> n\n",
+    );
     write_file(
         &manifest,
         &format!(
             "crate_name=bad_pkg\n\
-             schema_hash=2222222222222\n\
-             leo4_abi_dep=\"0.1\"\n\
              out_dir={}\n\
-             source={} abc_a\n",
+             source={}\n",
             out_dir.display(),
             lean.display()
         ),
@@ -315,7 +327,7 @@ fn cli_reports_transpile_error_with_nonzero_exit() {
     // No crate emitted on transpile failure.
     assert!(
         !out_dir.join("Cargo.toml").exists(),
-        "manifest must NOT exist on transpile failure"
+        "Cargo.toml must NOT exist on transpile failure"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

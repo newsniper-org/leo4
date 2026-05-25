@@ -61,8 +61,8 @@
 //!   IO error reading manifest / source / out_dir).
 
 use leo4_oxilean_build::{
-    emit_crate, leo4_env_bootstrap::bootstrap_env, transpile_source_to_unit,
-    transpile_source_to_units, Leo4ExportRegistry,
+    leo4_env_bootstrap::bootstrap_env,
+    pure_emit::transpile_sources_to_pure_crate,
 };
 use std::collections::HashMap;
 use std::io::Read;
@@ -84,8 +84,16 @@ struct SourceEntry {
 
 struct Manifest {
     crate_name: String,
-    schema_hash: String,
-    leo4_abi_dep: String,
+    /// Required for canonical (option B) emit. None
+    /// allowed in pure (option A) mode where the
+    /// transpiled crate has no `LeanProc` impl that
+    /// would carry a schema_hash.
+    schema_hash: Option<String>,
+    /// Required for canonical emit (the emitted
+    /// Cargo.toml gains a `leo4-abi = { … }` line).
+    /// Pure mode emits a Cargo.toml with no deps so
+    /// this field is unused.
+    leo4_abi_dep: Option<String>,
     out_dir: PathBuf,
     sources: Vec<SourceEntry>,
 }
@@ -104,14 +112,28 @@ fn print_help() {
          \x20 leo4-oxilean-build --manifest -\n\
          \x20 leo4-oxilean-build --help\n\
          \n\
+         Output: a plain Rust crate at `out_dir/` —\n\
+         `Cargo.toml` + `src/lib.rs` with `pub fn`\n\
+         signatures, no canonical-ABI wrapper, no\n\
+         leo4-abi dep, no schema_hash. Consumers `use`\n\
+         the crate and call functions natively. This\n\
+         is the single mode the CLI emits; the\n\
+         canonical (cross-impl-conformant) wrapper\n\
+         synth lives in the lib API for other\n\
+         consumers (lake plugin's OX1 path; deprecated\n\
+         2026-05-25).\n\
+         \n\
          Manifest fields (line-oriented `key=value`):\n\
          \x20 crate_name=<str>          required\n\
-         \x20 schema_hash=<13-char>     required\n\
-         \x20 leo4_abi_dep=<toml-frag>  required, e.g. `{{ path = \"../leo4-abi\" }}`\n\
          \x20 out_dir=<path>            required\n\
-         \x20 source=<lean> <mangled>   single-decl source (file = 1 decl)\n\
-         \x20 source=<lean>             multi-decl source (binds follow)\n\
-         \x20 bind=<name>=<mangled>     per-decl mangled (multi-decl form only)\n\
+         \x20 source=<lean>             one per Lean source file\n\
+         \n\
+         Legacy manifest fields (silently ignored —\n\
+         carried by older lake-plugin-driven manifests):\n\
+         \x20 schema_hash=<13-char>\n\
+         \x20 leo4_abi_dep=<toml-frag>\n\
+         \x20 source=<lean> <mangled>   (mangled suffix ignored)\n\
+         \x20 bind=<name>=<mangled>\n\
          \n\
          Exit codes: 0 = success, 1 = transpile failure, 2 = usage / IO error\n"
     );
@@ -181,9 +203,8 @@ fn parse_manifest(text: &str) -> Result<Manifest, String> {
 
     Ok(Manifest {
         crate_name: crate_name.ok_or("missing required field `crate_name`")?,
-        schema_hash: schema_hash.ok_or("missing required field `schema_hash`")?,
-        leo4_abi_dep: leo4_abi_dep
-            .ok_or("missing required field `leo4_abi_dep`")?,
+        schema_hash,
+        leo4_abi_dep,
         out_dir: out_dir.ok_or("missing required field `out_dir`")?,
         sources,
     })
@@ -224,7 +245,19 @@ fn main() -> ExitCode {
     let manifest = parse_manifest(&text)
         .unwrap_or_else(|e| die(format!("parsing manifest: {e}")));
 
-    let mut registry = Leo4ExportRegistry::new();
+    // Legacy canonical-mode fields silently ignored
+    // — kept on Manifest for backward compat with
+    // older lake-plugin-emitted manifests. Surface a
+    // one-line note when they appear so the user
+    // knows they had no effect.
+    if manifest.schema_hash.is_some() || manifest.leo4_abi_dep.is_some() {
+        eprintln!(
+            "leo4-oxilean-build: note — manifest has canonical-mode fields \
+             (schema_hash / leo4_abi_dep); the CLI emits pure-Rust only \
+             since 2026-05-25, so they are ignored."
+        );
+    }
+
     // OX5-oxi: populate env with OxiLean prelude + leo4
     // boundary primitives before elab so the transpile
     // pipeline doesn't choke on `NameNotFound("UInt64")`
@@ -233,84 +266,49 @@ fn main() -> ExitCode {
     let env = bootstrap_env().unwrap_or_else(|e| {
         die(format!("leo4-oxilean-build: env bootstrap failed: {e}"))
     });
-    let mut units = Vec::with_capacity(manifest.sources.len());
-    let mut skipped = 0usize;
-    let mut errors = 0usize;
 
+    // Read all source files into memory + collect into
+    // a single multi-file PureCrate. Legacy single-decl
+    // form's `<mangled>` suffix and multi-decl `bind=`
+    // lines are silently ignored — pure mode has no
+    // mangling.
+    let mut source_strings: Vec<String> = Vec::with_capacity(manifest.sources.len());
     for entry in &manifest.sources {
         let src = std::fs::read_to_string(&entry.path).unwrap_or_else(|e| {
             die(format!("reading source `{}`: {e}", entry.path.display()))
         });
-        if let Some(single_mangled) = &entry.single_mangled {
-            // Single-decl form.
-            match transpile_source_to_unit(&env, &mut registry, &src, single_mangled) {
-                Ok(Some(unit)) => units.push(unit),
-                Ok(None) => {
-                    skipped += 1;
-                    eprintln!(
-                        "leo4-oxilean-build: skip (no @[leo4_export]): {}",
-                        entry.path.display()
-                    );
-                }
-                Err(e) => {
-                    errors += 1;
-                    eprintln!(
-                        "leo4-oxilean-build: ERROR `{}`: 0x{:08x} {}",
-                        entry.path.display(),
-                        e.code,
-                        e.message
-                    );
-                }
-            }
-        } else {
-            // Multi-decl form.
-            match transpile_source_to_units(&env, &mut registry, &src, &entry.binds) {
-                Ok(us) => {
-                    if us.is_empty() {
-                        skipped += 1;
-                        eprintln!(
-                            "leo4-oxilean-build: skip (no @[leo4_export]s): {}",
-                            entry.path.display()
-                        );
-                    }
-                    units.extend(us);
-                }
-                Err(e) => {
-                    errors += 1;
-                    eprintln!(
-                        "leo4-oxilean-build: ERROR `{}`: 0x{:08x} {}",
-                        entry.path.display(),
-                        e.code,
-                        e.message
-                    );
-                }
-            }
-        }
+        source_strings.push(src);
     }
+    let source_refs: Vec<&str> = source_strings.iter().map(String::as_str).collect();
 
-    if errors > 0 {
-        eprintln!(
-            "leo4-oxilean-build: {errors} source(s) failed transpile; no crate emitted"
-        );
-        return ExitCode::from(1);
-    }
-
-    let g = emit_crate(
+    let pure_crate = match transpile_sources_to_pure_crate(
+        &env,
         &manifest.crate_name,
-        &units,
-        &manifest.leo4_abi_dep,
-        &manifest.schema_hash,
-    );
-    let written = g.write_to_dir(&manifest.out_dir).unwrap_or_else(|e| {
-        die(format!("writing crate to `{}`: {e}", manifest.out_dir.display()))
+        &source_refs,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!(
+                "leo4-oxilean-build: ERROR — pure transpile failed: 0x{:08x} {}",
+                e.code, e.message
+            );
+            return ExitCode::from(1);
+        }
+    };
+
+    pure_crate.write_to_dir(&manifest.out_dir).unwrap_or_else(|e| {
+        die(format!(
+            "writing crate to `{}`: {} {}",
+            manifest.out_dir.display(),
+            e.code,
+            e.message
+        ))
     });
 
     eprintln!(
-        "leo4-oxilean-build: wrote crate `{}` ({} units, {} skipped, {} bytes) to {}",
+        "leo4-oxilean-build: wrote pure crate `{}` ({} fns) to {}",
         manifest.crate_name,
-        units.len(),
-        skipped,
-        written,
+        pure_crate.fns.len(),
         manifest.out_dir.display()
     );
     ExitCode::SUCCESS
