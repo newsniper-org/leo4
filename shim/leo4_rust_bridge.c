@@ -444,6 +444,23 @@ struct leo4_worker {
     DWORD  pid;         /* informational only                */
 };
 
+/* Helper thread that just runs the blocking ConnectNamedPipe so
+ * `win_spawn_worker` can `WaitForMultipleObjects` on
+ * [thread, worker process] and detect early worker exit
+ * (which would otherwise leave the synchronous ConnectNamedPipe
+ * blocked forever — see the call site for the deadlock
+ * analysis). Returns 0 on success or
+ * (success-via-`ERROR_PIPE_CONNECTED`), the GetLastError() code
+ * otherwise. Cancelable via `CancelSynchronousIo`. */
+static DWORD WINAPI win_connect_pipe_thread(LPVOID lpv) {
+    HANDLE pipe = (HANDLE)lpv;
+    BOOL connected = ConnectNamedPipe(pipe, NULL);
+    if (connected) return 0;
+    DWORD gle = GetLastError();
+    if (gle == ERROR_PIPE_CONNECTED) return 0;
+    return gle;
+}
+
 static int win_spawn_worker(const char* cdylib_path,
                             leo4_worker_t** out,
                             char*  err_buf, size_t err_cap) {
@@ -525,18 +542,85 @@ static int win_spawn_worker(const char* cdylib_path,
     }
     CloseHandle(pi.hThread);   /* main thread handle unused */
 
-    /* Wait for the worker to connect. The worker calls
-     * `CreateFileA(pipe_name, ...)`; ConnectNamedPipe blocks until
-     * the child end is open. */
-    BOOL connected = ConnectNamedPipe(pipe, NULL);
-    if (!connected && GetLastError() != ERROR_PIPE_CONNECTED) {
+    /* Wait for the worker to connect, OR for the worker to die
+     * before connecting. The worker calls `CreateFileA(pipe_name,
+     * ...)` on success; otherwise (clap arg parse failure,
+     * missing cdylib at the path, immediate panic, …) it exits
+     * fast and would leave ConnectNamedPipe(pipe, NULL) blocked
+     * forever — there's no client connection coming, and the
+     * sync ConnectNamedPipe call doesn't observe the worker
+     * process state. Run ConnectNamedPipe on a helper thread and
+     * use WaitForMultipleObjects on [thread, worker process] so
+     * worker death surfaces as LEO4_ERR_RUST_SPAWN_FAILED
+     * rather than a hang.
+     *
+     * The helper thread's blocking ConnectNamedPipe call is
+     * unblocked by `CancelSynchronousIo` if the worker dies
+     * first; CancelSynchronousIo has been available since
+     * Vista / 2008 (well within leo4's Tier 2 gnullvm target's
+     * supported OS floor). */
+    HANDLE connect_thread = CreateThread(
+        NULL, 0, win_connect_pipe_thread, pipe, 0, NULL);
+    if (connect_thread == NULL) {
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hProcess);
         CloseHandle(pipe);
         if (err_buf && err_cap)
             (void)snprintf(err_buf, err_cap,
-                           "ConnectNamedPipe failed: GLE=%lu",
+                           "CreateThread(ConnectNamedPipe helper) failed: GLE=%lu",
                            GetLastError());
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    }
+
+    HANDLE wait_handles[2] = { connect_thread, pi.hProcess };
+    DWORD wr = WaitForMultipleObjects(2, wait_handles, FALSE, INFINITE);
+    if (wr == WAIT_OBJECT_0) {
+        /* Helper thread exited = ConnectNamedPipe returned.
+         * Read the thread's exit code to learn whether the
+         * pipe is now connected or if connect itself errored. */
+        DWORD thread_rc = 0;
+        GetExitCodeThread(connect_thread, &thread_rc);
+        CloseHandle(connect_thread);
+        if (thread_rc != 0) {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pipe);
+            if (err_buf && err_cap)
+                (void)snprintf(err_buf, err_cap,
+                               "ConnectNamedPipe failed: GLE=%lu",
+                               thread_rc);
+            return LEO4_ERR_RUST_SPAWN_FAILED;
+        }
+        /* fall through: pipe connected, worker alive */
+    } else if (wr == WAIT_OBJECT_0 + 1) {
+        /* Worker exited before opening the pipe. Cancel the
+         * blocked ConnectNamedPipe in the helper thread, reap
+         * it, then return SPAWN_FAILED. */
+        DWORD worker_exit = 0;
+        GetExitCodeProcess(pi.hProcess, &worker_exit);
+        CancelSynchronousIo(connect_thread);
+        WaitForSingleObject(connect_thread, INFINITE);
+        CloseHandle(connect_thread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pipe);
+        if (err_buf && err_cap)
+            (void)snprintf(err_buf, err_cap,
+                           "worker exited before opening pipe (exit=%lu)",
+                           worker_exit);
+        return LEO4_ERR_RUST_SPAWN_FAILED;
+    } else {
+        /* WAIT_FAILED or other unexpected wait result. */
+        DWORD gle = GetLastError();
+        CancelSynchronousIo(connect_thread);
+        WaitForSingleObject(connect_thread, INFINITE);
+        CloseHandle(connect_thread);
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pipe);
+        if (err_buf && err_cap)
+            (void)snprintf(err_buf, err_cap,
+                           "WaitForMultipleObjects on [pipe, worker] failed: wr=%lu GLE=%lu",
+                           wr, gle);
         return LEO4_ERR_RUST_SPAWN_FAILED;
     }
 
