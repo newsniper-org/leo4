@@ -160,18 +160,56 @@ file the diagnostic and stop — everything downstream
 depends on it.
 
 ### T2 — Pure Rust test suite (no Lean toolchain needed)
+
+Same `--exclude` set as T1 (examples have the
+sample-lean lake artifact precondition). Add
+`--no-fail-fast` so any single fail doesn't abort the
+whole matrix, and `--skip parses_lake_plugin_sample_schema`
+because `leo4-idl::tests::round_trip_sample` reads the
+same precondition fixture.
+
 ```powershell
-cargo test --workspace
+cd C:\leo4
+cargo test --workspace --target x86_64-pc-windows-gnullvm `
+    --no-fail-fast `
+    --exclude leo4-example-01-hello `
+    --exclude leo4-example-02-roundtrip `
+    --exclude leo4-example-04-mutual-ast `
+    --exclude leo4-example-05-rust-export `
+    -- --skip parses_lake_plugin_sample_schema
 ```
-**Expect**: same pass count as Linux host. Known
-already-Windows-aware tests:
+
+**Expect**: comparable pass count to Linux host (~214 →
+~208, the small delta accounted for by the
+`parses_lake_plugin_sample_schema` skip and the
+`cfg(unix)` gate on
+`leo4-rust-bridge::tests::dispatcher_links_and_errors_cleanly_on_missing_worker`).
+
+**Verified 2026-05-25 on Windows 11 Pro + MSYS2
+ucrt64**: 208/208 pass.
+
+Known already-Windows-aware tests:
 - `leo4-cli`: `bin_name_strips_exe_on_unix` covers both
   branches.
-- `leo4-cli`: `find_cdylib_picks_linux_so` is Linux-shape; on
-  Windows the cdylib lookup is `*.dll`. Expect this test
-  to PASS or be skipped — it constructs a `.so` file
-  manually so it doesn't actually invoke OS-specific
-  cdylib semantics.
+- `leo4-cli`: `find_cdylib_picks_linux_so` constructs a
+  `.so` file manually so it doesn't actually invoke
+  OS-specific cdylib semantics.
+
+**Discoveries during T2** (already landed as fixes):
+- `leo4-rust-bridge::tests::dispatcher_links_and_errors_cleanly_on_missing_worker`
+  was documented POSIX-only but missing `cfg(unix)`.
+  Gated 2b2e5b8 + warning-cleanup 8182850.
+- The same test surfaced a real Windows-backend
+  deadlock in `shim/leo4_rust_bridge.c`:
+  `ConnectNamedPipe(pipe, NULL)` blocks forever if the
+  spawned worker dies before opening the client end of
+  the pipe. Fixed 86abc41 by running ConnectNamedPipe
+  on a helper thread + `WaitForMultipleObjects` on
+  `[connect_thread, worker_process_handle]`, then
+  `CancelSynchronousIo` on the helper if the worker
+  fires first. **This is a production fix** — affects
+  real reverse-direction calls on Windows, not just
+  the test.
 
 Failure mode to watch: tests that build temp files using
 hardcoded `/tmp` paths. Audit shows only one:
