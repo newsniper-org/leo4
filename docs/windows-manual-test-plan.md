@@ -129,6 +129,26 @@ Run on a fresh Windows 11 Pro VM with:
 - The leo4 repo: `git clone` to `C:\leo4` (path with spaces
   not recommended for first pass)
 
+**Shell choice — run from MSYS2 ucrt64**: `cargo
+install --path crates\leo4-cli` produces a `leo4.exe`
+that dynamically links against the mingw runtime DLLs
+(`libwinpthread-1.dll`, `libgcc_s_seh-1.dll`, …)
+when the rustup default toolchain is one of the
+`*-gnu` / `*-gnullvm` flavors. PowerShell's default
+`PATH` does NOT include the MSYS2 / mingw bin
+directory that holds those DLLs, so invoking
+`leo4 ...` from PowerShell fails with exit code
+`-1073741515` (`0xC0000135`, `STATUS_DLL_NOT_FOUND`)
+before printing anything. The MSYS2 ucrt64 shell
+includes `C:\msys64\ucrt64\bin` in its `PATH` by
+default, so all `leo4 …` commands here are written
+assuming that shell. Alternative: prepend
+`C:\msys64\ucrt64\bin` to PowerShell's PATH, or
+switch the rustup default to
+`stable-x86_64-pc-windows-msvc` and rebuild
+(`cargo install --path crates\leo4-cli --force`) for
+a self-contained binary.
+
 ### T1 — Pure Rust compile-only sanity (forward path crates)
 
 The `examples/0{1,2,4,5}-*` crates' `build.rs` calls
@@ -218,18 +238,37 @@ hardcoded `/tmp` paths. Audit shows only one:
 test reads conformance fixtures via env var; should be
 fine.
 
-### T3 — `leo4 create` (forward, mslean4) — pure CLI, no
+### T3 — `leo4 create` (forward, default impl) — pure CLI, no
        lake invocation
-```powershell
-cargo install --path crates\leo4-cli
-leo4 create forward C:\tmp\scaffold-fwd
-type C:\tmp\scaffold-fwd\leo4.toml
-type C:\tmp\scaffold-fwd\Cargo.toml
+```bash
+# MSYS2 ucrt64
+cd /c/leo4
+cargo install --path crates/leo4-cli --force
+leo4 create forward /c/tmp/scaffold-fwd
+ls /c/tmp/scaffold-fwd
+cat /c/tmp/scaffold-fwd/leo4.toml
+cat /c/tmp/scaffold-fwd/Cargo.toml
+cat /c/tmp/scaffold-fwd/lean/lean-toolchain
+test -e /c/tmp/scaffold-fwd/.leo4-impl && echo "FAIL: legacy marker present" || echo "OK: no legacy marker"
+xxd /c/tmp/scaffold-fwd/lean/lean-toolchain | head -2
 ```
-**Expect**: scaffold files written with `\` Windows
-separators in paths (or `/` — both should parse). Check
-that `lean-toolchain` file has unix LF line ending (so
-`elan` parses it).
+
+**Expect**:
+- Scaffold files written with platform-correct path
+  separators (Rust's `Path::join` handles both).
+- `leo4.toml` carries `[[impl]] kind = "mslean4"` as
+  the default, with the Post-OX6 render's
+  `out = "..."  # default; uncomment to override`
+  hint line.
+- `Cargo.toml` references `leo4` + `leo4-build` via
+  workspace-relative paths; NO `--impl` artifact.
+- `lean-toolchain` content is `leanprover/lean4:v4.29.1\n`.
+- **No `.leo4-impl` legacy marker** (Post-OX6 refactor
+  invariant — `leo4 create` writes only `leo4.toml`).
+
+**Verified 2026-05-25 on Windows 11 Pro + MSYS2
+ucrt64**: pass (forward direction; reverse direction
+follows the same shape and is left for ad-hoc smoke).
 
 ### T4 — `leo4-oxilean-build` standalone (OxiLean-only
        path, no lake)
