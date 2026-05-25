@@ -130,12 +130,34 @@ Run on a fresh Windows 11 Pro VM with:
   not recommended for first pass)
 
 ### T1 — Pure Rust compile-only sanity (forward path crates)
+
+The `examples/0{1,2,4,5}-*` crates' `build.rs` calls
+`leo4-build::wire(...)` and canonicalizes the
+`tests/sample-lean/.lake/build/leo4` directory. That
+directory only exists after `lake build` has run on the
+sample fixture — under Linux the path is normally warm
+via `just smoke-plugin`; on a fresh Windows VM it does
+NOT exist yet, so a bare `cargo build --workspace`
+panics in the examples' build scripts. Exclude them
+from T1 (they get their own end-to-end test under T8):
+
 ```powershell
 cd C:\leo4
-cargo build --workspace
+cargo build --workspace `
+    --exclude leo4-example-01-hello `
+    --exclude leo4-example-02-roundtrip `
+    --exclude leo4-example-04-mutual-ast `
+    --exclude leo4-example-05-rust-export `
+    --target x86_64-pc-windows-gnullvm
 ```
-**Expect**: clean (per `OS-PORTABILITY.md` claim). If this fails, file
-the diagnostic and stop — everything downstream depends on it.
+
+(In an MSYS2 ucrt64 bash, swap PowerShell's `` ` `` line
+continuations for `\`.)
+
+**Expect**: clean. **Verified 2026-05-25 on a fresh
+Windows 11 Pro + MSYS2 ucrt64 VM**: pass. If this fails,
+file the diagnostic and stop — everything downstream
+depends on it.
 
 ### T2 — Pure Rust test suite (no Lean toolchain needed)
 ```powershell
