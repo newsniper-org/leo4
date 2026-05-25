@@ -340,15 +340,50 @@ Skip until the worker's Windows `open_ipc_channel` is
 implemented.
 
 ### T7 — `leo4 run` `--impl rust-transpile`
-```powershell
-cd C:\tmp\scaffold-fwd
-notepad leo4.toml   # change kind = "mslean4" → "rust-transpile"
-leo4 run
+
+Pre-req: run from MSYS2 ucrt64 (same shell choice as T3).
+The CLI now drives `leo4-oxilean-build` end-to-end
+(Phase 3 wire-up, 2026-05-25), so the user just edits
+`leo4.toml` and re-runs.
+
+```bash
+cd /c/tmp/scaffold-fwd
+sed -i 's/kind = "mslean4"/kind = "rust-transpile"/' leo4.toml
+
+# The transpile path emits a pure native Rust crate at
+# `<dir>/transpiled/`. The user's Cargo.toml needs a
+# path dep on it before `leo4 run` will succeed. The
+# CLI errors with the exact snippet to paste if it's
+# missing; add it once and re-run:
+cat >> Cargo.toml <<'EOF'
+leo4_transpiled = { path = "transpiled" }
+EOF
+
+# Also rewrite src/main.rs to call the transpiled crate
+# instead of via `leo4::import!` — the import macro
+# only resolves under mslean4. For the default scaffold
+# sample (`def add (a b : UInt64) : UInt64`), the call
+# is just `leo4_transpiled::add(1, 2)`.
+
+leo4 run --impl rust-transpile
 ```
-**Expect**: this path goes through leo4-oxilean-build
-(no lake / no shim) so the OS-PORTABILITY.md §3 issues
-don't trigger. T4's standalone test predicts this
-should work. Confirm end-to-end.
+
+**Expect**: pipeline is
+
+1. `cargo build --release` of `leo4-oxilean-build`
+   (only on first run; binary cached afterwards).
+2. `leo4-oxilean-build --manifest …` → `transpiled/`
+   crate with `pub fn add(u64, u64) -> u64` etc.
+3. `cargo build` of the user crate (pulls in
+   `transpiled/` as a path dep).
+4. `cargo run` printing the result.
+
+No lake, no shim, no Lean toolchain involved — so
+none of the OS-PORTABILITY.md §3 mslean4 issues
+trigger. T4's standalone test already predicts the
+transpile step works; T7 confirms the full
+end-to-end including the user-Cargo.toml dep
+detection path.
 
 ### T8 — Examples (`examples/01-hello`, etc.)
 Walk through the in-tree examples to surface user-facing

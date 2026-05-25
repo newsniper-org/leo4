@@ -231,28 +231,22 @@ fn main() {
 /// pointer at the SPEC. Returns `Ok(())` for supported impls.
 fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
     match kind {
+        // mslean4: lake plugin → leanc-built shim →
+        // libloading dispatch. Stable since v0.1.0.
         ImplKind::Mslean4 => Ok(()),
+        // rust-transpile: leo4-oxilean-build (OX5-oxi
+        // env bootstrap + OX6 PEG parser + pure_emit
+        // option-A native Rust crate, 2026-05-25). Zero
+        // lake/lean overhead.
+        ImplKind::RustTranspile => Ok(()),
         ImplKind::RustNative => Err(
             "--impl rust-native is currently deferred. The integration \
              contract is pinned at `SPEC/rust-native-lean.md` §2, but \
              no in-tree scaffolding ships yet — you'd need an external \
              adapter crate (`leo4-<impl>`, e.g. `leo4-oxilean`).\n\n\
              See `SPEC/rust-native-lean.md` §8 for the activation plan, \
-             or use `--impl mslean4` for the reference Lean 4 path that \
-             ships today.".into()
-        ),
-        ImplKind::RustTranspile => Err(
-            "--impl rust-transpile is currently scaffold-only. The \
-             transpile path (Lean source → Rust crate via OxiLean's \
-             `oxilean-codegen::rust_target_backend`) is pinned at \
-             `SPEC/rust-native-lean.md` §9 and the build-side adapter \
-             crate exists at `sibling/leo4-oxilean-build/`, but no \
-             user-package scaffold layout is wired into `leo4 create` \
-             / `leo4 init` yet.\n\n\
-             See `SPEC/rust-native-lean.md` §9.6 for the open \
-             questions an adapter author still answers per-fixture, \
-             or use `--impl mslean4` for the reference Lean 4 path \
-             that ships today.".into()
+             or use `--impl mslean4` / `--impl rust-transpile` for the \
+             paths that ship today.".into()
         ),
     }
 }
@@ -806,7 +800,7 @@ fn run_run(
     match direction {
         Direction::Forward => {
             let iface = iface_arg.unwrap_or_else(|| "Sample".to_string());
-            run_forward(&dir, &iface, &leo4_root_dir, &args)
+            run_forward(&dir, &iface, &leo4_root_dir, &impl_kind, &args)
         }
         Direction::Reverse => {
             let iface = iface_arg.unwrap_or_else(|| camel_case(&crate_name));
@@ -835,20 +829,44 @@ fn resolve_leo4_root_dir(p: Option<PathBuf>, project_dir: &Path) -> Result<PathB
     })
 }
 
+/// Dispatch the forward-direction `leo4 run` flow to
+/// the per-impl runner. `mslean4` keeps the historical
+/// `lake build → lake exe leo4plugin → cargo run`
+/// pipeline; `rust-transpile` spawns
+/// `leo4-oxilean-build` to emit a pure-Rust crate at
+/// `<dir>/transpiled/`, then `cargo run`.
 fn run_forward(
     dir: &Path,
     iface: &str,
-    _leo4_root: &Path,
+    leo4_root: &Path,
+    impl_kind: &ImplKind,
     args: &[String],
 ) -> Result<(), String> {
     let lean_dir = dir.join("lean");
     if !lean_dir.exists() {
-        return Err(format!("run: no `lean/` directory at {dir:?}"));
+        return Err(format!("run: no `lean/` directory at {}", dir.display()));
     }
+    match impl_kind {
+        ImplKind::Mslean4 => run_forward_mslean4(dir, &lean_dir, iface, args),
+        ImplKind::RustTranspile => run_forward_rust_transpile(dir, &lean_dir, leo4_root, args),
+        // check_impl_supported rejects rust-native upstream
+        // of this dispatch — unreachable in practice.
+        ImplKind::RustNative => Err(
+            "run: --impl rust-native is not yet supported (check_impl_supported \
+             should have rejected this earlier — please file a bug).".into()
+        ),
+    }
+}
 
+fn run_forward_mslean4(
+    dir: &Path,
+    lean_dir: &Path,
+    iface: &str,
+    args: &[String],
+) -> Result<(), String> {
     step("[1/3] lake build");
     run_cmd(
-        Command::new("lake").arg("build").current_dir(&lean_dir),
+        Command::new("lake").arg("build").current_dir(lean_dir),
         "lake build",
     )?;
 
@@ -856,7 +874,7 @@ fn run_forward(
     run_cmd(
         Command::new("lake")
             .args(["exe", "leo4plugin", iface])
-            .current_dir(&lean_dir),
+            .current_dir(lean_dir),
         "leo4plugin",
     )?;
 
@@ -867,6 +885,176 @@ fn run_forward(
         cmd.arg("--").args(args);
     }
     run_cmd(&mut cmd, "cargo run")
+}
+
+/// Forward-direction runner for `--impl rust-transpile`.
+/// Pipeline (option A, pure native — 2026-05-25):
+///
+///   1. Ensure `leo4-oxilean-build` binary exists in
+///      `<leo4_root>/sibling/leo4-oxilean-build/target/release/`,
+///      building it if absent.
+///   2. Write a manifest listing every `.lean` file
+///      under `<dir>/lean/` and pointing `out_dir` at
+///      `<dir>/transpiled/`.
+///   3. Invoke `leo4-oxilean-build --manifest <path>`.
+///      The emitted crate is a self-contained Rust
+///      crate with no leo4-abi dependency.
+///   4. `cargo run` on the user's project.
+///
+/// The user's project Cargo.toml is expected to depend
+/// on the transpiled crate (path = "transpiled"). When
+/// the dep is missing we error out with an exact
+/// snippet to paste — we never auto-edit user
+/// manifests.
+fn run_forward_rust_transpile(
+    dir: &Path,
+    lean_dir: &Path,
+    leo4_root: &Path,
+    args: &[String],
+) -> Result<(), String> {
+    let oxi_root = leo4_root.join("sibling").join("leo4-oxilean-build");
+    if !oxi_root.exists() {
+        return Err(format!(
+            "run: rust-transpile impl requires `{}` to exist (the leo4-oxilean-build \
+             sibling project). Pass --leo4-root to point at your leo4 checkout.",
+            oxi_root.display()
+        ));
+    }
+    let oxi_bin = oxi_root.join("target").join("release").join(bin_name("leo4-oxilean-build"));
+    if !oxi_bin.exists() {
+        step("[helpers] cargo build --release (leo4-oxilean-build)");
+        run_cmd(
+            Command::new("cargo")
+                .args(["build", "--release"])
+                .current_dir(&oxi_root),
+            "cargo build (leo4-oxilean-build)",
+        )?;
+    }
+
+    let lean_sources = collect_lean_sources(lean_dir)?;
+    if lean_sources.is_empty() {
+        return Err(format!(
+            "run: no `*.lean` files found under {} — \
+             rust-transpile needs at least one source.",
+            lean_dir.display()
+        ));
+    }
+
+    let transpile_root = dir.join("transpiled");
+    let manifest_dir = dir.join("target").join("leo4-rust-transpile");
+    fs::create_dir_all(&manifest_dir)
+        .map_err(|e| format!("mkdir {}: {e}", manifest_dir.display()))?;
+    let manifest_path = manifest_dir.join("manifest.txt");
+    let crate_name = "leo4_transpiled";
+    let manifest = render_transpile_manifest(crate_name, &transpile_root, &lean_sources);
+    fs::write(&manifest_path, &manifest)
+        .map_err(|e| format!("write {}: {e}", manifest_path.display()))?;
+
+    step(&format!(
+        "[1/3] leo4-oxilean-build --manifest {} ({} source{})",
+        manifest_path.display(),
+        lean_sources.len(),
+        if lean_sources.len() == 1 { "" } else { "s" }
+    ));
+    run_cmd(
+        Command::new(&oxi_bin).arg("--manifest").arg(&manifest_path),
+        "leo4-oxilean-build",
+    )?;
+
+    let cargo_toml = dir.join("Cargo.toml");
+    if !user_cargo_has_transpiled_dep(&cargo_toml, crate_name) {
+        return Err(format!(
+            "run: rust-transpile emitted crate at {}, but the user Cargo.toml at {} \
+             has no dependency on it. Add:\n\n\
+             \x20 [dependencies]\n\
+             \x20 {crate_name} = {{ path = \"transpiled\" }}\n\n\
+             then re-run `leo4 run --impl rust-transpile`.",
+            transpile_root.display(),
+            cargo_toml.display()
+        ));
+    }
+
+    step("[2/3] cargo build");
+    run_cmd(
+        Command::new("cargo").arg("build").current_dir(dir),
+        "cargo build",
+    )?;
+
+    step("[3/3] cargo run");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run").current_dir(dir);
+    if !args.is_empty() {
+        cmd.arg("--").args(args);
+    }
+    run_cmd(&mut cmd, "cargo run")
+}
+
+/// Walk `lean_dir` recursively, collecting every
+/// regular file with a `.lean` extension. Skips
+/// `.lake/`, `lake-packages/`, `build/`, and any
+/// hidden directories so we don't try to transpile
+/// lake's compiler intermediates.
+fn collect_lean_sources(lean_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let mut stack = vec![lean_dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let entries = fs::read_dir(&d).map_err(|e| format!("read_dir {}: {e}", d.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("read_dir entry {}: {e}", d.display()))?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name_s = name.to_string_lossy();
+            if name_s.starts_with('.')
+                || name_s == "lake-packages"
+                || name_s == "build"
+            {
+                continue;
+            }
+            let ft = entry.file_type()
+                .map_err(|e| format!("file_type {}: {e}", path.display()))?;
+            if ft.is_dir() {
+                stack.push(path);
+            } else if ft.is_file()
+                && path.extension().is_some_and(|e| e == "lean")
+            {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn render_transpile_manifest(crate_name: &str, out_dir: &Path, sources: &[PathBuf]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    writeln!(s, "crate_name={crate_name}").expect("write to String");
+    writeln!(s, "out_dir={}", out_dir.display()).expect("write to String");
+    for src in sources {
+        writeln!(s, "source={}", src.display()).expect("write to String");
+    }
+    s
+}
+
+/// Cheap textual check: does the user's Cargo.toml
+/// mention the transpiled crate at all? We don't try
+/// to parse TOML — a `crate_name =` substring is
+/// sufficient to catch the documented setup snippet
+/// in both `[dependencies]` and inline forms. False
+/// positives are harmless (cargo will reject a
+/// broken dep on actual build).
+fn user_cargo_has_transpiled_dep(cargo_toml: &Path, crate_name: &str) -> bool {
+    let Ok(s) = fs::read_to_string(cargo_toml) else { return false };
+    for line in s.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(&format!("{crate_name} ="))
+            || trimmed.starts_with(&format!("{crate_name}="))
+            || trimmed.starts_with(&format!("\"{crate_name}\""))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn run_reverse(
@@ -1462,11 +1650,11 @@ mod tests {
     }
 
     #[test]
-    fn check_impl_supported_rejects_rust_transpile_with_pointer_to_spec_section_9() {
-        let err = check_impl_supported(&ImplKind::RustTranspile).unwrap_err();
-        assert!(err.contains("rust-transpile"), "{err}");
-        assert!(err.contains("§9"), "{err}");
-        assert!(err.contains("leo4-oxilean-build"), "{err}");
+    fn check_impl_supported_passes_rust_transpile_post_phase3() {
+        // Phase 3 wire-up (2026-05-25): rust-transpile is
+        // no longer scaffold-only — leo4-oxilean-build is
+        // production-wired into `run_forward_rust_transpile`.
+        assert!(check_impl_supported(&ImplKind::RustTranspile).is_ok());
     }
 
     #[test]
@@ -2009,5 +2197,108 @@ kind = "rust-transpile"
         )
         .expect("run_create must succeed");
         assert!(dir.join("leo4.toml").exists());
+    }
+
+    // ─── Phase 3 — rust-transpile run helpers ───────────────────────
+
+    #[test]
+    fn render_transpile_manifest_emits_key_value_lines() {
+        let m = render_transpile_manifest(
+            "leo4_transpiled",
+            Path::new("/tmp/out"),
+            &[
+                PathBuf::from("/x/a.lean"),
+                PathBuf::from("/x/sub/b.lean"),
+            ],
+        );
+        // CLI parser is line-oriented `key=value`; verify
+        // exact shape so the round-trip stays stable.
+        assert!(m.contains("crate_name=leo4_transpiled\n"));
+        assert!(m.contains("out_dir=/tmp/out\n"));
+        assert!(m.contains("source=/x/a.lean\n"));
+        assert!(m.contains("source=/x/sub/b.lean\n"));
+        // No legacy canonical-mode fields (schema_hash /
+        // leo4_abi_dep / bind) — pure mode only.
+        assert!(!m.contains("schema_hash"));
+        assert!(!m.contains("leo4_abi_dep"));
+        assert!(!m.contains("bind="));
+    }
+
+    #[test]
+    fn collect_lean_sources_walks_recursively_and_sorts() {
+        let dir = tempdir();
+        let lean = dir.join("lean");
+        fs::create_dir_all(lean.join("sub")).unwrap();
+        // Out-of-order create to verify final sort.
+        fs::write(lean.join("sub").join("Two.lean"), "").unwrap();
+        fs::write(lean.join("One.lean"), "").unwrap();
+        // Non-`.lean` files ignored.
+        fs::write(lean.join("README.md"), "").unwrap();
+        let found = collect_lean_sources(&lean).expect("walk must succeed");
+        assert_eq!(found.len(), 2);
+        // Sorted by full path → `One.lean` < `sub/Two.lean`.
+        assert!(found[0].ends_with("One.lean"));
+        assert!(found[1].ends_with("Two.lean"));
+    }
+
+    #[test]
+    fn collect_lean_sources_skips_lake_and_build_dirs() {
+        let dir = tempdir();
+        let lean = dir.join("lean");
+        fs::create_dir_all(lean.join(".lake").join("build")).unwrap();
+        fs::create_dir_all(lean.join("build")).unwrap();
+        fs::create_dir_all(lean.join("lake-packages")).unwrap();
+        // Files in skipped dirs must not appear in the result.
+        fs::write(lean.join(".lake").join("build").join("X.lean"), "").unwrap();
+        fs::write(lean.join("build").join("Y.lean"), "").unwrap();
+        fs::write(lean.join("lake-packages").join("Z.lean"), "").unwrap();
+        // The one real source.
+        fs::write(lean.join("Real.lean"), "").unwrap();
+        let found = collect_lean_sources(&lean).expect("walk must succeed");
+        assert_eq!(found.len(), 1);
+        assert!(found[0].ends_with("Real.lean"));
+    }
+
+    #[test]
+    fn user_cargo_has_transpiled_dep_detects_path_form() {
+        let dir = tempdir();
+        let toml = dir.join("Cargo.toml");
+        fs::write(
+            &toml,
+            "[package]\nname = \"x\"\n\n[dependencies]\nleo4_transpiled = { path = \"transpiled\" }\n",
+        )
+        .unwrap();
+        assert!(user_cargo_has_transpiled_dep(&toml, "leo4_transpiled"));
+    }
+
+    #[test]
+    fn user_cargo_has_transpiled_dep_detects_no_space_form() {
+        let dir = tempdir();
+        let toml = dir.join("Cargo.toml");
+        fs::write(
+            &toml,
+            "[dependencies]\nleo4_transpiled={path=\"transpiled\"}\n",
+        )
+        .unwrap();
+        assert!(user_cargo_has_transpiled_dep(&toml, "leo4_transpiled"));
+    }
+
+    #[test]
+    fn user_cargo_has_transpiled_dep_missing_returns_false() {
+        let dir = tempdir();
+        let toml = dir.join("Cargo.toml");
+        fs::write(
+            &toml,
+            "[package]\nname = \"x\"\n\n[dependencies]\nleo4 = { path = \"../leo4\" }\n",
+        )
+        .unwrap();
+        assert!(!user_cargo_has_transpiled_dep(&toml, "leo4_transpiled"));
+    }
+
+    #[test]
+    fn user_cargo_has_transpiled_dep_absent_file_returns_false() {
+        let dir = tempdir();
+        let toml = dir.join("nonexistent.toml");
+        assert!(!user_cargo_has_transpiled_dep(&toml, "leo4_transpiled"));
     }
 }
