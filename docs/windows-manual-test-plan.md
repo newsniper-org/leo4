@@ -275,16 +275,45 @@ follows the same shape and is left for ad-hoc smoke).
 This is the **lowest-risk Windows path** because it has
 zero lake / lean / shim dependency — pure
 Rust+oxilean-kernel.
-```powershell
-cd C:\leo4
-cargo build -p leo4-oxilean-build
-# Manual: hand-craft a manifest pointing at a Lean
-# source file with @[leo4_export], invoke
-# leo4-oxilean-build --manifest manifest.txt
+
+`leo4-oxilean-build` and `leo4-lean4-parse` are
+**standalone Cargo projects** (not workspace members),
+so they need a `cd` into the sibling directory:
+
+```bash
+# MSYS2 ucrt64
+cd /c/leo4/sibling/leo4-oxilean-build
+cargo build --target x86_64-pc-windows-gnullvm
+cargo test --target x86_64-pc-windows-gnullvm
+
+cd /c/leo4/sibling/leo4-lean4-parse
+cargo test --target x86_64-pc-windows-gnullvm
 ```
-**Expect**: env bootstrap works (OX5-oxi has 10 tests
-already passing on Linux). Watch for: file path
-handling, manifest line ending (`\r\n` vs `\n`).
+
+**Verified 2026-05-25 on Windows 11 Pro + MSYS2
+ucrt64**:
+- `leo4-oxilean-build`: 168 lib + 9 integration = 177
+  passed (matches Linux).
+- `leo4-lean4-parse`: 289 passed (288 lib + 1
+  cross-check against `oxilean-parse` on a shared
+  corpus).
+- Build time on the VM: ~2m 18s for `leo4-oxilean-build`
+  (the full OxiLean toolchain — oxilean-kernel /
+  oxilean-meta / oxilean-elab / oxilean-codegen +
+  oxiz-* — compiles fresh; cached on subsequent runs).
+
+This closes the most-important Windows verification:
+the **OxiLean-only user installs nothing beyond
+`leo4-oxilean-build`** — OX5-oxi's `bootstrap_env`
+(`oxilean_kernel::init_builtin_env` + leo4 boundary
+primitives) and OX6's `leo4_lean4_parse` →
+`leo4_translate` pipeline are both runtime-verified
+on Windows native. The rust-transpile path needs no
+lake / lean toolchain on Windows.
+
+Watch on the hand-crafted-manifest smoke (next step,
+under T7): file path handling, manifest line ending
+(`\r\n` vs `\n`).
 
 ### T5 — `leo4 run` forward / mslean4 — first real
        integration test
