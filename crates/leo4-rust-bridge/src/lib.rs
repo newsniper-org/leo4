@@ -30,13 +30,23 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
+    // The only test in this module is POSIX-specific
+    // (see the `#[cfg(unix)]` gate on the test fn below for
+    // the underlying Windows-backend deadlock context). Gate
+    // the test-only imports + constants on the same cfg so
+    // Windows builds don't trip `unused_imports` /
+    // `dead_code` warnings under the gate.
+    #[cfg(unix)]
     use super::leo4_rust_call;
 
     /// Reverse-direction passthrough error codes (`SPEC/canonical-abi.md`
     /// §13 + `SPEC/reverse-direction.md` §10). The dispatcher
     /// surfaces one of these whenever any layer fails.
+    #[cfg(unix)]
     const LEO4_ERR_RUST_SPAWN_FAILED: i32 = 0x0002_0003;
+    #[cfg(unix)]
     const LEO4_ERR_RUST_CDYLIB_NOT_FOUND: i32 = 0x0002_0004;
+    #[cfg(unix)]
     const LEO4_ERR_RUST_IPC_FAILED: i32 = 0x0002_0006;
 
     /// On a 9-4b POSIX build with no worker binary on PATH and
