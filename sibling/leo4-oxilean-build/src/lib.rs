@@ -172,6 +172,15 @@ pub mod leo4_translate;
 /// step doesn't choke on `NameNotFound`.
 pub mod leo4_env_bootstrap;
 
+/// Option A — pure native-Rust crate emit. Skips the
+/// canonical-ABI wrapper / `LeanProc` impl / mangling
+/// layers entirely. The transpiled crate is just plain
+/// Rust with `pub fn` signatures; consumers call it
+/// directly without going through any C ABI hop. See
+/// the module docs for the option-A vs option-B
+/// decision matrix.
+pub mod pure_emit;
+
 use leo4_abi::LeanError;
 use oxilean_codegen::lcnf::LcnfFunDecl;
 use oxilean_codegen::rust_target_backend::{RustItem, RustTargetBackend};
