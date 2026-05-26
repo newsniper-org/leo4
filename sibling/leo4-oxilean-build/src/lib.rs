@@ -1602,7 +1602,77 @@ fn unfold_decl(ty: &Expr, val: &Expr) -> (Vec<(Name, Expr)>, Expr, Expr) {
         cur_ty = rest_ty;
         cur_val = rest_val;
     }
-    (params, cur_val.clone(), cur_ty.clone())
+    // OX7 (1b-α, 2026-05-27): `oxilean-elab` opens
+    // binders by substituting `BVar(idx)` references in
+    // the body with fresh `FVar(<i>)` IDs (i = binder
+    // depth, 0-indexed from outermost). `to_lcnf`
+    // expects raw-kernel-shape with `BVar` references
+    // for the param binders; routing the elab output
+    // through `to_lcnf` unchanged causes each `FVar(i)`
+    // to be allocated a fresh `LcnfVarId` via
+    // `convert_fvar`, decoupling the body's arg refs
+    // from the param ids set up by `decl_to_lcnf`.
+    //
+    // The fix re-substitutes the body's `FVar(0..N)`
+    // back into de Bruijn `BVar(N-1-i)` form before
+    // handing it to `to_lcnf`. Top-level decl
+    // assumption: the rust-transpile pipeline only sees
+    // decl bodies whose outermost binders' fvar ids
+    // start at 0; nested user-introduced binders inside
+    // the body don't collide with this range.
+    //
+    // See `docs/ox7-1b-elab-bloat-findings.md` for the
+    // diagnosis trail.
+    let n = u32::try_from(params.len()).unwrap_or(u32::MAX);
+    let body = substitute_param_fvars(&cur_val.clone(), n, 0);
+    (params, body, cur_ty.clone())
+}
+
+/// OX7 (1b-α, 2026-05-27) — substitute `FVar(0..n)` →
+/// `BVar(n-1-i)` recursively, tracking de Bruijn depth
+/// through nested binders.
+fn substitute_param_fvars(e: &Expr, n: u32, depth: u32) -> Expr {
+    match e {
+        Expr::FVar(fid) => {
+            let id_u32 = u32::try_from(fid.0).unwrap_or(u32::MAX);
+            if id_u32 < n {
+                Expr::BVar(depth + (n - 1 - id_u32))
+            } else {
+                e.clone()
+            }
+        }
+        Expr::App(f, a) => Expr::App(
+            Box::new(substitute_param_fvars(f, n, depth)),
+            Box::new(substitute_param_fvars(a, n, depth)),
+        ),
+        Expr::Lam(bi, name, ty, body) => Expr::Lam(
+            *bi,
+            name.clone(),
+            Box::new(substitute_param_fvars(ty, n, depth)),
+            Box::new(substitute_param_fvars(body, n, depth + 1)),
+        ),
+        Expr::Pi(bi, name, ty, body) => Expr::Pi(
+            *bi,
+            name.clone(),
+            Box::new(substitute_param_fvars(ty, n, depth)),
+            Box::new(substitute_param_fvars(body, n, depth + 1)),
+        ),
+        Expr::Let(name, ty, val, body) => Expr::Let(
+            name.clone(),
+            Box::new(substitute_param_fvars(ty, n, depth)),
+            Box::new(substitute_param_fvars(val, n, depth)),
+            Box::new(substitute_param_fvars(body, n, depth + 1)),
+        ),
+        Expr::Proj(name, idx, base) => Expr::Proj(
+            name.clone(),
+            *idx,
+            Box::new(substitute_param_fvars(base, n, depth)),
+        ),
+        Expr::BVar(_)
+        | Expr::Sort(_)
+        | Expr::Const(_, _)
+        | Expr::Lit(_) => e.clone(),
+    }
 }
 
 /// Full pipeline: Lean source string → Rust source string.
@@ -1910,7 +1980,7 @@ pub fn decl_name(decl: &Located<Decl>) -> Option<&str> {
 /// (parser rejection or `TranslateError::Unsupported`).
 /// With the feature disabled this is the same as the
 /// legacy walker — zero behavioural delta from pre-13c.
-fn parse_decls_for_transpile(
+pub fn parse_decls_for_transpile(
     normalised: &str,
 ) -> Result<Vec<Located<Decl>>, LeanError> {
     #[cfg(feature = "leo4-parser")]
