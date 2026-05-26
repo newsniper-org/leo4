@@ -15,7 +15,7 @@ fn main() {
     // until HAdd typeclass + instances arrive. Use the
     // explicit form to expose what implicit args elab
     // piles on top of the body.
-    let src = "def add (a b : UInt64) : UInt64 := UInt64.add a b\n";
+    let src = "def add (a b : UInt64) : UInt64 := a + b\n";
     let norm = lean4_normalize(src);
     let parsed = parse_decls_for_transpile(&norm).expect("parse");
 
@@ -23,6 +23,7 @@ fn main() {
         let inner = inner_decl(d);
         if let OxDecl::Definition { name, .. } = &inner.value {
             println!("=== source decl: {name:?} ===");
+            println!("--- post-translate Decl ---\n{:#?}\n---", inner.value);
             match elaborate_decl(&env, &inner.value) {
                 Ok(PendingDecl::Definition { name, ty, val, .. }) => {
                     println!("--- name = {name:?} ---");

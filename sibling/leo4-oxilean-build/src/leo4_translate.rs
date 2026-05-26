@@ -375,6 +375,39 @@ fn translate_binder_kind(k: &L4BinderKind) -> OxBinderKind {
     }
 }
 
+/// OX7 (α, 2026-05-27) — expand one `LamBinder` (the
+/// PEG's lambda-binder shape) into one or more
+/// `OxBinder`s (the surface-AST shape). `Typed`'s
+/// `names` list spreads the same `ty` across each
+/// name; `Untyped` becomes a single binder with no
+/// annotation (oxilean-elab will infer the type from
+/// context).
+fn lam_binder_to_ox_binders(
+    lb: &oxilean_parse_peg::LamBinder,
+) -> Result<Vec<OxBinder>, TranslateError> {
+    use oxilean_parse_peg::LamBinder;
+    match lb {
+        LamBinder::Untyped(name) => Ok(vec![OxBinder {
+            name: name.clone(),
+            ty: None,
+            info: OxBinderKind::Default,
+        }]),
+        LamBinder::Typed { kind, names, ty } => {
+            let ty_loc = translate_expr_located(ty)?;
+            let info = translate_binder_kind(kind);
+            let mut out = Vec::with_capacity(names.len());
+            for name in names {
+                out.push(OxBinder {
+                    name: name.clone(),
+                    ty: Some(Box::new(ty_loc.clone())),
+                    info: info.clone(),
+                });
+            }
+            Ok(out)
+        }
+    }
+}
+
 /// Wrap `inner` in a Pi-type over the given binders.
 /// Empty binders pass through unchanged.
 fn wrap_pi(binders: &[OxBinder], inner: Located<OxExpr>) -> Located<OxExpr> {
@@ -436,6 +469,50 @@ fn head_ident(e: &L4Expr) -> Option<String> {
     }
 }
 
+/// OX7 typeclass step (2026-05-27): map a surface
+/// arithmetic / comparison operator symbol to the
+/// Lean stdlib typeclass-projection identifier
+/// oxilean-elab + leo4_env_bootstrap expect. Unknown
+/// operators fall through verbatim — they'll surface
+/// as NameNotFound during elab if the env doesn't
+/// carry them. Mirror of
+/// `leo4_env_bootstrap::ARITHMETIC_TC_PROJECTIONS`.
+fn arith_op_to_tc_projection(op: &str) -> &str {
+    match op {
+        // Arithmetic.
+        "+" => "HAdd.hAdd",
+        "-" => "HSub.hSub",
+        "*" => "HMul.hMul",
+        "/" => "HDiv.hDiv",
+        "%" => "HMod.hMod",
+        "^" => "HPow.hPow",
+        // Bitwise.
+        "&&&" => "HAnd.hAnd",
+        "|||" => "HOr.hOr",
+        "^^^" => "HXor.hXor",
+        "<<<" => "HShiftLeft.hShiftLeft",
+        ">>>" => "HShiftRight.hShiftRight",
+        // Comparison.
+        "<" => "LT.lt",
+        "<=" | "≤" => "LE.le",
+        // `a > b` and `a ≥ b` swap to `LT.lt b a` /
+        // `LE.le b a` in Lean stdlib. We can't do the
+        // arg swap here without restructuring the App
+        // tree, so for now they pass through and
+        // codegen handles them as TODO — same as the
+        // legacy lowering's behaviour.
+        "==" => "BEq.beq",
+        // Unmapped — keep `Var(op)` for the legacy path.
+        // Includes ">", ">=", "&&", "||", "!=", "≠",
+        // "→", "↔", "∈", "∉", "⊆", etc. Some will
+        // surface as NameNotFound until env coverage
+        // expands; this is intentional (we don't want
+        // silent fallback for operators with non-trivial
+        // semantics).
+        _ => op,
+    }
+}
+
 fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
     match e {
         L4Expr::Ident(s) => Ok(OxExpr::Var(s.clone())),
@@ -459,17 +536,52 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
         }
         L4Expr::Paren(inner) => translate_expr(inner),
         L4Expr::BinOp(op, lhs, rhs) => {
-            // Lower `BinOp("+", lhs, rhs)` to the
-            // application tree `App(App(Var("+"), lhs),
-            // rhs)`. The operator surfaces as a `Var` —
-            // oxilean's elaborator resolves `+` against
-            // its `HAdd.hAdd` typeclass entry (the same
-            // path it takes for explicit-form sources).
-            // For Unicode operators (≤, ≥, ≠, ×, ÷, ∈,
-            // ∉, ∪, ∩, ⊆) the op symbol is passed
-            // through verbatim; oxilean handles dispatch
-            // identically to ASCII.
-            let f = Located::new(OxExpr::Var(op.clone()), dummy_span());
+            // OX7 (α, 2026-05-27): the `->` function-type
+            // arrow is a BinOp at the PEG level but
+            // lowers to a non-dependent `Pi` in surface
+            // AST, not an application of a `Var("->"")`.
+            // Handle it specially before the arithmetic
+            // mapping table.
+            if op == "->" {
+                let dom = translate_expr_located(lhs)?;
+                let codom = translate_expr_located(rhs)?;
+                let binder = OxBinder {
+                    name: "_".to_string(),
+                    ty: Some(Box::new(dom)),
+                    info: OxBinderKind::Default,
+                };
+                return Ok(OxExpr::Pi(vec![binder], Box::new(codom)));
+            }
+            // OX7 typeclass step (2026-05-27): map the
+            // surface operator to its Lean stdlib
+            // typeclass-projection identifier
+            // (`HAdd.hAdd`, `LT.lt`, …). oxilean-parse-peg
+            // preserves the operator symbol verbatim
+            // (`BinOp("+", lhs, rhs)`), unlike the legacy
+            // oxilean-parse which desugared at parse
+            // time. We do the desugar here so the
+            // identifier looks the same to oxilean-elab
+            // regardless of which parser produced the
+            // tree.
+            //
+            // The mapped identifier needs to be present
+            // in the env so elab's identifier-lookup
+            // succeeds; `leo4_env_bootstrap` registers
+            // each one as a leaf axiom
+            // (`ARITHMETIC_TC_PROJECTIONS`). Codegen
+            // pattern-matches on the `Const(name)` head
+            // at LCNF time to emit native Rust BinOps.
+            //
+            // Unknown operators (currently anything not
+            // in the table) pass through as `Var(op)`
+            // for compatibility with the legacy lowering
+            // path; they'll surface as NameNotFound if
+            // the env doesn't carry an entry.
+            let mapped_op = arith_op_to_tc_projection(op);
+            let f = Located::new(
+                OxExpr::Var(mapped_op.to_string()),
+                dummy_span(),
+            );
             let lhs = translate_expr_located(lhs)?;
             let rhs = translate_expr_located(rhs)?;
             let f_lhs = Located::new(
@@ -483,7 +595,71 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             let x = translate_expr_located(x)?;
             Ok(OxExpr::App(Box::new(f), Box::new(x)))
         }
-        _ => Err(TranslateError::Unsupported("Expr variant (lands in 13b)")),
+        // OX7 (α, 2026-05-27) — `fun BINDERS => body` and
+        // its synonyms. PEG `LamBinder::Typed { names,
+        // ty, kind }` expands to one OxBinder per name
+        // sharing the same type; `LamBinder::Untyped`
+        // becomes a no-annotation OxBinder. The body
+        // arrow's two surface forms (`=>` / `->`) are
+        // already normalised by `lean4_normalize` at
+        // OX3 — both reach us as the same `Lam` shape.
+        //
+        // Top-level `def`s emit a Lam wrapping the
+        // body whose binders mirror the declaration's
+        // params. This is the path that lit up
+        // NameNotFound on `+` — `def add (a b :
+        // UInt64) ...` PEG's the body as
+        // `Lam(binders, BinOp("+", Var("a"), Var("b")))`.
+        L4Expr::Lam(binders, body) => {
+            let mut ox_binders: Vec<OxBinder> = Vec::new();
+            for lb in binders {
+                let group = lam_binder_to_ox_binders(lb)?;
+                ox_binders.extend(group);
+            }
+            let body_loc = translate_expr_located(body)?;
+            Ok(OxExpr::Lam(ox_binders, Box::new(body_loc)))
+        }
+        // OX7 (γ, 2026-05-27): name the variant in the
+        // diagnostic so production logs say *which*
+        // shape forced the legacy-walker fallback. The
+        // catch-all also points the user at the
+        // production-code path that needs the new arm.
+        other => Err(TranslateError::Unsupported(
+            expr_variant_name(other),
+        )),
+    }
+}
+
+/// OX7 (γ, 2026-05-27) — return a stable, short
+/// identifier for an `L4Expr` variant, used in
+/// `TranslateError::Unsupported` so production logs
+/// pinpoint the exact shape that fell back to the
+/// legacy walker.
+fn expr_variant_name(e: &L4Expr) -> &'static str {
+    match e {
+        L4Expr::Ident(_) => "Ident",
+        L4Expr::Lit(_) => "Lit",
+        L4Expr::App(_, _) => "App",
+        L4Expr::BinOp(_, _, _) => "BinOp",
+        L4Expr::UnaryOp(_, _) => "UnaryOp",
+        L4Expr::Paren(_) => "Paren",
+        L4Expr::If(_, _, _) => "If",
+        L4Expr::IfLet { .. } => "IfLet",
+        L4Expr::Match(_, _) => "Match",
+        L4Expr::MatchBind { .. } => "MatchBind",
+        L4Expr::Lam(_, _) => "Lam",
+        L4Expr::Let { .. } => "Let",
+        L4Expr::Forall(_, _) => "Forall",
+        L4Expr::Exists(_, _) => "Exists",
+        L4Expr::Do(_) => "Do",
+        L4Expr::InterpStr(_) => "InterpStr",
+        L4Expr::By(_) => "By",
+        L4Expr::List(_) => "List",
+        L4Expr::AnonStruct(_) => "AnonStruct",
+        L4Expr::AnonCtor(_) => "AnonCtor",
+        L4Expr::At(_) => "At",
+        L4Expr::DotFn(_) => "DotFn",
+        L4Expr::Raw(_) => "Raw",
     }
 }
 
@@ -726,7 +902,13 @@ mod tests {
 
     #[test]
     fn binop_plus_lowers_to_nested_app() {
-        // `a + b` should become `App(App(Var("+"), a), b)`.
+        // OX7 typeclass step (2026-05-27): `a + b` now
+        // lowers to `App(App(Var("HAdd.hAdd"), a), b)`
+        // — `+` desugars to its Lean stdlib
+        // typeclass-projection identifier here at
+        // translate time, so oxilean-elab can resolve
+        // the name against `leo4_env_bootstrap`'s
+        // axiom set.
         let decls = parse_decls("def x : T := a + b").expect("must parse");
         let d = translate_decl(&decls[0]).expect("must translate").value;
         let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
@@ -737,18 +919,23 @@ mod tests {
         let OxExpr::App(f, lhs) = f_lhs.value else {
             panic!("expected inner App");
         };
-        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "+"));
+        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "HAdd.hAdd"));
         assert!(matches!(lhs.value, OxExpr::Var(ref s) if s == "a"));
     }
 
     #[test]
     fn binop_unicode_op_preserved() {
+        // OX7 (2026-05-27): `≤` maps to `LE.le` (alias
+        // of `<=`) in the typeclass-projection table.
+        // Other Unicode ops (`×`, `÷`, `∪`, `∩`, `→`,
+        // …) fall through verbatim until they're added
+        // to `arith_op_to_tc_projection`.
         let decls = parse_decls("def x : T := a ≤ b").expect("must parse");
         let d = translate_decl(&decls[0]).expect("must translate").value;
         let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
         let OxExpr::App(f_lhs, _) = val.value else { panic!("expected App") };
         let OxExpr::App(f, _) = f_lhs.value else { panic!("expected App") };
-        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "≤"));
+        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "LE.le"));
     }
 
     #[test]
