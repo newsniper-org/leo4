@@ -13,7 +13,7 @@ description = "Build-time transpiler from OxiLean Lean source → Rust crate, vi
 
 [features]
 # OX6 step 13d (2026-05-24): `leo4-parser` flipped ON by
-# default. The leo4-lean4-parse → leo4_translate path is
+# default. The oxilean-parse-peg → leo4_translate path is
 # now the primary parser for transpile_source*; oxilean-
 # parse stays as the fallback. Users wanting the legacy-
 # only behaviour can opt out via
@@ -26,7 +26,7 @@ default = ["leo4-parser"]
 # toolchain — see `crates/leo4-abi/src/floats_nightly.rs`.
 nightly-floats = ["leo4-abi/nightly-floats"]
 # OX6 step 13c — route the `transpile_source*` entry points
-# through `leo4_translate` (`leo4-lean4-parse` → translate →
+# through `leo4_translate` (`oxilean-parse-peg` → translate →
 # oxilean Decl) as the PRIMARY parser path; oxilean-parse
 # becomes the fallback when translation fails
 # (`TranslateError::Unsupported`). Default OFF in 13c so the
@@ -42,7 +42,15 @@ leo4-abi = { path = "../../crates/leo4-abi" }
 # 13a (foundation) → 13b–13c (translator coverage + wiring) →
 # 13d (default switchover). oxilean-parse stays as the
 # fallback parser path until 13d.
-leo4-lean4-parse = { path = "../leo4-lean4-parse" }
+#
+# OX7 (2026-05-26): donated upstream to cool-japan/oxilean
+# and now consumed from the fork submodule at
+# `sibling/oxilean/oxilean-parse-peg/` (branch
+# `0.1.3-leo4-ox7`). The crate is leo4-independent; its
+# parse errors come back as `oxilean_parse_peg::ParseError`
+# and we wrap into `LeanError(DECODE_ERROR)` at the
+# boundary inside `transpile_source*`.
+oxilean-parse-peg = { path = "../oxilean/oxilean-parse-peg" }
 
 # OxiLean toolchain layered up to codegen. The transpile
 # pipeline:

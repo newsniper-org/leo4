@@ -157,7 +157,7 @@
 
 #![allow(clippy::missing_errors_doc)]
 
-/// OX6 step 13 — translator from `leo4_lean4_parse::Decl`
+/// OX6 step 13 — translator from `oxilean_parse_peg::Decl`
 /// (PEG-based Lean 4 parser AST) into `oxilean_parse::Decl`
 /// (the surface AST the rest of this crate's elab / codegen
 /// pipeline already consumes). Foundation for the parser
@@ -1864,7 +1864,7 @@ pub fn decl_name(decl: &Located<Decl>) -> Option<&str> {
 /// OX6 step 13c — parse a normalised source into
 /// `Vec<Located<Decl>>` for the transpile pipeline. When
 /// the `leo4-parser` feature is enabled, tries the
-/// `leo4-lean4-parse` → `leo4_translate` path first; falls
+/// `oxilean-parse-peg` → `leo4_translate` path first; falls
 /// back to the legacy oxilean-parse walker on any failure
 /// (parser rejection or `TranslateError::Unsupported`).
 /// With the feature disabled this is the same as the
@@ -1927,10 +1927,10 @@ fn parse_decls_via_oxilean(normalised: &str) -> Result<Vec<Located<Decl>>, LeanE
 
 #[cfg(feature = "leo4-parser")]
 fn try_parse_via_leo4(normalised: &str) -> Result<Vec<Located<Decl>>, LeanError> {
-    let l4 = leo4_lean4_parse::parse_decls(normalised).map_err(|e| {
+    let l4 = oxilean_parse_peg::parse_decls(normalised).map_err(|e| {
         LeanError::new(
             leo4_abi::error::error_codes::DECODE_ERROR,
-            format!("leo4-lean4-parse: parse_decls failed: {e:?}"),
+            format!("oxilean-parse-peg: parse_decls failed: {e:?}"),
         )
     })?;
     let mut out = Vec::with_capacity(l4.len());
@@ -2049,7 +2049,7 @@ pub fn transpile_source_to_units(
     name_to_mangled: &HashMap<String, String>,
 ) -> Result<Vec<TranspileUnit>, LeanError> {
     let normalised = lean4_normalize(src);
-    // OX6 step 13c: parse via the leo4-lean4-parse →
+    // OX6 step 13c: parse via the oxilean-parse-peg →
     // translate path when the `leo4-parser` feature is on;
     // otherwise (and when translation fails) fall back to
     // the legacy oxilean-parse walker.
@@ -3579,7 +3579,7 @@ mod tests {
     #[cfg(feature = "leo4-parser")]
     #[test]
     fn leo4_parser_path_falls_back_on_unsupported() {
-        // leo4-lean4-parse accepts `notation` (DSL); the
+        // oxilean-parse-peg accepts `notation` (DSL); the
         // translator returns Unsupported permanently. The
         // outer parse_decls_for_transpile helper should
         // fall back to oxilean — which itself accepts the

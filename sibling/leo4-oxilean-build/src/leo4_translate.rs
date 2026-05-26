@@ -1,4 +1,4 @@
-//! OX6 step 13 — translator from `leo4_lean4_parse`'s
+//! OX6 step 13 — translator from `oxilean_parse_peg`'s
 //! Decl/Expr AST into `oxilean_parse`'s `Decl` /
 //! `SurfaceExpr` AST.
 //!
@@ -13,7 +13,7 @@
 //!
 //! - **13a (this commit — foundation)**: skeleton + trivial
 //!   `Definition` translation (Ident + Lit + flat
-//!   `App`-tree synthesis from `leo4_lean4_parse::Expr::App`).
+//!   `App`-tree synthesis from `oxilean_parse_peg::Expr::App`).
 //!   `BinOp`s, attributes, every other Decl variant return
 //!   `Err(TranslateError::Unsupported)` — the production
 //!   pipeline is NOT yet routed through this module.
@@ -33,10 +33,10 @@
 //! `IfLet`, `DotFn`, `Omit`, `Include`) MAY be returned as
 //! `Err(TranslateError::Unsupported)` permanently —
 //! consumers needing those surfaces operate on the
-//! leo4-lean4-parse AST directly, not via the translation
+//! oxilean-parse-peg AST directly, not via the translation
 //! shim.
 
-use leo4_lean4_parse::{
+use oxilean_parse_peg::{
     Attribute as L4Attr, BinderGroup as L4BinderGroup, BinderKind as L4BinderKind,
     Ctor as L4Ctor, Decl as L4Decl, DeclKind as L4Kind, Expr as L4Expr,
     InstanceBody as L4InstanceBody, Literal as L4Lit, StructField as L4Field,
@@ -72,10 +72,10 @@ impl std::fmt::Display for TranslateError {
 
 impl std::error::Error for TranslateError {}
 
-/// Translate a `leo4_lean4_parse::Decl` into a
+/// Translate a `oxilean_parse_peg::Decl` into a
 /// `Located<oxilean_parse::Decl>` ready for the existing
 /// elab pipeline. Span info is `dummy_span()` —
-/// leo4-lean4-parse doesn't carry source spans in its AST
+/// oxilean-parse-peg doesn't carry source spans in its AST
 /// today; recovering them is future work tracked under
 /// the broader "diagnostic quality" non-RC item.
 pub fn translate_decl(d: &L4Decl) -> Result<Located<OxDecl>, TranslateError> {
@@ -442,7 +442,7 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
         L4Expr::Lit(L4Lit::Nat(n)) => Ok(OxExpr::Lit(OxLit::Nat(*n))),
         L4Expr::Lit(L4Lit::Str(s)) => Ok(OxExpr::Lit(OxLit::String(s.clone()))),
         L4Expr::Lit(L4Lit::Float(s)) => {
-            // leo4-lean4-parse holds floats as the raw source
+            // oxilean-parse-peg holds floats as the raw source
             // text (NaN-comparable preserve); oxilean takes
             // an f64. A round-trip failure here is a
             // diagnostic-quality issue, not a translation
@@ -490,13 +490,13 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use leo4_lean4_parse::parse_decls;
+    use oxilean_parse_peg::parse_decls;
 
     /// Helper: parse one decl and translate it. Returns
     /// the inner `OxDecl` (panics on parse/translate err so
     /// failure shows the diagnostic).
     fn parse_and_translate(src: &str) -> OxDecl {
-        let decls = parse_decls(src).expect("leo4-lean4-parse must accept");
+        let decls = parse_decls(src).expect("oxilean-parse-peg must accept");
         assert_eq!(decls.len(), 1, "expected exactly one decl in `{src}`");
         translate_decl(&decls[0])
             .unwrap_or_else(|e| panic!("translate must succeed for `{src}`: {e}"))
