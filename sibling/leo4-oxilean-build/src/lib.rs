@@ -1525,24 +1525,44 @@ pub fn transpile_kernel_decl(
     params: &[(Name, Expr)],
     body: &Expr,
 ) -> Result<String, LeanError> {
+    transpile_kernel_decl_with_ret_type(name, params, None, body)
+}
+
+/// OX7 (#1, 2026-05-26) — variant of
+/// [`transpile_kernel_decl`] that lets the caller pass
+/// the declared return-type `Expr` (typically the
+/// rightmost codomain of the declaration's `Pi`-typed
+/// signature, available via [`unfold_decl`]). When
+/// supplied, the emitted Rust function signature reflects
+/// the declared return type instead of falling back to
+/// `Box<dyn std::any::Any>` for `TailCall`-terminated
+/// bodies.
+///
+/// # Errors
+/// Same as [`transpile_kernel_decl`].
+pub fn transpile_kernel_decl_with_ret_type(
+    name: &Name,
+    params: &[(Name, Expr)],
+    ret_type: Option<&Expr>,
+    body: &Expr,
+) -> Result<String, LeanError> {
     let config = ToLcnfConfig::default();
-    // OX7 (1a, 2026-05-26): use the upstream-fork-side
-    // entry that returns the `LcnfVarId → kernel-name`
-    // map alongside the decl, then feed the map to the
-    // backend so Const refs emit as their actual
-    // mangled names (`Nat_add` instead of `_x2`).
+    // OX7 (1a + #1, 2026-05-26): `decl_to_lcnf_full`
+    // returns both the kernel-name map (for Const
+    // identifier emission) and accepts an optional
+    // declared `ret_type_expr` (for honouring the
+    // declaration's signature instead of body
+    // inference).
     let (lcnf_decl, const_names): (
         LcnfFunDecl,
         std::collections::HashMap<oxilean_codegen::lcnf::LcnfVarId, String>,
-    ) = oxilean_codegen::to_lcnf::decl_to_lcnf_with_const_names(
-        name, params, body, &config,
+    ) = oxilean_codegen::to_lcnf::decl_to_lcnf_full(
+        name, params, ret_type, body, &config,
     )
     .map_err(|e| {
         LeanError::new(
             leo4_abi::error::error_codes::ENCODE_ERROR,
-            format!(
-                "leo4-oxilean-build: decl_to_lcnf_with_const_names failed: {e:?}"
-            ),
+            format!("leo4-oxilean-build: decl_to_lcnf_full failed: {e:?}"),
         )
     })?;
     let mut backend = RustTargetBackend::new();
@@ -1556,15 +1576,20 @@ pub fn transpile_kernel_decl(
     Ok(rust_fn.emit())
 }
 
-/// Unfold a Pi-typed declaration into a `(params, body)`
-/// pair the way `decl_to_lcnf` expects.
+/// Unfold a Pi-typed declaration into a
+/// `(params, body, ret_type)` triple the way
+/// `decl_to_lcnf_full` expects.
 ///
 /// A `def f (x : A) (y : B) : C := body` elaborates into
 /// `ty = Π (x : A), Π (y : B), C` and
-/// `val = λ (x : A), λ (y : B), body`. The pairs zip
-/// together as `params = [(x, A), (y, B)]` + the unbound
-/// inner `body`.
-fn unfold_decl(ty: &Expr, val: &Expr) -> (Vec<(Name, Expr)>, Expr) {
+/// `val = λ (x : A), λ (y : B), body`. The Pi chain
+/// unfolds to `params = [(x, A), (y, B)]`, the inner
+/// `body`, and the residual `ret_type = C` (the
+/// rightmost codomain). OX7 (#1) added the `ret_type`
+/// return so callers can pass it to
+/// `decl_to_lcnf_full` for declared-type-driven
+/// `LcnfFunDecl.ret_type`.
+fn unfold_decl(ty: &Expr, val: &Expr) -> (Vec<(Name, Expr)>, Expr, Expr) {
     let mut params = Vec::new();
     let mut cur_ty = ty;
     let mut cur_val = val;
@@ -1577,7 +1602,7 @@ fn unfold_decl(ty: &Expr, val: &Expr) -> (Vec<(Name, Expr)>, Expr) {
         cur_ty = rest_ty;
         cur_val = rest_val;
     }
-    (params, cur_val.clone())
+    (params, cur_val.clone(), cur_ty.clone())
 }
 
 /// Full pipeline: Lean source string → Rust source string.
@@ -1642,11 +1667,14 @@ pub fn transpile_source(env: &Environment, src: &str) -> Result<String, LeanErro
         }
     };
 
-    // 5. Unfold Pi / Lam into (params, body).
-    let (params, body) = unfold_decl(&ty, &val);
+    // 5. Unfold Pi / Lam into (params, body, ret_type).
+    let (params, body, ret_type) = unfold_decl(&ty, &val);
 
-    // 6. Drive the kernel-level helper.
-    transpile_kernel_decl(&name, &params, &body)
+    // 6. Drive the kernel-level helper, forwarding the
+    //    declared return type so the emitted Rust
+    //    signature honours `def f … : C := …`'s `C`
+    //    (OX7 #1, 2026-05-26).
+    transpile_kernel_decl_with_ret_type(&name, &params, Some(&ret_type), &body)
 }
 
 /// Sanity probe: does the backend's type mapper actually
@@ -2003,8 +2031,9 @@ pub fn transpile_source_if_exported(
         }
     };
 
-    let (params, body) = unfold_decl(&ty, &val);
-    transpile_kernel_decl(&name, &params, &body).map(Some)
+    let (params, body, ret_type) = unfold_decl(&ty, &val);
+    transpile_kernel_decl_with_ret_type(&name, &params, Some(&ret_type), &body)
+        .map(Some)
 }
 
 /// Superset of `transpile_source_if_exported` that also runs
@@ -2243,21 +2272,22 @@ fn process_parsed_decl(
         }
     };
 
-    let (params, body) = unfold_decl(&ty, &val);
+    let (params, body, ret_type) = unfold_decl(&ty, &val);
 
     let config = ToLcnfConfig::default();
-    let (lcnf_decl, const_names) =
-        oxilean_codegen::to_lcnf::decl_to_lcnf_with_const_names(
-            &name, &params, &body, &config,
+    let (lcnf_decl, const_names) = oxilean_codegen::to_lcnf::decl_to_lcnf_full(
+        &name,
+        &params,
+        Some(&ret_type),
+        &body,
+        &config,
+    )
+    .map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            format!("leo4-oxilean-build: decl_to_lcnf_full failed: {e:?}"),
         )
-        .map_err(|e| {
-            LeanError::new(
-                leo4_abi::error::error_codes::ENCODE_ERROR,
-                format!(
-                    "leo4-oxilean-build: decl_to_lcnf_with_const_names failed: {e:?}"
-                ),
-            )
-        })?;
+    })?;
     let mut backend = RustTargetBackend::new();
     backend.set_const_names(const_names);
     let rust_fn = backend.compile_decl(&lcnf_decl).map_err(|e| {

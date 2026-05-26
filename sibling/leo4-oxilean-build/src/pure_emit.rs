@@ -44,9 +44,7 @@ use oxilean_kernel::env::Environment;
 use oxilean_parse::Decl as OxDecl;
 use std::path::Path;
 
-use crate::{
-    parse_decls_for_transpile, unfold_decl, transpile_kernel_decl,
-};
+use crate::{parse_decls_for_transpile, unfold_decl};
 use oxilean_elab::elab_decl::{elaborate_decl, PendingDecl};
 
 /// One transpiled native function from a Lean source.
@@ -178,8 +176,19 @@ pub fn transpile_source_to_pure_fns(
                     continue;
                 }
             };
-            let (params, body) = unfold_decl(&ty, &val);
-            let source = transpile_kernel_decl(&pname, &params, &body)?;
+            // OX7 (#1, 2026-05-26): forward the declared
+            // return type from `unfold_decl` so the
+            // emitted Rust fn signature honours the
+            // declaration's signature instead of falling
+            // back to `Box<dyn Any>` for
+            // TailCall-terminated bodies.
+            let (params, body, ret_type) = unfold_decl(&ty, &val);
+            let source = crate::transpile_kernel_decl_with_ret_type(
+                &pname,
+                &params,
+                Some(&ret_type),
+                &body,
+            )?;
             out.push(PureFn {
                 name: pname.to_string(),
                 source,
