@@ -237,7 +237,13 @@ fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
         // rust-transpile: leo4-oxilean-build (OX5-oxi
         // env bootstrap + OX6 PEG parser + pure_emit
         // option-A native Rust crate, 2026-05-25). Zero
-        // lake/lean overhead.
+        // lake/lean overhead. Marked experimental in v1.0
+        // RC since OX7 (2026-05-26) found OxiLean 0.1.2
+        // codegen is broken at multiple layers (BVar/Const
+        // ID tracking, return type inference, UInt
+        // mapping, HAdd typeclasses). Wire-up stays so
+        // upstream fixes light up immediately; runtime
+        // warning is emitted by run_forward_rust_transpile.
         ImplKind::RustTranspile => Ok(()),
         ImplKind::RustNative => Err(
             "--impl rust-native is currently deferred. The integration \
@@ -912,6 +918,16 @@ fn run_forward_rust_transpile(
     leo4_root: &Path,
     args: &[String],
 ) -> Result<(), String> {
+    eprintln!(
+        "leo4 run: warning — `--impl rust-transpile` is experimental in v1.0 RC.\n\
+         \x20 OxiLean 0.1.2 codegen is broken at multiple layers (BVar/Const ID\n\
+         \x20 tracking, return-type inference, UInt mapping, HAdd typeclass\n\
+         \x20 unfolding). Tracked as OX7 against\n\
+         \x20 github.com/cool-japan/oxilean. The pipeline will run end-to-end\n\
+         \x20 once upstream lands the fixes; until then expect compile/link\n\
+         \x20 errors on non-trivial bodies. Use `--impl mslean4` for the\n\
+         \x20 path that ships today."
+    );
     let oxi_root = leo4_root.join("sibling").join("leo4-oxilean-build");
     if !oxi_root.exists() {
         return Err(format!(
@@ -993,7 +1009,10 @@ fn run_forward_rust_transpile(
 /// regular file with a `.lean` extension. Skips
 /// `.lake/`, `lake-packages/`, `build/`, and any
 /// hidden directories so we don't try to transpile
-/// lake's compiler intermediates.
+/// lake's compiler intermediates. Also skips
+/// `lakefile.lean` — that's a Lake DSL file, not a
+/// Lean source — so the scaffold's stock lakefile
+/// doesn't end up fed to the `OxiLean` transpiler.
 fn collect_lean_sources(lean_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
     let mut stack = vec![lean_dir.to_path_buf()];
@@ -1016,6 +1035,7 @@ fn collect_lean_sources(lean_dir: &Path) -> Result<Vec<PathBuf>, String> {
                 stack.push(path);
             } else if ft.is_file()
                 && path.extension().is_some_and(|e| e == "lean")
+                && name_s != "lakefile.lean"
             {
                 out.push(path);
             }
@@ -2239,6 +2259,24 @@ kind = "rust-transpile"
         // Sorted by full path → `One.lean` < `sub/Two.lean`.
         assert!(found[0].ends_with("One.lean"));
         assert!(found[1].ends_with("Two.lean"));
+    }
+
+    #[test]
+    fn collect_lean_sources_skips_lakefile_lean() {
+        // `lakefile.lean` is a Lake DSL file, not a
+        // Lean source. The transpiler must not try to
+        // elaborate it — bug T7 surfaced when the
+        // forward scaffold's stock lakefile got fed
+        // into leo4-oxilean-build and died at the
+        // `import Lake` line.
+        let dir = tempdir();
+        let lean = dir.join("lean");
+        fs::create_dir_all(&lean).unwrap();
+        fs::write(lean.join("lakefile.lean"), "import Lake\nopen Lake DSL\n").unwrap();
+        fs::write(lean.join("Sample.lean"), "def add (a b : UInt64) : UInt64 := a\n").unwrap();
+        let found = collect_lean_sources(&lean).expect("walk must succeed");
+        assert_eq!(found.len(), 1, "got: {found:?}");
+        assert!(found[0].ends_with("Sample.lean"));
     }
 
     #[test]

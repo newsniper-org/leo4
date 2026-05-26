@@ -341,10 +341,28 @@ implemented.
 
 ### T7 — `leo4 run` `--impl rust-transpile`
 
+**STATUS (2026-05-26): EXPERIMENTAL — blocked on OX7.**
+
+T7 spike on 2026-05-26 surfaced that OxiLean 0.1.2 codegen
+is broken at multiple layers — body BVar/Const ID tracking
+emits undefined `_xN` identifiers; return-type inference
+defaults to `Box<dyn std::any::Any>`; UInt8..128 / Int8..128
+have no native Rust type mapping; `HAdd`/`HSub`/... typeclasses
++ instances are absent from `init_builtin_env`. Filed as OX7
+against [github.com/cool-japan/oxilean](https://github.com/cool-japan/oxilean),
+γ-1' track: upstream codegen fix + leo4-lean4-parse PEG
+donation discussion.
+
+The Phase 3 CLI wire-up stays in place — `leo4 run --impl
+rust-transpile` already emits a runtime warning and will run
+the full pipeline once OxiLean ships fixes. Until then:
+T7 only validates that the **CLI invokes leo4-oxilean-build,
+the manifest format works, the user-Cargo.toml dep check
+errors out cleanly, and the emitted crate is written to
+`transpiled/`**. The emitted crate is not expected to compile
+for non-trivial bodies.
+
 Pre-req: run from MSYS2 ucrt64 (same shell choice as T3).
-The CLI now drives `leo4-oxilean-build` end-to-end
-(Phase 3 wire-up, 2026-05-25), so the user just edits
-`leo4.toml` and re-runs.
 
 ```bash
 cd /c/tmp/scaffold-fwd
@@ -368,22 +386,27 @@ EOF
 leo4 run --impl rust-transpile
 ```
 
-**Expect**: pipeline is
+**Expect** (CLI validation only — see STATUS note above):
 
 1. `cargo build --release` of `leo4-oxilean-build`
    (only on first run; binary cached afterwards).
-2. `leo4-oxilean-build --manifest …` → `transpiled/`
-   crate with `pub fn add(u64, u64) -> u64` etc.
-3. `cargo build` of the user crate (pulls in
-   `transpiled/` as a path dep).
-4. `cargo run` printing the result.
+2. `leo4-oxilean-build --manifest …` writes
+   `transpiled/Cargo.toml` + `transpiled/src/lib.rs`
+   to disk. The lib.rs body is currently broken
+   (`_x4(_x5, _x6)` etc.) per OX7 — that's expected
+   until upstream lands.
+3. `cargo build` fails with Rust compile errors
+   referring to undefined `_xN` identifiers — that's
+   the expected OX7 symptom. Treat as PASS for T7's
+   CLI-validation purpose.
+4. Once OxiLean upstream lands the codegen fixes:
+   the same T7 command will produce a working
+   binary. No leo4 code changes will be needed —
+   only the OxiLean dep bump.
 
 No lake, no shim, no Lean toolchain involved — so
 none of the OS-PORTABILITY.md §3 mslean4 issues
-trigger. T4's standalone test already predicts the
-transpile step works; T7 confirms the full
-end-to-end including the user-Cargo.toml dep
-detection path.
+trigger.
 
 ### T8 — Examples (`examples/01-hello`, etc.)
 Walk through the in-tree examples to surface user-facing
