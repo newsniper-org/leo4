@@ -493,8 +493,6 @@ dependencies = [
 [[package]]
 name = "oxilean-codegen"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39e14a3ab7231aa0c509e6350214aac76fd3c77dcf0e7181b31c074f662f35d4"
 dependencies = [
  "oxilean-kernel",
  "tiny-keccak",
@@ -503,8 +501,6 @@ dependencies = [
 [[package]]
 name = "oxilean-elab"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bffc15eaa19cc9a4466076e3c9cd738c59fe7e90b6aa9a06b9d788b9e40da8f7"
 dependencies = [
  "lazy_static",
  "oxilean-kernel",
@@ -515,14 +511,10 @@ dependencies = [
 [[package]]
 name = "oxilean-kernel"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a20763e6088a64a90b96310ae1bbb6672baabbd7c8205f19edeea2575fb10193"
 
 [[package]]
 name = "oxilean-meta"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7b7b3e817d2ecb4c2e043affc8cf4096d3f5877d8eeafe3bcdd88ec1661017e"
 dependencies = [
  "oxilean-kernel",
  "oxiz-solver",
@@ -531,8 +523,6 @@ dependencies = [
 [[package]]
 name = "oxilean-parse"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25300831335df64a6bd669d86602a77ba828367b64cd803150b7327cea7622d0"
 dependencies = [
  "oxilean-kernel",
 ]

@@ -184,7 +184,7 @@ pub mod pure_emit;
 use leo4_abi::LeanError;
 use oxilean_codegen::lcnf::LcnfFunDecl;
 use oxilean_codegen::rust_target_backend::{RustItem, RustTargetBackend};
-use oxilean_codegen::to_lcnf::{decl_to_lcnf, ToLcnfConfig};
+use oxilean_codegen::to_lcnf::ToLcnfConfig;
 use oxilean_elab::attribute::{
     AttrAction, AttrEntry, AttrHandler, AttributeManager, DeriveHandler,
     DeriveHandlerRegistry,
@@ -1526,14 +1526,27 @@ pub fn transpile_kernel_decl(
     body: &Expr,
 ) -> Result<String, LeanError> {
     let config = ToLcnfConfig::default();
-    let lcnf_decl: LcnfFunDecl =
-        decl_to_lcnf(name, params, body, &config).map_err(|e| {
-            LeanError::new(
-                leo4_abi::error::error_codes::ENCODE_ERROR,
-                format!("leo4-oxilean-build: decl_to_lcnf failed: {e:?}"),
-            )
-        })?;
+    // OX7 (1a, 2026-05-26): use the upstream-fork-side
+    // entry that returns the `LcnfVarId → kernel-name`
+    // map alongside the decl, then feed the map to the
+    // backend so Const refs emit as their actual
+    // mangled names (`Nat_add` instead of `_x2`).
+    let (lcnf_decl, const_names): (
+        LcnfFunDecl,
+        std::collections::HashMap<oxilean_codegen::lcnf::LcnfVarId, String>,
+    ) = oxilean_codegen::to_lcnf::decl_to_lcnf_with_const_names(
+        name, params, body, &config,
+    )
+    .map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::ENCODE_ERROR,
+            format!(
+                "leo4-oxilean-build: decl_to_lcnf_with_const_names failed: {e:?}"
+            ),
+        )
+    })?;
     let mut backend = RustTargetBackend::new();
+    backend.set_const_names(const_names);
     let rust_fn = backend.compile_decl(&lcnf_decl).map_err(|e| {
         LeanError::new(
             leo4_abi::error::error_codes::ENCODE_ERROR,
@@ -2233,14 +2246,20 @@ fn process_parsed_decl(
     let (params, body) = unfold_decl(&ty, &val);
 
     let config = ToLcnfConfig::default();
-    let lcnf_decl: LcnfFunDecl =
-        decl_to_lcnf(&name, &params, &body, &config).map_err(|e| {
+    let (lcnf_decl, const_names) =
+        oxilean_codegen::to_lcnf::decl_to_lcnf_with_const_names(
+            &name, &params, &body, &config,
+        )
+        .map_err(|e| {
             LeanError::new(
                 leo4_abi::error::error_codes::ENCODE_ERROR,
-                format!("leo4-oxilean-build: decl_to_lcnf failed: {e:?}"),
+                format!(
+                    "leo4-oxilean-build: decl_to_lcnf_with_const_names failed: {e:?}"
+                ),
             )
         })?;
     let mut backend = RustTargetBackend::new();
+    backend.set_const_names(const_names);
     let rust_fn = backend.compile_decl(&lcnf_decl).map_err(|e| {
         LeanError::new(
             leo4_abi::error::error_codes::ENCODE_ERROR,
@@ -2614,14 +2633,20 @@ pub fn transpile_kernel_decl_with_wrapper(
     body: &Expr,
 ) -> Result<(String, String), LeanError> {
     let config = ToLcnfConfig::default();
-    let lcnf_decl: LcnfFunDecl =
-        decl_to_lcnf(name, params, body, &config).map_err(|e| {
+    let (lcnf_decl, const_names) =
+        oxilean_codegen::to_lcnf::decl_to_lcnf_with_const_names(
+            name, params, body, &config,
+        )
+        .map_err(|e| {
             LeanError::new(
                 leo4_abi::error::error_codes::ENCODE_ERROR,
-                format!("leo4-oxilean-build: decl_to_lcnf failed: {e:?}"),
+                format!(
+                    "leo4-oxilean-build: decl_to_lcnf_with_const_names failed: {e:?}"
+                ),
             )
         })?;
     let mut backend = RustTargetBackend::new();
+    backend.set_const_names(const_names);
     let rust_fn = backend.compile_decl(&lcnf_decl).map_err(|e| {
         LeanError::new(
             leo4_abi::error::error_codes::ENCODE_ERROR,

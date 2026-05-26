@@ -1,5 +1,4 @@
 # Standalone (NOT a member of the main leo4 workspace).
-[workspace]
 
 [package]
 name        = "leo4-oxilean-build"
@@ -60,10 +59,32 @@ oxilean-parse-peg = { path = "../oxilean/oxilean-parse-peg" }
 #                    to recognise @[leo4_export]s)
 #   oxilean-codegen::rust_target_backend
 #                  → LCNF → RustFn AST → Rust source text
+#
+# OX7 (2026-05-26): consumed from the fork submodule
+# (`sibling/oxilean/`, branch `0.1.3-leo4-ox7`) so the
+# γ-1' codegen fixes (Const name preservation in (1a),
+# return-type inference and UInt mapping coming next)
+# light up immediately. Crates.io still ships 0.1.2;
+# the fork is unpublished. Bump the submodule SHA when
+# pulling new upstream codegen work.
+#
+# Spec'd against crates.io versions here so cargo
+# treats them as registry deps; `[patch.crates-io]`
+# below redirects to the fork submodule. This avoids
+# the cargo cross-workspace path-dep inheritance bug
+# where fork-crate manifests using
+# `version.workspace = true` etc. fail to resolve
+# inheritance from the invoking workspace.
 oxilean-kernel  = "=0.1.2"
 oxilean-parse   = "=0.1.2"
 oxilean-elab    = "=0.1.2"
 oxilean-codegen = "=0.1.2"
+
+[patch.crates-io]
+oxilean-kernel  = { path = "../oxilean/crates/oxilean-kernel" }
+oxilean-parse   = { path = "../oxilean/crates/oxilean-parse" }
+oxilean-elab    = { path = "../oxilean/crates/oxilean-elab" }
+oxilean-codegen = { path = "../oxilean/crates/oxilean-codegen" }
 # `oxilean-runtime` deliberately omitted — the transpile path
 # bypasses OxiLean's evaluator entirely. The generated crate
 # has zero OxiLean runtime dep at consumer build time.

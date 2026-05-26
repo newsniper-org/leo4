@@ -20,6 +20,24 @@ members = [
     "examples/04-mutual-ast",
     "examples/05-rust-export",
 ]
+# OX7 (2026-05-26): exclude sibling projects so cargo
+# doesn't fold them into the main leo4 workspace. The
+# OxiLean fork submodule at `sibling/oxilean/` carries
+# its own `[workspace]` whose crates inherit from a
+# `[workspace.package]` table the leo4 root does not
+# provide; without this exclude, cargo's path-dep
+# inheritance resolver attaches the fork crates to
+# leo4's workspace and fails with
+# `workspace.package.homepage was not defined`. Each
+# sibling already declares its own `[workspace]` block,
+# so excluding them here just makes that explicit.
+exclude = [
+    "sibling/oxilean",
+    "sibling/leo4-oxilean-build",
+    "sibling/leo4-oxilean",
+    "sibling/leo4-wasip3",
+    "sibling/mathlib-bridge-test",
+]
 
 [workspace.package]
 version = "0.1.0"
