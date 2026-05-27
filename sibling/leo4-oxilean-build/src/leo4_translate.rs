@@ -610,9 +610,67 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             Ok(OxExpr::App(Box::new(f_lhs), Box::new(rhs)))
         }
         L4Expr::UnaryOp(op, x) => {
-            let f = Located::new(OxExpr::Var(op.clone()), dummy_span());
+            // OX7 (2026-05-27): same typeclass-projection
+            // desugar as BinOp — `-` (prefix) → `Neg.neg`,
+            // `!` → `Not.not`. Unknown ops pass through.
+            let mapped_op: &str = match op.as_str() {
+                "-" => "Neg.neg",
+                "!" => "Not.not",
+                other => other,
+            };
+            let f = Located::new(OxExpr::Var(mapped_op.to_string()), dummy_span());
             let x = translate_expr_located(x)?;
             Ok(OxExpr::App(Box::new(f), Box::new(x)))
+        }
+        // OX7 (2026-05-27) — coverage expansion. Each
+        // arm here landed once a coverage spike showed
+        // a real fixture falling back to the legacy
+        // walker. Pre-2026-05-27 these all hit the
+        // catch-all `Unsupported` branch.
+        L4Expr::If(cond, then_branch, else_branch) => {
+            let cond = translate_expr_located(cond)?;
+            let then_b = translate_expr_located(then_branch)?;
+            let else_b = translate_expr_located(else_branch)?;
+            Ok(OxExpr::If(Box::new(cond), Box::new(then_b), Box::new(else_b)))
+        }
+        L4Expr::Let { name, ty, value, body } => {
+            // PEG carries an optional type annotation; the
+            // surface AST's `Let` slot also takes `Option`.
+            let ty_loc = match ty {
+                Some(t) => Some(Box::new(translate_expr_located(t)?)),
+                None => None,
+            };
+            let value = translate_expr_located(value)?;
+            let body = translate_expr_located(body)?;
+            Ok(OxExpr::Let(
+                name.clone(),
+                ty_loc,
+                Box::new(value),
+                Box::new(body),
+            ))
+        }
+        L4Expr::List(items) => {
+            // Lean 4's `[a, b, c]` literal — surface AST
+            // has a matching `ListLit` variant; downstream
+            // elab desugars to the `List.cons … List.nil`
+            // tree.
+            let mut out = Vec::with_capacity(items.len());
+            for it in items {
+                out.push(translate_expr_located(it)?);
+            }
+            Ok(OxExpr::ListLit(out))
+        }
+        L4Expr::At(inner) => {
+            // `@f x y` — explicit-args marker. The surface
+            // AST has no dedicated variant for this; elab
+            // distinguishes implicit vs explicit at the
+            // applied-arg level, not at the head. So we
+            // pass the inner expression through
+            // transparently — semantics-preserving in the
+            // rust-transpile path which doesn't synthesise
+            // implicit args anyway (codegen sees only the
+            // explicit App-tree).
+            translate_expr(inner)
         }
         // OX7 (α, 2026-05-27) — `fun BINDERS => body` and
         // its synonyms. PEG `LamBinder::Typed { names,
@@ -959,11 +1017,17 @@ mod tests {
 
     #[test]
     fn unary_op_lowers_to_app() {
+        // OX7 typeclass step (2026-05-27): UnaryOp `-`
+        // now desugars to `Neg.neg` (and `!` to
+        // `Not.not`) before becoming an App. Matches
+        // the BinOp arm's `arith_op_to_tc_projection`
+        // treatment so the codegen typeclass-fold path
+        // can later recognise the projection identifier.
         let decls = parse_decls("def x : T := -y").expect("must parse");
         let d = translate_decl(&decls[0]).expect("must translate").value;
         let OxDecl::Definition { val, .. } = d else { panic!("expected Definition") };
         let OxExpr::App(f, x) = val.value else { panic!("expected App") };
-        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "-"));
+        assert!(matches!(f.value, OxExpr::Var(ref s) if s == "Neg.neg"));
         assert!(matches!(x.value, OxExpr::Var(ref s) if s == "y"));
     }
 

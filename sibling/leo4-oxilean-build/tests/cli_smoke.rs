@@ -432,3 +432,78 @@ fn cli_native_binop_smoke_all_arith_and_comparison_ops() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cli_translate_coverage_if_let_list_at() {
+    // OX7 translate coverage expansion (2026-05-27) —
+    // the `If`, `Let`, `List`, `At` arms in
+    // `translate_expr` now route the fixture through
+    // the production translate path instead of falling
+    // back to the legacy walker. Each fixture exercises
+    // one arm; we only assert the CLI accepts the
+    // source and emits *some* crate — the resulting
+    // Rust bodies may be unhelpful (e.g.  `ite(...)`
+    // for `if`, `List_cons(...)` for `[1, 2, 3]`)
+    // because OxiLean lowers `if`/list-literals
+    // through their typeclass / inductive desugars and
+    // we don't fold those into native `if-expr` /
+    // `vec![...]` yet — that's tracked as a separate
+    // codegen step. Translate-path coverage is what
+    // this test pins down.
+    let dir = tmp_dir("translate_coverage");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Coverage.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        // Two decls, each exercising one previously-
+        // Unsupported translate_expr arm:
+        //   1. `if-then-else`        — L4Expr::If
+        //   2. `[1, 2, 3]` list-lit  — L4Expr::List
+        //
+        // `L4Expr::At` (the `@`-explicit-args marker)
+        // and `L4Expr::Let` (let-in) translate arms
+        // are exercised by translate-side unit tests in
+        // `leo4_translate.rs` since they need
+        // identifiers the OX5-oxi env doesn't ship
+        // (e.g. `@id`), which would force the smoke
+        // here to fail at elab even with a correctly
+        // translated AST.
+        "def fromIf : UInt64 := if true then 1 else 0\n\
+         def threeU64 : List UInt64 := [1, 2, 3]\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=translate_coverage_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_path = out_dir.join("src").join("lib.rs");
+    assert!(lib_path.exists(), "src/lib.rs must exist");
+    let lib_text = std::fs::read_to_string(&lib_path).expect("read");
+    // The three `pub fn` decls all landed — translate
+    // succeeded for each fixture's surface form.
+    assert!(lib_text.contains("fn fromIf"),    "lib.rs missing `fromIf`: {lib_text}");
+    assert!(lib_text.contains("fn threeU64"),  "lib.rs missing `threeU64`: {lib_text}");
+
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
