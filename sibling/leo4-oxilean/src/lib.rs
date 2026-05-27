@@ -95,9 +95,11 @@ use std::sync::{Arc, Mutex};
 use leo4_abi::{LeanError, LeanProc, LeanProcInvoker};
 
 use oxilean_kernel::ffi::{
-    CallingConvention, ExternDecl, ExternRegistry, FfiSafety, FfiSignature, FfiType,
+    CallbackRegistry, CallingConvention, ExternCallError, ExternCallback, ExternDecl,
+    ExternRegistry, FfiSafety, FfiSignature, FfiType,
 };
 use oxilean_kernel::{Expr, Name};
+use oxilean_runtime::extern_resolver::{ExternResolver, SharedExternResolver};
 
 /// Convention: every `#[leo4::export]` becomes an
 /// `ExternDecl` under this `lib_name`. Mirrors the
@@ -141,13 +143,23 @@ fn mangled_to_oxi_name(mangled: &str) -> Name {
 #[derive(Clone)]
 pub struct OxiLeanInvoker {
     registry: Arc<Mutex<ExternRegistry>>,
+    /// OX8.3c (2026-05-28): the fork-side
+    /// `CallbackRegistry` storing per-symbol Rust
+    /// closures. `OxiLeanInvoker::invoke` (+ via
+    /// `ExternResolver`, the runtime's
+    /// `dispatch_extern_const` helper) reads from here
+    /// after the metadata-side `ExternRegistry` lookup
+    /// confirms the symbol is registered.
+    callbacks: Arc<Mutex<CallbackRegistry>>,
 }
 
 impl std::fmt::Debug for OxiLeanInvoker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let count = self.registry.lock().map(|r| r.count()).unwrap_or(0);
+        let cb_count = self.callbacks.lock().map(|c| c.len()).unwrap_or(0);
         f.debug_struct("OxiLeanInvoker")
             .field("registered_externs", &count)
+            .field("registered_callbacks", &cb_count)
             .finish()
     }
 }
@@ -165,6 +177,7 @@ impl OxiLeanInvoker {
     pub fn new() -> Self {
         Self {
             registry: Arc::new(Mutex::new(ExternRegistry::new())),
+            callbacks: Arc::new(Mutex::new(CallbackRegistry::new())),
         }
     }
 
@@ -173,7 +186,68 @@ impl OxiLeanInvoker {
     /// running OxiLean and just needs leo4 exports added.
     #[must_use]
     pub fn with_registry(registry: Arc<Mutex<ExternRegistry>>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            callbacks: Arc::new(Mutex::new(CallbackRegistry::new())),
+        }
+    }
+
+    /// OX8.3c (2026-05-28) — register a Rust closure as
+    /// the runtime callback for a previously-registered
+    /// `#[leo4::export]` mangled body. Pair with
+    /// [`Self::register_export`]: the former records
+    /// metadata for the OxiLean evaluator to find the
+    /// symbol; this one supplies the actual Rust
+    /// function the evaluator calls (via
+    /// `dispatch_extern_const`).
+    ///
+    /// The closure receives canonical-ABI byte buffers
+    /// (encoded args in, encoded return out) — same
+    /// shape as the forward path's `leo4-rust-bridge`
+    /// dispatcher uses.
+    ///
+    /// # Errors
+    /// `LeanError` if the callback registry mutex is
+    /// poisoned. (Successful registration cannot fail
+    /// today; future "duplicate registration" rejection
+    /// can.)
+    pub fn register_export_callback<F>(
+        &self,
+        mangled: &str,
+        cb: F,
+    ) -> Result<(), LeanError>
+    where
+        F: Fn(&[u8]) -> Result<Vec<u8>, ExternCallError> + Send + Sync + 'static,
+    {
+        let boxed: ExternCallback = Box::new(cb);
+        self.callbacks
+            .lock()
+            .map_err(|e| {
+                LeanError::new(
+                    leo4_abi::error::error_codes::OOM,
+                    format!("leo4-oxilean: callback registry mutex poisoned: {e}"),
+                )
+            })?
+            .register(LEO4_RUST_BRIDGE_LIB_NAME, mangled, boxed);
+        Ok(())
+    }
+
+    /// Diagnostic: number of registered callbacks. Pairs
+    /// with [`Self::registered_count`] which counts
+    /// metadata entries.
+    #[must_use]
+    pub fn registered_callbacks(&self) -> usize {
+        self.callbacks.lock().map(|c| c.len()).unwrap_or(0)
+    }
+
+    /// Wrap this invoker as a shared `ExternResolver` for
+    /// installation into an OxiLean evaluator's resolver
+    /// slot. Use this when a host process drives an
+    /// OxiLean evaluator that needs to dispatch
+    /// `@[extern]` decls into leo4-registered callbacks.
+    #[must_use]
+    pub fn as_shared_resolver(self: Arc<Self>) -> SharedExternResolver {
+        self
     }
 
     /// Register a `#[leo4::export]` mangled body with
@@ -248,39 +322,101 @@ impl OxiLeanInvoker {
 }
 
 impl LeanProcInvoker for OxiLeanInvoker {
-    fn invoke(&self, mangled: &str, _args: &[u8]) -> Result<Vec<u8>, LeanError> {
-        // ExternRegistry::lookup gives us back the ExternDecl
-        // (metadata), confirming the export is registered.
-        // But OxiLean v0.1.2 doesn't expose a per-call
-        // callback hook in the evaluator — there's nowhere to
-        // put the actual Rust closure that would handle the
-        // call. So even on a successful lookup the dispatch
-        // is currently not possible.
+    fn invoke(&self, mangled: &str, args: &[u8]) -> Result<Vec<u8>, LeanError> {
+        // OX8.3c (2026-05-28): the prior stub returned
+        // `RUST_DLSYM_FAILED` because the fork's evaluator
+        // had no callback-dispatch entry. With OX8.3a's
+        // `CallbackRegistry` + OX8.3b's
+        // `dispatch_extern_const` landed, we now:
+        //   1. Confirm the metadata `ExternRegistry` carries
+        //      this mangled symbol (registration was paired).
+        //   2. Look up the runtime callback in
+        //      `CallbackRegistry` and invoke it with the
+        //      canonical-ABI byte buffer.
         //
-        // We surface a distinct error code depending on which
-        // half failed: UNKNOWN_FUNCTION if the export wasn't
-        // registered, RUST_DLSYM_FAILED (0x0002_0005) if it
-        // was registered but the OxiLean-side hook is
-        // missing.
+        // `UNKNOWN_FUNCTION` still fires when metadata
+        // registration is missing — the caller forgot
+        // `register_export(mangled)` upstream of
+        // `register_export_callback`. `RUST_DLSYM_FAILED`
+        // now means metadata exists but no callback was
+        // registered for it (rare; usually indicates a
+        // build-time bug).
         let registry = self.registry.lock().map_err(|e| {
             LeanError::new(
                 leo4_abi::error::error_codes::OOM,
                 format!("leo4-oxilean: registry mutex poisoned: {e}"),
             )
         })?;
-        match registry.lookup(&mangled_to_oxi_name(mangled)) {
-            Ok(_decl) => Err(LeanError::new(
-                0x0002_0005,
-                format!(
-                    "leo4-oxilean: `{mangled}` is registered in OxiLean's \
-                     ExternRegistry, but OxiLean v0.1.2 has no callback-hook \
-                     entry point in its evaluator to dispatch into a host Rust \
-                     closure. See `README.md` §\"OxiLean upstream prerequisite\"."
-                ),
-            )),
-            Err(_) => Err(LeanError::unknown_function(mangled)),
+        if registry.lookup(&mangled_to_oxi_name(mangled)).is_err() {
+            return Err(LeanError::unknown_function(mangled));
+        }
+        drop(registry);
+        let callbacks = self.callbacks.lock().map_err(|e| {
+            LeanError::new(
+                leo4_abi::error::error_codes::OOM,
+                format!("leo4-oxilean: callback registry mutex poisoned: {e}"),
+            )
+        })?;
+        match callbacks.invoke(LEO4_RUST_BRIDGE_LIB_NAME, mangled, args) {
+            Ok(bytes) => Ok(bytes),
+            Err(ExternCallError::NotRegistered { lib, symbol }) => {
+                Err(LeanError::new(
+                    0x0002_0005,
+                    format!(
+                        "leo4-oxilean: `{symbol}` is registered as metadata in \
+                         OxiLean's ExternRegistry (lib `{lib}`), but no Rust \
+                         callback has been installed via \
+                         `register_export_callback`. Pair the two register \
+                         calls at adapter init time."
+                    ),
+                ))
+            }
+            Err(ExternCallError::CallbackFailed(msg)) => {
+                Err(LeanError::new(
+                    leo4_abi::error::error_codes::ENCODE_ERROR,
+                    format!("leo4-oxilean: callback `{mangled}` failed: {msg}"),
+                ))
+            }
         }
     }
+}
+
+impl ExternResolver for OxiLeanInvoker {
+    /// OX8.3c (2026-05-28) — the fork-side
+    /// `dispatch_extern_const` helper calls this when the
+    /// evaluator reduces a `@[extern]`-attributed `Const`.
+    /// We bridge from OxiLean's `Name` to leo4's mangled-
+    /// string convention (`mangled_to_oxi_name` is the
+    /// inverse) and dispatch through the callback
+    /// registry.
+    fn resolve(
+        &self,
+        decl_name: &Name,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ExternCallError> {
+        // Reconstruct the leo4-side mangled symbol from
+        // the OxiLean `Name`. `mangled_to_oxi_name`
+        // converts mangled → OxiLean name; the reverse is
+        // the kernel-name's flattened string form.
+        let symbol = oxi_name_to_mangled(decl_name);
+        let callbacks =
+            self.callbacks.lock().map_err(|_| ExternCallError::CallbackFailed(
+                "leo4-oxilean: callback registry mutex poisoned".to_string(),
+            ))?;
+        callbacks.invoke(LEO4_RUST_BRIDGE_LIB_NAME, &symbol, args)
+    }
+}
+
+/// Reverse of `mangled_to_oxi_name`. The latter builds an
+/// OxiLean `Name` whose flattened dot-joined form equals
+/// the leo4 mangled string; this fn pulls that string back
+/// out.
+fn oxi_name_to_mangled(n: &Name) -> String {
+    // OxiLean's `Name` has a `to_string()` impl that
+    // dot-joins all segments. Our `mangled_to_oxi_name`
+    // single-segments the input via `Name::str`, so the
+    // round-trip is verbatim.
+    n.to_string()
 }
 
 /// `LeanProc` implementation for OxiLean. Scaffold —
@@ -373,7 +509,15 @@ mod tests {
     }
 
     #[test]
-    fn invoker_invoke_returns_dlsym_failed_for_registered_but_no_callback_hook() {
+    fn invoker_invoke_returns_dlsym_failed_when_metadata_registered_but_callback_missing() {
+        // OX8.3c (2026-05-28): the prior stub returned
+        // `RUST_DLSYM_FAILED` because OxiLean v0.1.2 had no
+        // callback-hook entry. Now the callback registry
+        // exists; this test verifies the "metadata
+        // registered but caller forgot to install the Rust
+        // closure" path still reports `0x0002_0005` (with a
+        // refined error message that points at
+        // `register_export_callback`).
         let inv = OxiLeanInvoker::new();
         inv.register_export("leo4__pkg__iface__ping__u32__hping0000ping00")
             .unwrap();
@@ -382,10 +526,71 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code, 0x0002_0005);
         assert!(
-            err.message.contains("OxiLean v0.1.2"),
-            "{}",
+            err.message.contains("register_export_callback"),
+            "error must point at the missing-callback step: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn invoker_register_export_callback_and_dispatch_round_trip() {
+        // OX8.3c (2026-05-28) — pairing
+        // `register_export` (metadata) +
+        // `register_export_callback` (runtime closure)
+        // lets `invoke` actually call the closure and
+        // return the encoded bytes.
+        let inv = OxiLeanInvoker::new();
+        let mangled = "leo4__pkg__iface__echo__L_u8_l__hecho0000echo00";
+        inv.register_export(mangled).unwrap();
+        inv.register_export_callback(mangled, |args| {
+            // Trivial echo: return the input byte buffer.
+            Ok(args.to_vec())
+        })
+        .unwrap();
+        let out = inv.invoke(mangled, &[1, 2, 3, 4]).unwrap();
+        assert_eq!(out, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn invoker_callback_error_propagates_as_encode_error() {
+        // The closure's `Err(CallbackFailed)` surfaces as
+        // a leo4 `LeanError(ENCODE_ERROR)` with the
+        // closure's message embedded.
+        let inv = OxiLeanInvoker::new();
+        let mangled = "leo4__pkg__iface__fail__u8__hfail0000fail00";
+        inv.register_export(mangled).unwrap();
+        inv.register_export_callback(mangled, |_args| {
+            Err(ExternCallError::CallbackFailed("custom bug".to_string()))
+        })
+        .unwrap();
+        let err = inv.invoke(mangled, &[]).unwrap_err();
+        assert_eq!(err.code, leo4_abi::error::error_codes::ENCODE_ERROR);
+        assert!(err.message.contains("custom bug"), "{}", err.message);
+    }
+
+    #[test]
+    fn invoker_extern_resolver_impl_routes_through_callback_registry() {
+        // OX8.3c verifying the `impl ExternResolver`
+        // path — when the OxiLean evaluator (via
+        // `dispatch_extern_const`) calls `resolve` with a
+        // `Name` matching a registered mangled symbol,
+        // the right callback fires.
+        let inv = OxiLeanInvoker::new();
+        let mangled = "leo4__pkg__iface__id__u64__hid000000id0000";
+        inv.register_export(mangled).unwrap();
+        inv.register_export_callback(mangled, |args| Ok(args.to_vec()))
+            .unwrap();
+        // The OxiLean evaluator passes Name; here we
+        // synthesise the same `Name::str(mangled)` form
+        // that `mangled_to_oxi_name` produces.
+        let name = mangled_to_oxi_name(mangled);
+        let out = <OxiLeanInvoker as ExternResolver>::resolve(
+            &inv,
+            &name,
+            &[42],
+        )
+        .unwrap();
+        assert_eq!(out, vec![42]);
     }
 
     #[test]

@@ -18,14 +18,26 @@ dependencies = [
 [[package]]
 name = "oxilean-kernel"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a20763e6088a64a90b96310ae1bbb6672baabbd7c8205f19edeea2575fb10193"
 
 [[package]]
 name = "oxilean-runtime"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "958f441f19a09982ad64cc692ce4c1b095e13920a5e603817adbe0345e988d01"
 dependencies = [
  "oxilean-kernel",
 ]
+
+[[patch.unused]]
+name = "oxilean-codegen"
+version = "0.1.2"
+
+[[patch.unused]]
+name = "oxilean-elab"
+version = "0.1.2"
+
+[[patch.unused]]
+name = "oxilean-meta"
+version = "0.1.2"
+
+[[patch.unused]]
+name = "oxilean-parse"
+version = "0.1.2"
