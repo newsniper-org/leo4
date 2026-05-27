@@ -331,3 +331,104 @@ fn cli_reports_transpile_error_with_nonzero_exit() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cli_native_binop_smoke_all_arith_and_comparison_ops() {
+    // OX7 typeclass step (2026-05-27) — every Lean
+    // stdlib primitive arithmetic / comparison operator
+    // backed by an `HXxx.xXxx` / `LT.lt` / etc.
+    // projection is expected to emit as a native Rust
+    // BinOp on the resulting `pub fn` body. This is the
+    // first multi-decl, multi-op smoke that exercises
+    // both the leo4-side translate desugar
+    // (`arith_op_to_tc_projection`) and the fork-side
+    // codegen fold (`try_builtin_app` +
+    // `tc_projection_to_rust_binop`).
+    let dir = tmp_dir("native_binops");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Ops.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def addU64 (a b : UInt64) : UInt64 := a + b\n\
+         def subU64 (a b : UInt64) : UInt64 := a - b\n\
+         def mulU64 (a b : UInt64) : UInt64 := a * b\n\
+         def divU64 (a b : UInt64) : UInt64 := a / b\n\
+         def modU64 (a b : UInt64) : UInt64 := a % b\n\
+         def ltU64  (a b : UInt64) : Bool   := a < b\n\
+         def leU64  (a b : UInt64) : Bool   := a <= b\n\
+         def eqU64  (a b : UInt64) : Bool   := a == b\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=native_binops_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_text = std::fs::read_to_string(out_dir.join("src").join("lib.rs"))
+        .expect("read lib.rs");
+
+    // Each op must lower to its native Rust counterpart.
+    // The exact whitespace inside the parens is stable
+    // from `RustExpr::BinOp`'s emit — `(lhs op rhs)`.
+    let cases: &[(&str, &str)] = &[
+        ("addU64", "+"),
+        ("subU64", "-"),
+        ("mulU64", "*"),
+        ("divU64", "/"),
+        ("modU64", "%"),
+        ("ltU64",  "<"),
+        ("leU64",  "<="),
+        ("eqU64",  "=="),
+    ];
+    for (fn_name, op) in cases {
+        let needle = format!("fn {fn_name}");
+        assert!(
+            lib_text.contains(&needle),
+            "lib.rs missing `{needle}` declaration:\n{lib_text}"
+        );
+        let body_needle = format!("(_x0 {op} _x1)");
+        assert!(
+            lib_text.contains(&body_needle),
+            "fn {fn_name} body must contain `{body_needle}`:\n{lib_text}"
+        );
+        // Negative invariant — the typeclass-projection
+        // mangled name must NOT leak into the emit; the
+        // backend's `try_builtin_app` folded it.
+        let projection_mangled = match *op {
+            "+"  => "HAdd_hAdd",
+            "-"  => "HSub_hSub",
+            "*"  => "HMul_hMul",
+            "/"  => "HDiv_hDiv",
+            "%"  => "HMod_hMod",
+            "<"  => "LT_lt",
+            "<=" => "LE_le",
+            "==" => "BEq_beq",
+            _ => unreachable!(),
+        };
+        assert!(
+            !lib_text.contains(projection_mangled),
+            "fn {fn_name}: `{projection_mangled}` leaked into emit:\n{lib_text}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
