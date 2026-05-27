@@ -507,3 +507,196 @@ fn cli_translate_coverage_if_let_list_at() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cli_translate_coverage_forall_do_anonctor() {
+    // OX7 translate coverage expansion (2026-05-27, batch 2) —
+    // `Forall`, `Do`, `AnonCtor` PEG variants now route through
+    // production translate instead of the legacy fallback.
+    //
+    // `Exists`, `InterpStr`, `AnonStruct` are deliberately
+    // omitted — they need additional surface-AST shape work or
+    // (in the case of InterpStr) Token-level Lean ↔ OxiLean
+    // conversion that doesn't fit a single commit.
+    let dir = tmp_dir("translate_coverage_2");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Coverage2.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def forallAscii : Prop := forall (x : Nat), x = x\n\
+         def justReturn : IO Unit := do return ()\n\
+         def pairAnon : Prod Nat Nat := ⟨1, 2⟩\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=translate_coverage_2_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_path = out_dir.join("src").join("lib.rs");
+    assert!(lib_path.exists(), "src/lib.rs must exist");
+    let lib_text = std::fs::read_to_string(&lib_path).expect("read");
+    assert!(lib_text.contains("fn forallAscii"),  "lib.rs missing forallAscii: {lib_text}");
+    assert!(lib_text.contains("fn justReturn"),   "lib.rs missing justReturn: {lib_text}");
+    assert!(lib_text.contains("fn pairAnon"),     "lib.rs missing pairAnon: {lib_text}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ─── OX8.2b — reverse mode CLI smoke tests ───────────────────────────
+//
+// End-to-end actual cdylib roundtrip belongs to OX8.4 (and
+// is gated on a leo4-abi-compatible cdylib being available
+// at test time, which would require building one inside
+// this crate's test harness). The tests below pin the
+// arg-parsing + error-surfacing surface only — exit codes,
+// the missing-required-field messages, and the
+// nonexistent-cdylib branch.
+
+#[test]
+fn cli_reverse_mode_via_cli_flags_missing_cdylib_path_reports_error_1() {
+    // `--mode reverse --cdylib /no/such/file …` — the path
+    // doesn't exist; the CLI must surface this as exit
+    // code 1 (transpile/emit failure) with a clear
+    // message, NOT as exit code 2 (usage error).
+    let dir = tmp_dir("reverse_missing_cdylib");
+    let lean_out = dir.join("lean").join("X").join("Rust.lean");
+    let bogus_cdylib = dir.join("does_not_exist.so");
+
+    let output = Command::new(cli_path())
+        .arg("--mode").arg("reverse")
+        .arg("--cdylib").arg(&bogus_cdylib)
+        .arg("--iface").arg("X")
+        .arg("--out").arg(&lean_out)
+        .output()
+        .expect("invoke");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "missing cdylib path must exit 1 (emit failure), not 2 (usage). stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("does not exist") || stderr.contains("cdylib"),
+        "stderr should mention cdylib non-existence: {stderr}"
+    );
+    // No Lean output written on failure.
+    assert!(
+        !lean_out.exists(),
+        "reverse wrapper must NOT be written on cdylib load failure"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_reverse_mode_missing_required_iface_field_reports_usage_error() {
+    // Reverse mode with cdylib path but no --iface → exit
+    // code 2 (usage error). The check fires before the
+    // cdylib is even opened.
+    let dir = tmp_dir("reverse_no_iface");
+    let lean_out = dir.join("Rust.lean");
+
+    let output = Command::new(cli_path())
+        .arg("--mode").arg("reverse")
+        .arg("--cdylib").arg("/tmp/anything.so")
+        .arg("--out").arg(&lean_out)
+        .output()
+        .expect("invoke");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "missing --iface must exit 2 (usage). stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("iface"),
+        "stderr should mention iface: {stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_reverse_mode_via_manifest_fields_recognised() {
+    // The manifest can drive reverse mode entirely:
+    // `mode=reverse`, `cdylib=…`, `iface=…`, `lean_out=…`.
+    // We point at a nonexistent cdylib so the run fails
+    // at the cdylib-load step (exit 1) rather than at the
+    // usage-validation step (exit 2). This pins the
+    // manifest parser's recognition of the new fields.
+    let dir = tmp_dir("reverse_manifest");
+    let lean_out = dir.join("out.lean");
+    let bogus_cdylib = dir.join("does_not_exist.so");
+    let manifest = dir.join("manifest.txt");
+    write_file(
+        &manifest,
+        &format!(
+            "mode=reverse\n\
+             cdylib={}\n\
+             iface=MyIface\n\
+             lean_out={}\n",
+            bogus_cdylib.display(),
+            lean_out.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest").arg(&manifest)
+        .output()
+        .expect("invoke");
+
+    // Exit 1 = manifest parsed cleanly, mode dispatched
+    // to reverse, cdylib-existence check failed.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "manifest reverse-mode fields must be recognised; cdylib-missing must exit 1. stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_reverse_mode_unknown_mode_value_reports_usage_error() {
+    // `--mode foobar` is rejected at arg-parse time with
+    // exit code 2 (usage error).
+    let output = Command::new(cli_path())
+        .arg("--mode").arg("foobar")
+        .output()
+        .expect("invoke");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "bad --mode value must exit 2 (usage). stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("foobar") || stderr.contains("mode"),
+        "stderr should explain bad mode: {stderr}"
+    );
+}

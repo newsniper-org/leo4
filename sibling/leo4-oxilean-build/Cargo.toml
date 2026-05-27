@@ -34,7 +34,17 @@ leo4-parser = []
 
 [dependencies]
 # leo4 IDL + canonical-ABI + LeanProc/LeanProcInvoker contract.
-leo4-abi = { path = "../../crates/leo4-abi" }
+# `rust-exports` feature is required for OX8.2b reverse-mode —
+# pulls in the `ExportEntry` repr-C layout that the CLI reads
+# via `libloading` from the user's cdylib's
+# `leo4_rust_describe_exports` C entry point.
+leo4-abi = { path = "../../crates/leo4-abi", features = ["rust-exports"] }
+
+# OX8.2b — `--mode reverse` cdylib loader. The CLI opens the
+# user cdylib via `Library::new`, resolves the C entry
+# `leo4_rust_describe_exports`, and walks the returned
+# `ExportEntry` slice to feed `reverse_emit::render_reverse_wrapper`.
+libloading = "0.8"
 
 # OX6 step 13 — PEG-based Lean 4 parser. Translator lives in
 # the `leo4_translate` module; production wiring lands across
