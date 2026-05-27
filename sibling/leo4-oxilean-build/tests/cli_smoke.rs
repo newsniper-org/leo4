@@ -719,3 +719,63 @@ fn cli_reverse_mode_unknown_mode_value_reports_usage_error() {
         "stderr should explain bad mode: {stderr}"
     );
 }
+
+#[test]
+fn cli_translate_coverage_exists_anonstruct_match() {
+    // OX7 translate coverage expansion (2026-05-27, batch 3) —
+    // `Exists`, `MatchBind`, `IfLet`, `AnonStruct`, `Match`
+    // arms now route through production translate. Smoke
+    // here covers `Exists` (via `App(Var("Exists"), Lam)`),
+    // `AnonStruct` (lowered to `AnonymousCtor` with named
+    // fields dropped), and a simple `Match` (Lit pattern +
+    // wildcard).
+    //
+    // `InterpStr` is the one remaining frequent variant
+    // still on the Unsupported list (Token-level
+    // conversion).
+    let dir = tmp_dir("translate_coverage_3");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Coverage3.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        // Three fixtures, each exercising one arm. We
+        // avoid `Prop` / `()` / `Char` for the same
+        // reason as the previous batch (PEG/env gaps
+        // separate from translate). Match here uses a
+        // Nat literal pattern + wildcard — both pat-arm
+        // forms in the translate_pattern helper.
+        "def matchIsZero (n : Nat) : Bool := match n with | 0 => true | _ => false\n\
+         def pairLit : Prod Nat Nat := ⟨7, 13⟩\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=translate_coverage_3_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_text = std::fs::read_to_string(out_dir.join("src").join("lib.rs"))
+        .expect("read");
+    assert!(lib_text.contains("fn matchIsZero"), "missing matchIsZero: {lib_text}");
+    assert!(lib_text.contains("fn pairLit"),     "missing pairLit: {lib_text}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

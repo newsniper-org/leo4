@@ -832,6 +832,94 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             }
             Ok(OxExpr::AnonymousCtor(out))
         }
+        L4Expr::Exists(binders, body) => {
+            // `∃ (x : T), P x` desugars to `Exists (fun
+            // (x : T) => P x)` in Lean 4. Lower to an
+            // explicit `App(Var("Exists"), Lam(...))`. The
+            // elaborator + codegen handle this as any
+            // other higher-order app; the env should
+            // carry `Exists` as an axiom (or
+            // `init_builtin_env` from OxiLean ships it).
+            let mut ox_binders: Vec<OxBinder> = Vec::new();
+            for lb in binders {
+                ox_binders.extend(lam_binder_to_ox_binders(lb)?);
+            }
+            let body_loc = translate_expr_located(body)?;
+            let lam = OxExpr::Lam(ox_binders, Box::new(body_loc));
+            let lam_loc = Located::new(lam, dummy_span());
+            let head = Located::new(
+                OxExpr::Var("Exists".to_string()),
+                dummy_span(),
+            );
+            Ok(OxExpr::App(Box::new(head), Box::new(lam_loc)))
+        }
+        L4Expr::IfLet { pattern, scrutinee, then_branch, else_branch } => {
+            // `if let pat := scrut then t else e` ≡
+            // `match scrut with | pat => t | _ => e`.
+            // Direct desugar; the `_` fallback ensures
+            // exhaustiveness.
+            let scrut_loc = translate_expr_located(scrutinee)?;
+            let pat = translate_pattern(pattern)?;
+            let pat_loc = Located::new(pat, dummy_span());
+            let then_loc = translate_expr_located(then_branch)?;
+            let else_loc = translate_expr_located(else_branch)?;
+            let arm_match = OxMatchArm {
+                pattern: pat_loc,
+                guard: None,
+                rhs: then_loc,
+            };
+            let arm_wild = OxMatchArm {
+                pattern: Located::new(OxPattern::Wild, dummy_span()),
+                guard: None,
+                rhs: else_loc,
+            };
+            Ok(OxExpr::Match(
+                Box::new(scrut_loc),
+                vec![arm_match, arm_wild],
+            ))
+        }
+        L4Expr::MatchBind { binding: _, scrutinee, arms } => {
+            // `match h : SCRUT with | …` — scrutinee
+            // binding form. The `h : SCRUT = pat` evidence
+            // is propositional; the rust-transpile path
+            // doesn't model propositions, so we drop the
+            // binding and translate as a plain `Match`.
+            // Lossy on the proof side but semantically
+            // equivalent at the value level.
+            let scrut_loc = translate_expr_located(scrutinee)?;
+            let mut ox_arms: Vec<OxMatchArm> = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let pat = translate_pattern(&arm.pattern)?;
+                let pat_loc = Located::new(pat, dummy_span());
+                let guard_loc = match &arm.guard {
+                    Some(g) => Some(translate_expr_located(g)?),
+                    None => None,
+                };
+                let rhs_loc = translate_expr_located(&arm.body)?;
+                ox_arms.push(OxMatchArm {
+                    pattern: pat_loc,
+                    guard: guard_loc,
+                    rhs: rhs_loc,
+                });
+            }
+            Ok(OxExpr::Match(Box::new(scrut_loc), ox_arms))
+        }
+        L4Expr::AnonStruct(fields) => {
+            // `{ x := 1, y := 2 }` — named-field
+            // anonymous struct. Surface AST has no direct
+            // variant; closest match is `AnonymousCtor`
+            // with field values in declaration order. The
+            // elaborator infers field names from the
+            // target type. Loss: source field names. Most
+            // structs ctor-from-positional just fine in
+            // Lean 4, so this is acceptable for the
+            // rust-transpile primitive subset.
+            let mut out = Vec::with_capacity(fields.len());
+            for (_field_name, value) in fields {
+                out.push(Located::new(translate_expr(value)?, dummy_span()));
+            }
+            Ok(OxExpr::AnonymousCtor(out))
+        }
         L4Expr::Match(scrut, arms) => {
             // `match SCRUT with | pat1 => body1 | pat2 => body2 …`
             // Direct Pattern + arm shape mapping. Patterns
