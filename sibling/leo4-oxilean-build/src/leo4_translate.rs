@@ -44,8 +44,8 @@ use oxilean_parse_peg::{
 use oxilean_parse::{
     AttributeKind as OxAttr, Binder as OxBinder, BinderKind as OxBinderKind,
     Constructor as OxCtor, Decl as OxDecl, DoAction as OxDoAction,
-    FieldDecl as OxField, Literal as OxLit, Located, SortKind,
-    SurfaceExpr as OxExpr,
+    FieldDecl as OxField, Literal as OxLit, Located, MatchArm as OxMatchArm,
+    Pattern as OxPattern, SortKind, SurfaceExpr as OxExpr,
 };
 use oxilean_parse::span_util::dummy_span;
 
@@ -469,6 +469,68 @@ fn translate_do_stmt(
     }
 }
 
+/// OX7 (2026-05-27) — `oxilean_parse_peg::Pattern` →
+/// `oxilean_parse::Pattern` translation for `Match` arm
+/// bodies. Wildcard / Var / Lit / Ctor map 1-to-1.
+/// `DotCtor(name, args)` becomes `Ctor(name, args)` —
+/// oxilean-parse has no dedicated `.ctor` variant and
+/// the elab path treats both forms the same. `Paren`
+/// unwraps. `Tuple` is `Unsupported` until oxilean-parse
+/// grows a Tuple-pattern variant or we lower to a
+/// chained anonymous-ctor.
+fn translate_pattern(
+    p: &oxilean_parse_peg::Pattern,
+) -> Result<OxPattern, TranslateError> {
+    use oxilean_parse_peg::Pattern as L4Pat;
+    match p {
+        L4Pat::Wildcard => Ok(OxPattern::Wild),
+        L4Pat::Var(name) => Ok(OxPattern::Var(name.clone())),
+        L4Pat::Lit(lit) => Ok(OxPattern::Lit(translate_literal(lit))),
+        L4Pat::Ctor(name, args) => {
+            let mut out = Vec::with_capacity(args.len());
+            for a in args {
+                out.push(Located::new(translate_pattern(a)?, dummy_span()));
+            }
+            Ok(OxPattern::Ctor(name.clone(), out))
+        }
+        L4Pat::DotCtor(name, args) => {
+            let mut out = Vec::with_capacity(args.len());
+            for a in args {
+                out.push(Located::new(translate_pattern(a)?, dummy_span()));
+            }
+            // Lean 4's `.ctor` is shorthand for the
+            // namespace-qualified `T.ctor` where `T` is
+            // the scrutinee's type. The elaborator
+            // resolves the namespace; for translation we
+            // just hand the bare name to the same `Ctor`
+            // variant.
+            Ok(OxPattern::Ctor(name.clone(), out))
+        }
+        L4Pat::Paren(inner) => translate_pattern(inner),
+        L4Pat::Tuple(_) => Err(TranslateError::Unsupported("Pattern::Tuple")),
+    }
+}
+
+/// Map `oxilean_parse_peg::Literal` to `oxilean_parse::
+/// Literal`. Trivial 1-to-1 for the four currently
+/// supported variants (Nat, Float as string, Str, Char).
+fn translate_literal(l: &oxilean_parse_peg::Literal) -> OxLit {
+    use oxilean_parse_peg::Literal as L4Lit2;
+    match l {
+        L4Lit2::Nat(n) => OxLit::Nat(*n),
+        L4Lit2::Str(s) => OxLit::String(s.clone()),
+        L4Lit2::Float(s) => {
+            // OxLit::Float takes f64; we round-trip via
+            // parse (acceptable: any literal that parsed
+            // as Float-shaped text under PEG also parses
+            // as a Rust f64).
+            s.parse::<f64>()
+                .map(OxLit::Float)
+                .unwrap_or_else(|_| OxLit::String(s.clone()))
+        }
+    }
+}
+
 fn do_stmt_variant_name(s: &oxilean_parse_peg::DoStmt) -> &'static str {
     use oxilean_parse_peg::DoStmt;
     match s {
@@ -769,6 +831,30 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
                 out.push(Located::new(translate_expr(it)?, dummy_span()));
             }
             Ok(OxExpr::AnonymousCtor(out))
+        }
+        L4Expr::Match(scrut, arms) => {
+            // `match SCRUT with | pat1 => body1 | pat2 => body2 …`
+            // Direct Pattern + arm shape mapping. Patterns
+            // that don't have an oxilean-parse equivalent
+            // (e.g. `Pattern::Tuple`) surface as
+            // `TranslateError::Unsupported("Pattern::<name>")`.
+            let scrut_loc = translate_expr_located(scrut)?;
+            let mut ox_arms: Vec<OxMatchArm> = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let pat = translate_pattern(&arm.pattern)?;
+                let pat_loc = Located::new(pat, dummy_span());
+                let guard_loc = match &arm.guard {
+                    Some(g) => Some(translate_expr_located(g)?),
+                    None => None,
+                };
+                let rhs_loc = translate_expr_located(&arm.body)?;
+                ox_arms.push(OxMatchArm {
+                    pattern: pat_loc,
+                    guard: guard_loc,
+                    rhs: rhs_loc,
+                });
+            }
+            Ok(OxExpr::Match(Box::new(scrut_loc), ox_arms))
         }
         // OX7 (α, 2026-05-27) — `fun BINDERS => body` and
         // its synonyms. PEG `LamBinder::Typed { names,
