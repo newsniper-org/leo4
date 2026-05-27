@@ -1,6 +1,8 @@
 # SPEC: OX8 — rust-transpile path reverse direction
 
 Status: **DRAFT** (opened 2026-05-27, follows OX7 γ-1').
+Scope: **v1.0 RC blocker** (promoted from v1.x, 2026-05-27 — per
+user instruction OX7 and OX8 both ship before v1.0 RC).
 Owner: leo4 (윤병익) + Team Kitasan (cool-japan/oxilean upstream
 for the OxiLean-side pieces).
 
@@ -204,3 +206,12 @@ Single track, no parallelism within OX8 since phases stack
 dependency-wise. OX8.1 (audit) is the gate — once that's written,
 OX8.2 → OX8.5 are commit-sized each. Rough estimate: 4–7 days of
 focused work + however long the OX7 (1b) parallel track takes.
+
+**v1.0 RC blocker** as of 2026-05-27 (promoted from the original
+v1.x scope per user instruction): both OX7 and OX8 must close
+before v1.0 RC ships. OX7 typeclass-step end-to-end on primitive
+arithmetic landed; remaining OX7 work (translate_expr coverage
+expansion, multi-decl modules, `HPow.hPow`, 5 `#[ignore]`'d tests
+hard-fix) runs in parallel with the OX8 phases below since the
+two tracks touch disjoint code (codegen / translate vs.
+leo4-oxilean adapter / leo4-cli reverse runner).
