@@ -814,7 +814,10 @@ fn run_run(
         }
         Direction::Reverse => {
             let iface = iface_arg.unwrap_or_else(|| camel_case(&crate_name));
-            run_reverse(&dir, &pkg_name, &crate_name, &iface, &leo4_root_dir, &args)
+            run_reverse(
+                &dir, &pkg_name, &crate_name, &iface,
+                &leo4_root_dir, &impl_kind, &args,
+            )
         }
     }
 }
@@ -1082,18 +1085,52 @@ fn user_cargo_has_transpiled_dep(cargo_toml: &Path, crate_name: &str) -> bool {
     false
 }
 
+/// OX8.4 (2026-05-28) — dispatch the reverse-direction
+/// `leo4 run` flow to the per-impl runner. `mslean4`
+/// keeps the historical lake-driven pipeline; the new
+/// `rust-transpile` branch invokes `leo4-oxilean-build
+/// --mode reverse` to emit `lean/<Iface>/Rust.lean`,
+/// then `cargo run` on the user binary (which uses the
+/// `leo4-oxilean` adapter to drive the OxiLean
+/// evaluator on `lean/Main.lean`).
 fn run_reverse(
     dir: &Path,
     pkg_name: &str,
     crate_name: &str,
     iface: &str,
     leo4_root: &Path,
+    impl_kind: &ImplKind,
     args: &[String],
 ) -> Result<(), String> {
     let lean_dir = dir.join("lean");
     if !lean_dir.exists() {
         return Err(format!("run: no `lean/` directory at {dir:?}"));
     }
+    match impl_kind {
+        ImplKind::Mslean4 => {
+            run_reverse_mslean4(dir, pkg_name, crate_name, iface, leo4_root, &lean_dir, args)
+        }
+        ImplKind::RustTranspile => {
+            run_reverse_rust_transpile(
+                dir, pkg_name, crate_name, iface, leo4_root, &lean_dir, args,
+            )
+        }
+        ImplKind::RustNative => Err(
+            "run: --impl rust-native is not yet supported (check_impl_supported \
+             should have rejected this earlier — please file a bug).".into()
+        ),
+    }
+}
+
+fn run_reverse_mslean4(
+    dir: &Path,
+    pkg_name: &str,
+    crate_name: &str,
+    iface: &str,
+    leo4_root: &Path,
+    lean_dir: &Path,
+    args: &[String],
+) -> Result<(), String> {
     let leo4_target = leo4_root.join("target").join("release");
     let emit_bin = leo4_target.join(bin_name("leo4-rust-emit"));
     let worker_bin = leo4_target.join(bin_name("leo4-rust-worker"));
@@ -1131,7 +1168,7 @@ fn run_reverse(
     let mut emit_cmd = Command::new("lake");
     emit_cmd
         .args(["run", "Leo4Rust/regenerate"])
-        .current_dir(&lean_dir)
+        .current_dir(lean_dir)
         .env("LEO4_RUST_EMIT_BIN", &emit_bin)
         .env("LEO4_RUST_CDYLIB", &cdylib)
         .env("LEO4_RUST_IFACE", iface);
@@ -1139,7 +1176,7 @@ fn run_reverse(
 
     step("[3/4] lake build (auto-links bridge + glue via Leo4Rust extern_libs)");
     run_cmd(
-        Command::new("lake").arg("build").current_dir(&lean_dir),
+        Command::new("lake").arg("build").current_dir(lean_dir),
         "lake build",
     )?;
 
@@ -1160,6 +1197,116 @@ fn run_reverse(
         cmd.args(args);
     }
     run_cmd(&mut cmd, "lean exe")
+}
+
+/// OX8.4 (2026-05-28) — reverse-direction runner for
+/// `--impl rust-transpile`. Pipeline:
+///
+///   1. `cargo build --release -p <pkg>` — user crate
+///      (cdylib + standard main binary).
+///   2. `leo4-oxilean-build --mode reverse --cdylib …
+///      --iface <Name> --out lean/<Name>/Rust.lean` —
+///      emits `@[extern]` wrapper module per cdylib
+///      export.
+///   3. `cargo run -p <pkg>` — user binary calls the
+///      `leo4-oxilean` adapter (`OxiLeanInvoker` +
+///      `register_export_callback` + `ExternResolver`)
+///      to drive the OxiLean evaluator on
+///      `lean/Main.lean`.
+///
+/// No lake. No leanc. No Lean toolchain on the user's
+/// machine. The OxiLean evaluator (consumed through
+/// `leo4-oxilean`) handles `@[extern]` dispatch via
+/// the callback registry landed in OX8.3a/b/c.
+fn run_reverse_rust_transpile(
+    dir: &Path,
+    pkg_name: &str,
+    crate_name: &str,
+    iface: &str,
+    leo4_root: &Path,
+    lean_dir: &Path,
+    args: &[String],
+) -> Result<(), String> {
+    eprintln!(
+        "leo4 run: warning — `--impl rust-transpile` reverse is experimental\n\
+         \x20 in v1.0 RC. OX8.2/3 landed the wrapper emit + adapter dispatch;\n\
+         \x20 OX8.4 (this runner) + OX8.5 (scaffold) wire them into the\n\
+         \x20 production `leo4 run` path. Use `--impl mslean4` for the\n\
+         \x20 reverse path that ships today."
+    );
+    // Locate the leo4-oxilean-build helper binary. We
+    // reuse the same sibling-tree location forward path
+    // uses (`<leo4_root>/sibling/leo4-oxilean-build/
+    // target/release/`); if missing, fall back to
+    // building it on demand.
+    let oxi_build_root = leo4_root
+        .join("sibling")
+        .join("leo4-oxilean-build");
+    if !oxi_build_root.exists() {
+        return Err(format!(
+            "run: rust-transpile reverse impl requires `{}` to exist (the \
+             leo4-oxilean-build sibling project). Pass --leo4-root to point \
+             at your leo4 checkout.",
+            oxi_build_root.display()
+        ));
+    }
+    let oxi_build_bin = oxi_build_root
+        .join("target")
+        .join("release")
+        .join(bin_name("leo4-oxilean-build"));
+    if !oxi_build_bin.exists() {
+        step("[helpers] cargo build --release (leo4-oxilean-build)");
+        run_cmd(
+            Command::new("cargo")
+                .args(["build", "--release"])
+                .current_dir(&oxi_build_root),
+            "cargo build (leo4-oxilean-build)",
+        )?;
+    }
+
+    step(&format!("[1/3] cargo build --release -p {pkg_name}"));
+    run_cmd(
+        Command::new("cargo")
+            .args(["build", "--release", "-p", pkg_name])
+            .current_dir(dir),
+        "cargo build (cdylib + bin)",
+    )?;
+    let cargo_target = dir.join("target").join("release");
+    let cdylib = find_cdylib(&cargo_target, crate_name)?;
+
+    // Emit `lean/<Iface>/Rust.lean` with one
+    // `@[extern "<mangled>"] opaque <name> …` per export.
+    let iface_dir = lean_dir.join(iface);
+    fs::create_dir_all(&iface_dir).map_err(|e| {
+        format!("mkdir {}: {e}", iface_dir.display())
+    })?;
+    let wrapper_out = iface_dir.join("Rust.lean");
+    step(&format!(
+        "[2/3] leo4-oxilean-build --mode reverse --cdylib {} --iface {iface} --out {}",
+        cdylib.display(),
+        wrapper_out.display()
+    ));
+    run_cmd(
+        Command::new(&oxi_build_bin)
+            .arg("--mode").arg("reverse")
+            .arg("--cdylib").arg(&cdylib)
+            .arg("--iface").arg(iface)
+            .arg("--out").arg(&wrapper_out),
+        "leo4-oxilean-build --mode reverse",
+    )?;
+
+    step("[3/3] cargo run -p <pkg> (user binary drives leo4-oxilean evaluator)");
+    let mut cmd = Command::new("cargo");
+    cmd.args(["run", "--release", "-p", pkg_name])
+        .current_dir(dir)
+        .env("LEO4_OXILEAN_CDYLIB", &cdylib)
+        .env("LEO4_OXILEAN_IFACE", iface)
+        .env("LEO4_OXILEAN_LEAN_DIR", lean_dir)
+        .env("LEO4_OXILEAN_MAIN", lean_dir.join("Main.lean"));
+    if !args.is_empty() {
+        cmd.arg("--").args(args);
+    }
+    run_cmd(&mut cmd, "cargo run (rust-transpile reverse)")
 }
 
 fn step(label: &str) {
