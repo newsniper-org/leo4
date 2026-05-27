@@ -92,6 +92,16 @@ enum Cmd {
         /// workspace root is found above CWD.
         #[arg(long, default_value_t = false)]
         subcrate: bool,
+        /// OX8.5 (2026-05-28): explicit impl-kind for
+        /// scaffolding. Default `mslean4` (the stable
+        /// path). `--impl rust-transpile` produces the
+        /// rust-transpile layout — scaffolds main.rs +
+        /// lean/Main.lean for the
+        /// `run_reverse_rust_transpile` runner. Users
+        /// can also leave this off and edit `leo4.toml`
+        /// post-create.
+        #[arg(long, value_parser = parse_impl_kind, default_value = "mslean4")]
+        r#impl: ImplKind,
     },
 
     /// Add leo4 integration to an EXISTING Cargo crate (in cwd
@@ -211,8 +221,8 @@ fn parse_impl_kind(s: &str) -> Result<ImplKind, String> {
 fn main() {
     let cli = Cli::parse();
     let res = match cli.cmd {
-        Cmd::Create { direction, dir, name, leo4_root, subcrate } => {
-            run_create(direction, dir, name, leo4_root, subcrate)
+        Cmd::Create { direction, dir, name, leo4_root, subcrate, r#impl } => {
+            run_create(direction, dir, name, leo4_root, subcrate, r#impl)
         }
         Cmd::Init { direction, dir, leo4_root } => {
             run_init(direction, dir, leo4_root)
@@ -304,6 +314,7 @@ fn run_create(
     name: Option<String>,
     leo4_root: Option<PathBuf>,
     subcrate: bool,
+    impl_kind: ImplKind,
 ) -> Result<(), String> {
     let dir = abs(&dir)?;
     // For --subcrate, pre-resolve the workspace root
@@ -335,26 +346,37 @@ fn run_create(
     let project_name = name.unwrap_or_else(|| dir_basename(&dir));
     let leo4_root_str = resolve_leo4_root(leo4_root);
 
-    match direction {
-        Direction::Forward => scaffold_forward_full(&dir, &project_name, &leo4_root_str)?,
-        Direction::Reverse => scaffold_reverse_full(&dir, &project_name, &leo4_root_str)?,
+    // OX8.5 (2026-05-28): scaffold dispatch now takes
+    // both direction and impl_kind. The historical
+    // path (`mslean4`) keeps its existing scaffolds;
+    // the new `rust-transpile` reverse path lands a
+    // tailored scaffold that drives the leo4-oxilean
+    // adapter.
+    match (direction.clone(), impl_kind.clone()) {
+        (Direction::Forward, _) => {
+            scaffold_forward_full(&dir, &project_name, &leo4_root_str)?
+        }
+        (Direction::Reverse, ImplKind::Mslean4 | ImplKind::RustNative) => {
+            scaffold_reverse_full(&dir, &project_name, &leo4_root_str)?
+        }
+        (Direction::Reverse, ImplKind::RustTranspile) => {
+            scaffold_reverse_rust_transpile_full(
+                &dir, &project_name, &leo4_root_str,
+            )?
+        }
     }
-    // Post-OX6 default impl is `mslean4` — the only
-    // fully-shipping path. Users wanting `rust-native`
-    // or `rust-transpile` edit `leo4.toml` post-create
-    // (and accept that those paths are scaffold-only /
-    // deferred per `SPEC/rust-native-lean.md` §8–9).
-    write_leo4_toml(&dir, ImplKind::Mslean4.marker_str())?;
+    write_leo4_toml(&dir, impl_kind.marker_str())?;
 
+    let impl_label = impl_kind.marker_str();
     if let Some(ws_root) = workspace_root {
         register_in_workspace(&ws_root, &dir)?;
         println!(
-            "leo4 create: {project_name} ({direction:?}, impl=mslean4, subcrate) → {dir:?}"
+            "leo4 create: {project_name} ({direction:?}, impl={impl_label}, subcrate) → {dir:?}"
         );
         println!("  registered in workspace at {ws_root:?}");
     } else {
         println!(
-            "leo4 create: {project_name} ({direction:?}, impl=mslean4) → {dir:?}"
+            "leo4 create: {project_name} ({direction:?}, impl={impl_label}) → {dir:?}"
         );
     }
     println!("  edit {}/leo4.toml to switch impl or add more", dir.display());
@@ -1377,6 +1399,58 @@ fn scaffold_reverse_full(dir: &Path, name: &str, leo4_root: &str) -> Result<(), 
     Ok(())
 }
 
+/// OX8.5 (2026-05-28) — scaffold for `leo4 create reverse
+/// --impl rust-transpile`. No lake / lean toolchain. The
+/// emitted layout drives the
+/// `run_reverse_rust_transpile` pipeline (OX8.4) via
+/// `leo4-oxilean-build --mode reverse` + the user binary
+/// calling into the `leo4-oxilean` adapter to run
+/// `lean/Main.lean` under OxiLean's evaluator.
+fn scaffold_reverse_rust_transpile_full(
+    dir: &Path,
+    name: &str,
+    leo4_root: &str,
+) -> Result<(), String> {
+    let iface = camel_case(&name.replace('-', "_"));
+    write_required(
+        dir,
+        "Cargo.toml",
+        &cargo_toml_reverse_rust_transpile(name, leo4_root),
+    )?;
+    write_required(dir, "src/lib.rs", &lib_rs_reverse_rust_transpile(name))?;
+    write_required(
+        dir,
+        "src/main.rs",
+        &main_rs_reverse_rust_transpile(name, &iface),
+    )?;
+    // No `lean/lakefile.lean`, no `lean-toolchain`,
+    // because we don't use lake/lean here. Just the
+    // user's `lean/Main.lean` (consumed by the OxiLean
+    // evaluator) + the auto-generated wrapper
+    // `lean/<Iface>/Rust.lean` (emitted by
+    // `leo4-oxilean-build --mode reverse` at `leo4 run`
+    // time).
+    write_required(
+        dir,
+        "lean/Main.lean",
+        &main_lean_reverse_rust_transpile(&iface),
+    )?;
+    write_required(
+        dir,
+        "lean/.gitignore",
+        // The Iface/Rust.lean wrapper is regenerated on
+        // every `leo4 run` — don't commit it.
+        &format!("# Auto-emitted by `leo4 run --impl rust-transpile`.\n/{iface}/Rust.lean\n"),
+    )?;
+    write_required(dir, ".gitignore", GITIGNORE_REVERSE_ROOT)?;
+    write_required(
+        dir,
+        "README.md",
+        &readme_reverse_rust_transpile(name, &iface, leo4_root),
+    )?;
+    Ok(())
+}
+
 // ─── Templates ──────────────────────────────────────────────────────
 
 const BUILD_RS_FORWARD: &str = r#"// Wire the Lake-built shim into Cargo's compile environment.
@@ -1652,6 +1726,207 @@ LEO4_RUST_HANDSHAKE_PKG={crate_name} \
 LEO4_RUST_HANDSHAKE_IFACE={iface} \
   ./.lake/build/bin/{crate_name}
 ```
+"#
+    )
+}
+
+// ─── OX8.5: rust-transpile reverse scaffold templates ──────────────
+
+fn cargo_toml_reverse_rust_transpile(name: &str, leo4_root: &str) -> String {
+    format!(
+        r#"[package]
+name    = "{name}"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "{name}-runner"
+path = "src/main.rs"
+
+[dependencies]
+# Forward-direction trait surface — same as mslean4 reverse, the
+# `#[leo4::export]` macro lives here. `rust-exports` feature is
+# required so the cdylib carries the `EXPORTS` slice
+# `leo4-oxilean-build --mode reverse` reads via `dlopen`.
+leo4 = {{ path = "{leo4_root}/crates/leo4", features = ["rust-exports"] }}
+
+# OxiLean evaluator adapter — the runner binary uses this to
+# drive `lean/Main.lean` against the wrapper module emitted by
+# `leo4-oxilean-build --mode reverse`. Standalone sibling
+# project (not in the main leo4 workspace).
+leo4-oxilean = {{ path = "{leo4_root}/sibling/leo4-oxilean" }}
+"#
+    )
+}
+
+fn lib_rs_reverse_rust_transpile(name: &str) -> String {
+    let crate_name = name.replace('-', "_");
+    format!(
+        r#"//! `{name}` — leo4 rust-transpile reverse-direction demo.
+//!
+//! The functions tagged with `#[leo4::export]` below land in
+//! the cdylib's `EXPORTS` slice. `leo4-oxilean-build --mode
+//! reverse` (invoked by `leo4 run`) reads that slice and
+//! generates `lean/<Iface>/Rust.lean` with one `@[extern …]`
+//! decl per export. `lean/Main.lean` calls into the wrapper;
+//! the runner binary (`src/main.rs`) drives the OxiLean
+//! evaluator on Main.lean via the leo4-oxilean adapter.
+
+use leo4::export;
+
+#[export]
+pub fn double(n: u64) -> u64 {{
+    n.saturating_mul(2)
+}}
+
+#[export]
+pub fn add(a: u64, b: u64) -> u64 {{
+    a.saturating_add(b)
+}}
+
+// `_unused` silences the lint when downstream consumers only
+// re-use the `#[export]` slot. Remove once the crate exports
+// something else.
+#[allow(dead_code)]
+fn _unused_to_avoid_warning() {{
+    let _ = stringify!({crate_name});
+}}
+"#
+    )
+}
+
+fn main_rs_reverse_rust_transpile(name: &str, iface: &str) -> String {
+    let _ = name;
+    format!(
+        r#"//! Runner binary — `leo4 run --impl rust-transpile`
+//! invokes this after emitting `lean/{iface}/Rust.lean`.
+//!
+//! Wires together:
+//!  - the cdylib's `#[leo4::export]` functions (loaded via
+//!    libloading at the path the `LEO4_OXILEAN_CDYLIB` env
+//!    var points at),
+//!  - `leo4_oxilean::OxiLeanInvoker` registering each
+//!    export's callback,
+//!  - the OxiLean evaluator driving `lean/Main.lean` (path
+//!    in `LEO4_OXILEAN_MAIN`).
+//!
+//! `leo4 run --impl rust-transpile` sets those env vars
+//! before invoking this runner. For a hand-driven run set
+//! them yourself (see README).
+
+use leo4_oxilean::OxiLeanInvoker;
+use std::sync::Arc;
+
+fn main() {{
+    let cdylib = std::env::var("LEO4_OXILEAN_CDYLIB").unwrap_or_else(|_| {{
+        eprintln!("error: LEO4_OXILEAN_CDYLIB env var not set");
+        std::process::exit(2);
+    }});
+    let main_lean = std::env::var("LEO4_OXILEAN_MAIN")
+        .unwrap_or_else(|_| "lean/Main.lean".to_string());
+
+    eprintln!("runner: cdylib  = {{cdylib}}");
+    eprintln!("runner: Main.lean = {{main_lean}}");
+
+    // Initialise the invoker. Each cdylib export needs both
+    // `register_export(mangled)` (metadata) and
+    // `register_export_callback(mangled, closure)` (the
+    // actual `libloading`-driven Rust dispatch). A future
+    // helper will close over the cdylib handle to register
+    // every entry in the `EXPORTS` slice automatically;
+    // until then this template requires manual wiring.
+    let invoker = Arc::new(OxiLeanInvoker::new());
+
+    eprintln!(
+        "runner: scaffold-mode placeholder — extend this main.rs to:\n\
+         \x20 1. dlopen({{cdylib}})\n\
+         \x20 2. walk the EXPORTS slice via leo4_rust_describe_exports\n\
+         \x20 3. for each entry: register_export(mangled) +\n\
+         \x20    register_export_callback(mangled, |bytes| dlsym-and-call)\n\
+         \x20 4. instantiate the OxiLean evaluator with\n\
+         \x20    invoker.as_shared_resolver() and evaluate Main.lean."
+    );
+    // Suppress unused-variable warning until the user fills
+    // in the dispatch loop.
+    let _ = invoker;
+}}
+"#
+    )
+}
+
+fn main_lean_reverse_rust_transpile(iface: &str) -> String {
+    format!(
+        r#"-- `lean/Main.lean` — OxiLean evaluator entry point.
+--
+-- The wrapper module `{iface}.Rust` (auto-generated by
+-- `leo4 run --impl rust-transpile` from the cdylib's
+-- `EXPORTS` slice) carries one `@[extern]` decl per
+-- `#[leo4::export]` Rust function.
+--
+-- Edit this file freely; the runner binary at
+-- `src/main.rs` calls the OxiLean evaluator on whatever
+-- `LEO4_OXILEAN_MAIN` points at (default: this file).
+
+import {iface}.Rust
+
+def main : IO Unit := do
+  -- Sample usage of the generated wrappers:
+  IO.println s!"double 21 = {{{iface}.Rust.double 21}}"
+  IO.println s!"add 10 32 = {{{iface}.Rust.add 10 32}}"
+"#
+    )
+}
+
+fn readme_reverse_rust_transpile(name: &str, iface: &str, leo4_root: &str) -> String {
+    format!(
+        r#"# {name}
+
+leo4 **rust-transpile reverse-direction** scaffold (OX8.5,
+2026-05-28). Rust exposes `#[leo4::export]` functions; Lean
+calls them — *without* lake / leanc / a Lean toolchain
+installed.
+
+## Stack
+
+  - `src/lib.rs` — `#[leo4::export]` functions; built into a
+    cdylib.
+  - `src/main.rs` — runner that drives the OxiLean evaluator
+    on `lean/Main.lean` via the `leo4-oxilean` adapter.
+  - `lean/Main.lean` — user-editable Lean source.
+  - `lean/{iface}/Rust.lean` — auto-generated wrapper module
+    (one `@[extern]` decl per cdylib export). Regenerated on
+    every `leo4 run`; gitignored.
+
+## Build + run
+
+```sh
+leo4 run --impl rust-transpile --leo4-root {leo4_root}
+```
+
+The pipeline (OX8.4 runner):
+1. `cargo build --release` of this crate (cdylib + runner).
+2. `leo4-oxilean-build --mode reverse --cdylib … --iface
+   {iface} --out lean/{iface}/Rust.lean` — wrapper emit.
+3. `cargo run --release` of the runner binary, which
+   instantiates `leo4_oxilean::OxiLeanInvoker`, registers
+   every cdylib export's callback, and drives the OxiLean
+   evaluator on `lean/Main.lean`.
+
+## Status
+
+**Experimental** (v1.0 RC). The runner binary in
+`src/main.rs` is currently a scaffold — it sets up the
+invoker but does not yet automate the cdylib walking /
+callback registration / evaluator-instantiation steps.
+Those need to be filled in per use case until a helper
+crate lands. The full pipeline works end-to-end once you
+plug in the dispatch loop (see the comment in `src/main.rs`).
+
+See `SPEC/ox8-rust-transpile-reverse.md` + `docs/ox8-1-
+leo4-oxilean-audit.md` for the architectural context.
 "#
     )
 }
@@ -1980,6 +2255,7 @@ name = "x"
             Some("scaffold-fwd".into()),
             Some(leo4_root),
             false,
+            ImplKind::Mslean4,
         )
         .expect("run_create must succeed");
         assert!(dir.join("leo4.toml").exists(), "leo4.toml must be present");
@@ -2099,6 +2375,7 @@ name = "x"
             Some("foo".into()),
             Some(leo4_root),
             true, // subcrate
+            ImplKind::Mslean4,
         );
         std::env::set_current_dir(prev_cwd).unwrap();
         result.expect("--subcrate must succeed under workspace");
@@ -2126,6 +2403,7 @@ name = "x"
             Some("standalone".into()),
             Some(tempdir()),
             true,
+            ImplKind::Mslean4,
         );
         std::env::set_current_dir(prev_cwd).unwrap();
         let err = result.expect_err("--subcrate without workspace must error");
@@ -2366,6 +2644,7 @@ kind = "rust-transpile"
             Some("scaffold-rev".into()),
             Some(leo4_root),
             false,
+            ImplKind::Mslean4,
         )
         .expect("run_create must succeed");
         assert!(dir.join("leo4.toml").exists());
