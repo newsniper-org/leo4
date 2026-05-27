@@ -237,13 +237,17 @@ fn check_impl_supported(kind: &ImplKind) -> Result<(), String> {
         // rust-transpile: leo4-oxilean-build (OX5-oxi
         // env bootstrap + OX6 PEG parser + pure_emit
         // option-A native Rust crate, 2026-05-25). Zero
-        // lake/lean overhead. Marked experimental in v1.0
-        // RC since OX7 (2026-05-26) found OxiLean 0.1.2
-        // codegen is broken at multiple layers (BVar/Const
-        // ID tracking, return type inference, UInt
-        // mapping, HAdd typeclasses). Wire-up stays so
-        // upstream fixes light up immediately; runtime
-        // warning is emitted by run_forward_rust_transpile.
+        // lake/lean overhead. Marked experimental in
+        // v1.0 RC — OX7 (γ-1', 2026-05-26..27) landed
+        // six fork-side codegen fixes (1a / #1 / #2 /
+        // 1b-α / 1b-β / typeclass step) and the
+        // pipeline now emits compilable native Rust for
+        // primitive arithmetic on sized integers /
+        // floats. Coverage gaps (`If`/`Match`/`Let`
+        // bodies, user-namespace methods, multi-decl
+        // modules, `HPow.hPow`) remain as OX7 follow-
+        // ups; the runtime warning emitted by
+        // `run_forward_rust_transpile` reflects this.
         ImplKind::RustTranspile => Ok(()),
         ImplKind::RustNative => Err(
             "--impl rust-native is currently deferred. The integration \
@@ -920,13 +924,14 @@ fn run_forward_rust_transpile(
 ) -> Result<(), String> {
     eprintln!(
         "leo4 run: warning — `--impl rust-transpile` is experimental in v1.0 RC.\n\
-         \x20 OxiLean 0.1.2 codegen is broken at multiple layers (BVar/Const ID\n\
-         \x20 tracking, return-type inference, UInt mapping, HAdd typeclass\n\
-         \x20 unfolding). Tracked as OX7 against\n\
-         \x20 github.com/cool-japan/oxilean. The pipeline will run end-to-end\n\
-         \x20 once upstream lands the fixes; until then expect compile/link\n\
-         \x20 errors on non-trivial bodies. Use `--impl mslean4` for the\n\
-         \x20 path that ships today."
+         \x20 OX7 (2026-05-27) landed six fork-side codegen fixes; primitive\n\
+         \x20 arithmetic (`+`, `-`, `*`, `/`, `%`, `<`, `<=`, `==`) on sized\n\
+         \x20 integers / floats / `Char` now transpiles to compilable native\n\
+         \x20 Rust. Coverage gaps remain: `if`/`match`/`let-in` expression\n\
+         \x20 bodies fall back to the legacy walker (silent degraded emit),\n\
+         \x20 user-namespace methods are not exercised by smoke tests yet,\n\
+         \x20 and `HPow.hPow` (`^`) still emits an opaque call. Use\n\
+         \x20 `--impl mslean4` for full coverage today."
     );
     let oxi_root = leo4_root.join("sibling").join("leo4-oxilean-build");
     if !oxi_root.exists() {

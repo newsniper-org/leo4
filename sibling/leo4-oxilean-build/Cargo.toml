@@ -8,7 +8,7 @@ rust-version = "1.95"
 license     = "MIT OR Apache-2.0"
 authors     = ["윤병익 <yeun0908@gmail.com>"]
 repository  = "https://github.com/Honey-Be/leo4"
-description = "Build-time transpiler from OxiLean Lean source → Rust crate, via `oxilean-codegen::rust_target_backend`. Sibling adapter to `leo4-oxilean` (runtime-dispatch); this one is the zero-runtime transpile path per `SPEC/rust-native-lean.md` §9. Scaffold — see `README.md` §Status."
+description = "Build-time transpiler from Lean source → native Rust crate, via `oxilean-codegen::rust_target_backend` (consumed from the fork submodule at `sibling/oxilean/`). Sibling adapter to `leo4-oxilean` (runtime-dispatch); this one is the zero-runtime transpile path per `SPEC/rust-native-lean.md` §9. Experimental: primitive arithmetic on sized integers / floats / Char transpiles end-to-end as of OX7 (2026-05-27); see the `--impl rust-transpile` runtime warning for coverage limits."
 
 [features]
 # OX6 step 13d (2026-05-24): `leo4-parser` flipped ON by

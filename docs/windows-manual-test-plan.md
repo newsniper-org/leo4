@@ -341,26 +341,51 @@ implemented.
 
 ### T7 — `leo4 run` `--impl rust-transpile`
 
-**STATUS (2026-05-26): EXPERIMENTAL — blocked on OX7.**
+**STATUS (2026-05-27): EXPERIMENTAL — primitive arithmetic
+works end-to-end; broader coverage still pending OX7
+follow-ups.**
 
-T7 spike on 2026-05-26 surfaced that OxiLean 0.1.2 codegen
-is broken at multiple layers — body BVar/Const ID tracking
-emits undefined `_xN` identifiers; return-type inference
-defaults to `Box<dyn std::any::Any>`; UInt8..128 / Int8..128
-have no native Rust type mapping; `HAdd`/`HSub`/... typeclasses
-+ instances are absent from `init_builtin_env`. Filed as OX7
-against [github.com/cool-japan/oxilean](https://github.com/cool-japan/oxilean),
-γ-1' track: upstream codegen fix + leo4-lean4-parse PEG
-donation discussion.
+OX7 spike on 2026-05-26 found that OxiLean 0.1.2 codegen
+was broken at multiple layers (BVar/Const ID tracking,
+return-type inference, UInt mapping, HAdd typeclasses,
+elab-side FVar bloat). All six fixes (1a / #1 / #2 / 1b-α /
+1b-β / typeclass) landed across 2026-05-26..27 on the leo4
+fork [github.com/newsniper-org/oxilean](https://github.com/newsniper-org/oxilean)
+branch `0.1.3-leo4-ox7` (submoduled at `sibling/oxilean/`).
 
-The Phase 3 CLI wire-up stays in place — `leo4 run --impl
-rust-transpile` already emits a runtime warning and will run
-the full pipeline once OxiLean ships fixes. Until then:
-T7 only validates that the **CLI invokes leo4-oxilean-build,
-the manifest format works, the user-Cargo.toml dep check
-errors out cleanly, and the emitted crate is written to
-`transpiled/`**. The emitted crate is not expected to compile
-for non-trivial bodies.
+What works now:
+
+  - `def f (a b : UInt64) : UInt64 := a + b` (and the
+    other primitive ASCII operators `-`, `*`, `/`, `%`,
+    `<`, `<=`, `==`, plus their `Int*` / `Float*` analogues)
+    transpiles to compilable native Rust:
+    `pub fn f(_x0: u64, _x1: u64) -> u64 { (_x0 + _x1) }`.
+  - `def f (a b : UInt64) : UInt64 := UInt64.add a b`
+    (and other monomorphic primitive-namespace methods)
+    transpiles to `UInt64_add(_x0, _x1)` (caller-supplied
+    fn).
+  - All sized integer / float / Char Lean primitives map
+    to their native Rust scalars.
+
+What still has limits:
+
+  - `If`/`Match`/`Let`/`Do` expression bodies — `translate_expr`
+    has no arm for these yet; the source silently falls
+    back to the legacy walker which doesn't desugar `+`.
+  - User-namespace methods invoked via dot-syntax
+    (`MyType.foo a b`) — same Proj-fast-path as primitive
+    methods, so should work; not exercised yet.
+  - `HPow.hPow` (the `^` operator) — Rust has no native
+    `**`, so codegen falls back to `RustExpr::Call`;
+    consumer must provide a free fn or wait for the
+    method-call emit path.
+  - Multi-decl modules with cross-fn calls — single-decl
+    fixtures are covered; multi-decl coverage isn't
+    exercised in the conformance smoke tests yet.
+  - The `--impl rust-transpile` runtime still emits an
+    `experimental` warning naming OX7 — this stays until
+    coverage broadens enough to drop it (tracked as part
+    of OX7 closure).
 
 Pre-req: run from MSYS2 ucrt64 (same shell choice as T3).
 
@@ -386,23 +411,32 @@ EOF
 leo4 run --impl rust-transpile
 ```
 
-**Expect** (CLI validation only — see STATUS note above):
+**Expect** (post 2026-05-27, fixture using `a + b`):
 
-1. `cargo build --release` of `leo4-oxilean-build`
-   (only on first run; binary cached afterwards).
+1. `cargo build --release` of `leo4-oxilean-build` +
+   the fork submodule's `oxilean-codegen` (only on
+   first run after a submodule bump; binary cached
+   afterwards).
 2. `leo4-oxilean-build --manifest …` writes
    `transpiled/Cargo.toml` + `transpiled/src/lib.rs`
-   to disk. The lib.rs body is currently broken
-   (`_x4(_x5, _x6)` etc.) per OX7 — that's expected
-   until upstream lands.
-3. `cargo build` fails with Rust compile errors
-   referring to undefined `_xN` identifiers — that's
-   the expected OX7 symptom. Treat as PASS for T7's
-   CLI-validation purpose.
-4. Once OxiLean upstream lands the codegen fixes:
-   the same T7 command will produce a working
-   binary. No leo4 code changes will be needed —
-   only the OxiLean dep bump.
+   with the native-Rust body:
+
+       pub fn add(_x0: u64, _x1: u64) -> u64 {
+           (_x0 + _x1)
+       }
+
+3. `cargo build` of the user crate succeeds — the
+   transpiled crate's `Cargo.toml` is dep-free and the
+   `lib.rs` is plain Rust.
+4. `cargo run` executes the user binary and prints
+   the expected output (3 for `add(1, 2)`).
+
+If the fixture uses syntax not yet covered (e.g.
+`if c then a else b`, `match`, `let-in`), expect
+the lib.rs to revert to a degraded shape — the
+legacy walker handles parsing but not the OX7
+typeclass-projection desugar. Tracked as the OX7
+translate-coverage follow-up.
 
 No lake, no shim, no Lean toolchain involved — so
 none of the OS-PORTABILITY.md §3 mslean4 issues
