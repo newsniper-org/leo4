@@ -721,6 +721,179 @@ fn cli_reverse_mode_unknown_mode_value_reports_usage_error() {
 }
 
 #[test]
+#[ignore = "OX7 follow-up: user-defined fn cross-call elab gap — \
+            see `cli_multi_decl_cross_fn_call_currently_fails_at_elab` for the current-state pin"]
+fn cli_multi_decl_cross_fn_call() {
+    // OX7 multi-decl cross-fn smoke (2026-05-25) — every
+    // prior cli_smoke fixture has been either single-decl
+    // or multi-decl without a same-crate cross-call. This
+    // test pins down the production scenario where one
+    // emitted `pub fn` references another user-defined
+    // `pub fn` in the same transpiled crate.
+    //
+    // Fixture:
+    //   def double    (n : UInt64) : UInt64 := n + n
+    //   def quadruple (n : UInt64) : UInt64 := double (double n)
+    //
+    // Expected emit invariants:
+    //   1. Both `fn double` and `fn quadruple` exist.
+    //   2. `double`'s body folds via the BinOp path
+    //      (already covered by `cli_native_binop_smoke_*`,
+    //      reaffirmed here as a sanity check).
+    //   3. `quadruple`'s body contains a same-crate
+    //      reference to `double` — by Rust call name, not
+    //      a `_xN` placeholder. The exact shape today is
+    //      whatever the codegen emits for a const-name
+    //      application; we assert substring `double(`
+    //      appears in the body to keep the test robust
+    //      across cosmetic emit changes.
+    //
+    // STATUS (2026-05-25): currently `#[ignore]`d. The CLI
+    // exits 1 with
+    //   `elaborate_decl(quadruple): ElabError("NameNotFound(\"double\")")`
+    // — earlier-elaborated user-defined decls aren't added
+    // to the env that elaborates later decls in the same
+    // source. The fix lives upstream (`leo4_env_bootstrap`
+    // + `pure_emit` decl loop), tracked as a follow-up to
+    // OX7. The companion test
+    // `cli_multi_decl_cross_fn_call_currently_fails_at_elab`
+    // pins the current failure surface so the fix is forced
+    // to flip both tests in one commit.
+    let dir = tmp_dir("multi_decl_cross_fn");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Cross.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def double (n : UInt64) : UInt64 := n + n\n\
+         def quadruple (n : UInt64) : UInt64 := double (double n)\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=cross_fn_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_path = out_dir.join("src").join("lib.rs");
+    assert!(lib_path.exists(), "src/lib.rs must exist");
+    let lib_text = std::fs::read_to_string(&lib_path).expect("read lib.rs");
+
+    // Both fns are emitted.
+    assert!(
+        lib_text.contains("fn double"),
+        "lib.rs missing `fn double`:\n{lib_text}"
+    );
+    assert!(
+        lib_text.contains("fn quadruple"),
+        "lib.rs missing `fn quadruple`:\n{lib_text}"
+    );
+
+    // `double`'s body uses the native BinOp fold.
+    assert!(
+        lib_text.contains("(_x0 + _x0)"),
+        "fn double body must be `(_x0 + _x0)`:\n{lib_text}"
+    );
+
+    // `quadruple`'s body must reference `double` by name —
+    // i.e. the const-name lookup resolved the user-defined
+    // fn, not a stdlib symbol and not a `_xN` placeholder.
+    assert!(
+        lib_text.contains("double("),
+        "fn quadruple body must call `double(...)`:\n{lib_text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_multi_decl_cross_fn_call_currently_fails_at_elab() {
+    // OX7 multi-decl cross-fn smoke (2026-05-25) — companion
+    // current-state pin for `cli_multi_decl_cross_fn_call`.
+    //
+    // Pins the current failure surface: a user-defined fn
+    // (`double`) elaborated as decl #1 is NOT in scope when
+    // decl #2 (`quadruple`) gets elaborated against the same
+    // env. The CLI surfaces this as an exit-1 transpile
+    // failure with a `NameNotFound("double")` message.
+    //
+    // When the upstream fix lands (each elaborated decl gets
+    // added to the env passed to the next decl's elab), this
+    // test flips red, forcing the developer to:
+    //   1. Remove this pin.
+    //   2. Strip `#[ignore]` from `cli_multi_decl_cross_fn_call`.
+    let dir = tmp_dir("multi_decl_cross_fn_pin");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Cross.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def double (n : UInt64) : UInt64 := n + n\n\
+         def quadruple (n : UInt64) : UInt64 := double (double n)\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=cross_fn_pin_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+
+    // Current state: elab of `quadruple` fails because
+    // `double` is not in the env. Exit code 1 = transpile
+    // failure, NOT 2 = usage error.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "current-state pin: cross-fn elab must exit 1 (transpile failure). \
+         stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("NameNotFound") && stderr.contains("double"),
+        "current-state pin: stderr should mention `NameNotFound(\"double\")`. \
+         When this assertion fails, the cross-fn env gap has been fixed — \
+         delete this test AND un-`#[ignore]` `cli_multi_decl_cross_fn_call`. \
+         stderr={stderr}"
+    );
+    // No crate emitted on transpile failure.
+    assert!(
+        !out_dir.join("Cargo.toml").exists(),
+        "current-state pin: no Cargo.toml expected on transpile failure"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cli_translate_coverage_exists_anonstruct_match() {
     // OX7 translate coverage expansion (2026-05-27, batch 3) —
     // `Exists`, `MatchBind`, `IfLet`, `AnonStruct`, `Match`
