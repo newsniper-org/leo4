@@ -181,6 +181,11 @@ pub mod leo4_env_bootstrap;
 /// decision matrix.
 pub mod pure_emit;
 
+/// OX8.2a (2026-05-27) — reverse-direction wrapper emit.
+/// Lib API (cdylib-agnostic); CLI plumbing arrives in
+/// OX8.2b.
+pub mod reverse_emit;
+
 use leo4_abi::LeanError;
 use oxilean_codegen::lcnf::LcnfFunDecl;
 use oxilean_codegen::rust_target_backend::{RustItem, RustTargetBackend};
