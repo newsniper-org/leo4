@@ -309,7 +309,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "OX7 typeclass step (2026-05-27): regressed by translate-path going from legacy fallback to production via Lam arm + arith op mapping. Fix tracked separately."]
     fn empty_env_would_have_failed_on_uint64() {
         // Sanity / regression check: with a completely
         // empty env (no bootstrap), elab *should* report

@@ -79,17 +79,36 @@ impl std::error::Error for TranslateError {}
 /// today; recovering them is future work tracked under
 /// the broader "diagnostic quality" non-RC item.
 pub fn translate_decl(d: &L4Decl) -> Result<Located<OxDecl>, TranslateError> {
-    let value = translate_decl_kind(&d.kind, &d.univ_params)?;
+    let inner = translate_decl_kind(&d.kind, &d.univ_params)?;
     // Attach the leo4 attributes to the translated decl
     // *if* the decl variant has an `attrs` field. Variants
     // that don't (Inductive / ClassDecl / InstanceDecl /
     // Namespace / SectionDecl / Variable / Open / Mutual /
-    // Import) silently drop attrs — oxilean's elab path
-    // re-discovers them through a separate
-    // `Decl::Attribute` wrapping shape that we don't emit
-    // here. Wrapping in an outer `Decl::Attribute` is a
-    // possible follow-up if downstream needs it.
-    let value = attach_attrs(value, &d.attrs);
+    // Import) silently drop the per-variant attrs at this
+    // step.
+    let inner = attach_attrs(inner, &d.attrs);
+    // OX7 typeclass step (2026-05-27): downstream code
+    // (`decl_has_leo4_export`, the export-registry walk
+    // in `transpile_source_to_units`, etc.) expects the
+    // *outer* `Decl::Attribute { attrs: Vec<String>,
+    // decl: Box<…> }` wrapper the legacy walker
+    // produces — it only reads `attrs` from that wrapper,
+    // not from any per-variant `attrs` field. Wrap here
+    // so the translate path is observation-equivalent to
+    // the legacy walker for export discovery. This
+    // closes the 4 `transpile_source_*` regressions
+    // introduced when the translate path became
+    // production for `Lam` bodies.
+    let value = if d.attrs.is_empty() {
+        inner
+    } else {
+        let attr_names: Vec<String> =
+            d.attrs.iter().map(|a| a.name.clone()).collect();
+        OxDecl::Attribute {
+            attrs: attr_names,
+            decl: Box::new(Located::new(inner, dummy_span())),
+        }
+    };
     Ok(Located::new(value, dummy_span()))
 }
 
@@ -1122,15 +1141,31 @@ mod tests {
 
     #[test]
     fn attribute_simp_maps_to_typed_kind() {
+        // OX7 typeclass step (2026-05-27): the translator
+        // now also wraps attributed decls in an outer
+        // `OxDecl::Attribute { attrs: Vec<String>, decl
+        // }` (mirroring the legacy walker) so the
+        // production attr-discovery path
+        // (`decl_has_leo4_export`) finds the leo4_export
+        // marker. The inner Definition still carries the
+        // typed `OxAttr` list — both representations live
+        // side-by-side.
         let src = "@[simp]\ndef x : T := y";
         let decls = parse_decls(src).expect("must parse");
         let d = translate_decl(&decls[0]).expect("must translate").value;
-        match d {
+        let inner = match &d {
+            OxDecl::Attribute { attrs, decl } => {
+                assert_eq!(attrs, &vec!["simp".to_string()]);
+                &decl.value
+            }
+            _ => panic!("expected outer Attribute wrapper, got {d:?}"),
+        };
+        match inner {
             OxDecl::Definition { attrs, .. } => {
                 assert_eq!(attrs.len(), 1);
                 assert_eq!(attrs[0], OxAttr::Simp);
             }
-            other => panic!("expected Definition, got {other:?}"),
+            other => panic!("expected inner Definition, got {other:?}"),
         }
     }
 
@@ -1139,22 +1174,36 @@ mod tests {
         let src = "@[my_attr]\ndef x : T := y";
         let decls = parse_decls(src).expect("must parse");
         let d = translate_decl(&decls[0]).expect("must translate").value;
-        let OxDecl::Definition { attrs, .. } = d else { panic!("expected Definition") };
-        assert_eq!(attrs[0], OxAttr::Custom("my_attr".to_string()));
+        let OxDecl::Attribute { attrs, decl } = d else {
+            panic!("expected outer Attribute wrapper")
+        };
+        assert_eq!(attrs, vec!["my_attr".to_string()]);
+        let OxDecl::Definition { attrs: typed, .. } = decl.value else {
+            panic!("expected inner Definition")
+        };
+        assert_eq!(typed[0], OxAttr::Custom("my_attr".to_string()));
     }
 
     #[test]
     fn attribute_dropped_on_variants_without_attrs_field() {
-        // Inductive has no `attrs` field on oxilean. The
-        // translator drops them silently (no panic, no
-        // error) — `Decl::Attribute` wrapping is a
-        // possible follow-up if downstream needs.
+        // OX7 typeclass step (2026-05-27): even for
+        // variants whose inner shape doesn't carry an
+        // `attrs` field (Inductive / Class / Instance /
+        // Namespace / Section / Variable / Open / Mutual
+        // / Import), the outer `OxDecl::Attribute`
+        // wrapper still surfaces the attribute list so
+        // downstream attr discovery works uniformly. The
+        // *inner* variant is still attribute-free.
         let src = "@[inline]\ninductive Color where\n  | red";
         let decls = parse_decls(src).expect("must parse");
         let d = translate_decl(&decls[0]).expect("must translate").value;
-        match d {
+        let OxDecl::Attribute { attrs, decl } = d else {
+            panic!("expected outer Attribute wrapper")
+        };
+        assert_eq!(attrs, vec!["inline".to_string()]);
+        match decl.value {
             OxDecl::Inductive { name, .. } => assert_eq!(name, "Color"),
-            other => panic!("expected Inductive, got {other:?}"),
+            other => panic!("expected inner Inductive, got {other:?}"),
         }
     }
 

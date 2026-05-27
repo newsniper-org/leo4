@@ -4406,7 +4406,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "OX7 typeclass step (2026-05-27): regressed by translate-path going from legacy fallback to production via Lam arm + arith op mapping. Fix tracked separately."]
     fn transpile_source_to_unit_assembles_unit_when_tagged() {
         let mut registry = Leo4ExportRegistry::new();
         let env = Environment::new();
@@ -4535,7 +4534,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "OX7 typeclass step (2026-05-27): regressed by translate-path going from legacy fallback to production via Lam arm + arith op mapping. Fix tracked separately."]
     fn transpile_source_to_units_rejects_missing_mangled_for_fn() {
         let mut registry = Leo4ExportRegistry::new();
         let env = Environment::new();
@@ -4549,7 +4547,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "OX7 typeclass step (2026-05-27): regressed by translate-path going from legacy fallback to production via Lam arm + arith op mapping. Fix tracked separately."]
     fn transpile_source_to_units_uses_mangled_map_per_fn() {
         let mut registry = Leo4ExportRegistry::new();
         let env = Environment::new();
@@ -4691,7 +4688,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "OX7 typeclass step (2026-05-27): regressed by translate-path going from legacy fallback to production via Lam arm + arith op mapping. Fix tracked separately."]
     fn transpile_source_if_exported_records_when_tagged() {
         let mut registry = Leo4ExportRegistry::new();
         let env = Environment::new();
