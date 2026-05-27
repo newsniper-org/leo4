@@ -137,6 +137,8 @@ pub const ARITHMETIC_TC_PROJECTIONS: &[&str] = &[
     "LT.lt",
     "LE.le",
     "BEq.beq",
+    // OX7 (2026-05-27): propositional equality `a = b`.
+    "Eq.eq",
     // Unary.
     "Neg.neg",
     "Not.not",

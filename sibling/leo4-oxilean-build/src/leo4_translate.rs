@@ -43,8 +43,9 @@ use oxilean_parse_peg::{
 };
 use oxilean_parse::{
     AttributeKind as OxAttr, Binder as OxBinder, BinderKind as OxBinderKind,
-    Constructor as OxCtor, Decl as OxDecl, FieldDecl as OxField, Literal as OxLit,
-    Located, SortKind, SurfaceExpr as OxExpr,
+    Constructor as OxCtor, Decl as OxDecl, DoAction as OxDoAction,
+    FieldDecl as OxField, Literal as OxLit, Located, SortKind,
+    SurfaceExpr as OxExpr,
 };
 use oxilean_parse::span_util::dummy_span;
 
@@ -427,6 +428,60 @@ fn lam_binder_to_ox_binders(
     }
 }
 
+/// OX7 (2026-05-27) — translate one PEG `DoStmt` into
+/// the surface AST's `OxDoAction`. The PEG enum is
+/// wider — it carries `For`, `While`, `Until` (and
+/// maybe more layout-sensitive variants); these surface
+/// `TranslateError::Unsupported` so the legacy walker
+/// picks the source up. The common quadruple
+/// (`Let` / `Bind` / `Return` / pure expr) translates
+/// cleanly.
+fn translate_do_stmt(
+    s: &oxilean_parse_peg::DoStmt,
+) -> Result<OxDoAction, TranslateError> {
+    use oxilean_parse_peg::DoStmt;
+    match s {
+        DoStmt::Let { name, value } => {
+            let v = translate_expr_located(value)?;
+            Ok(OxDoAction::Let(name.clone(), v))
+        }
+        DoStmt::Bind { name, value } => {
+            let v = translate_expr_located(value)?;
+            Ok(OxDoAction::Bind(name.clone(), v))
+        }
+        DoStmt::Return(value) => {
+            let v = translate_expr_located(value)?;
+            Ok(OxDoAction::Return(v))
+        }
+        DoStmt::Expr(value) => {
+            // Bare expression statement (its effect is
+            // sequenced via the monad). Surface AST's
+            // `OxDoAction::Expr` takes the same shape.
+            let v = translate_expr_located(value)?;
+            Ok(OxDoAction::Expr(v))
+        }
+        // Catch-all: surfaces the variant name in the
+        // diagnostic so the production-coverage step
+        // knows what's still missing.
+        other => Err(TranslateError::Unsupported(
+            do_stmt_variant_name(other),
+        )),
+    }
+}
+
+fn do_stmt_variant_name(s: &oxilean_parse_peg::DoStmt) -> &'static str {
+    use oxilean_parse_peg::DoStmt;
+    match s {
+        DoStmt::Let { .. }     => "DoStmt::Let",
+        DoStmt::Bind { .. }    => "DoStmt::Bind",
+        DoStmt::Return(_)      => "DoStmt::Return",
+        DoStmt::For { .. }     => "DoStmt::For",
+        DoStmt::While { .. }   => "DoStmt::While",
+        DoStmt::Until { .. }   => "DoStmt::Until",
+        _ => "DoStmt::<other>",
+    }
+}
+
 /// Wrap `inner` in a Pi-type over the given binders.
 /// Empty binders pass through unchanged.
 fn wrap_pi(binders: &[OxBinder], inner: Located<OxExpr>) -> Located<OxExpr> {
@@ -521,6 +576,9 @@ fn arith_op_to_tc_projection(op: &str) -> &str {
         // codegen handles them as TODO — same as the
         // legacy lowering's behaviour.
         "==" => "BEq.beq",
+        // OX7 (2026-05-27): propositional equality `a = b`
+        // lowers to `Eq.eq a b`. Distinct from `==` (BEq).
+        "=" => "Eq.eq",
         // Unmapped — keep `Var(op)` for the legacy path.
         // Includes ">", ">=", "&&", "||", "!=", "≠",
         // "→", "↔", "∈", "∉", "⊆", etc. Some will
@@ -671,6 +729,46 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             // implicit args anyway (codegen sees only the
             // explicit App-tree).
             translate_expr(inner)
+        }
+        // OX7 (2026-05-27) coverage expansion, 2nd batch:
+        // dependent / monadic / anonymous-ctor surfaces.
+        L4Expr::Forall(binders, body) => {
+            // `∀ (x : Nat), P x` / `forall (x : Nat), P x`
+            // — universal quantification at type level.
+            // Lowers to a dependent `OxExpr::Pi` over the
+            // bound parameters. Same binder-expansion as
+            // `Lam` (see `lam_binder_to_ox_binders`).
+            let mut ox_binders: Vec<OxBinder> = Vec::new();
+            for lb in binders {
+                ox_binders.extend(lam_binder_to_ox_binders(lb)?);
+            }
+            let body_loc = translate_expr_located(body)?;
+            Ok(OxExpr::Pi(ox_binders, Box::new(body_loc)))
+        }
+        L4Expr::Do(stmts) => {
+            // `do { ... }` — monadic block. PEG's
+            // `DoStmt` enum is wider than oxilean-parse's
+            // `DoAction` (we also have `For`, `While`,
+            // `Until`); the unsupported variants surface
+            // a `TranslateError::Unsupported("DoStmt::<x>")`
+            // so the legacy walker can still pick the
+            // source up.
+            let mut actions: Vec<OxDoAction> = Vec::with_capacity(stmts.len());
+            for s in stmts {
+                actions.push(translate_do_stmt(s)?);
+            }
+            Ok(OxExpr::Do(actions))
+        }
+        L4Expr::AnonCtor(items) => {
+            // `⟨a, b, c⟩` — anonymous constructor for
+            // structures / inductives with a single
+            // explicit ctor. Surface AST has a direct
+            // `AnonymousCtor` variant.
+            let mut out = Vec::with_capacity(items.len());
+            for it in items {
+                out.push(Located::new(translate_expr(it)?, dummy_span()));
+            }
+            Ok(OxExpr::AnonymousCtor(out))
         }
         // OX7 (α, 2026-05-27) — `fun BINDERS => body` and
         // its synonyms. PEG `LamBinder::Typed { names,

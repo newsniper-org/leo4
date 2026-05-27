@@ -1,14 +1,21 @@
-use leo4_oxilean_build::{lean4_normalize, parse_decls_for_transpile, leo4_translate};
+use leo4_oxilean_build::{lean4_normalize, leo4_translate};
 use oxilean_parse_peg::parse_decls as peg_parse_decls;
 
-fn main() {
-    let src = "def maxU64 (a b : UInt64) : UInt64 := if a < b then b else a\n";
+fn try_one(label: &str, src: &str) {
     let norm = lean4_normalize(src);
-    let peg = peg_parse_decls(&norm).expect("peg parse");
-    for d in &peg {
+    let peg = match peg_parse_decls(&norm) {
+        Ok(p) => p,
+        Err(e) => { eprintln!("[{label}] PEG ERR: {e:?}"); return; }
+    };
+    for (i, d) in peg.iter().enumerate() {
+        eprintln!("[{label}] decl #{i}: kind = {:?}", d.kind);
         match leo4_translate::translate_decl(d) {
-            Ok(decl) => eprintln!("[trace] translate OK: {decl:#?}"),
-            Err(e) => eprintln!("[trace] translate ERR: {e}"),
+            Ok(_) => eprintln!("[{label}] translate OK"),
+            Err(e) => eprintln!("[{label}] translate ERR: {e}"),
         }
     }
+}
+
+fn main() {
+    try_one("just_return", "def justReturn : IO Unit := do return ()\n");
 }
