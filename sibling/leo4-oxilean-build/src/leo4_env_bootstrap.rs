@@ -107,8 +107,53 @@ pub fn add_leo4_primitives(env: &mut Environment) -> Result<(), String> {
             format!("arithmetic-tc axiom `{op}` install failed: {e}")
         })?;
     }
+    // OX7 InterpStr step (2026-05-28): register identifiers
+    // the `s!"…{x}…"` lowering emits but OxiLean's
+    // `init_builtin_env` doesn't ship. `String.append` is
+    // already present from the kernel's builtin install (see
+    // oxilean-kernel/src/builtin/functions.rs), so we only
+    // need `toString` here. Treating it as a leaf axiom
+    // (Sort 1) avoids re-deriving the `ToString` typeclass
+    // — the same model as ARITHMETIC_TC_PROJECTIONS: the
+    // name exists for elab's identifier-resolution pass,
+    // codegen pattern-matches on it at LCNF time if it ever
+    // needs to emit a real conversion.
+    for name in STRING_INTERP_AXIOMS {
+        // Defensively skip names that are already present —
+        // `String.append` slots through OxiLean's builtin
+        // install and would otherwise trip
+        // DuplicateDeclaration here.
+        if env.contains(&Name::from_str(name)) {
+            continue;
+        }
+        let decl = Declaration::Axiom {
+            name: Name::from_str(name),
+            univ_params: vec![],
+            ty: type1.clone(),
+        };
+        env.add(decl).map_err(|e| {
+            format!("string-interp axiom `{name}` install failed: {e}")
+        })?;
+    }
     Ok(())
 }
+
+/// OX7 InterpStr step (2026-05-28): identifiers the
+/// `L4Expr::InterpStr` → `String.append`/`toString`
+/// desugar in `leo4_translate` emits. Installed as leaf
+/// axioms so the parser-desugared identifiers resolve at
+/// elab time without `NameNotFound`. Mirrors the
+/// ARITHMETIC_TC_PROJECTIONS pattern.
+///
+/// Names already shipped by OxiLean's `init_builtin_env`
+/// (currently `String.append`) are listed here for
+/// completeness + future-proofing; the install loop
+/// skips any name that's already present to avoid
+/// DuplicateDeclaration.
+pub const STRING_INTERP_AXIOMS: &[&str] = &[
+    "String.append",
+    "toString",
+];
 
 /// OX7 typeclass step (2026-05-27): the projection
 /// names oxilean-parse desugars infix arithmetic /
@@ -338,6 +383,24 @@ mod tests {
              ships UInt64, trim LEO4_PRIMITIVE_TYPES + this \
              test."
         );
+    }
+
+    #[test]
+    fn bootstrap_env_installs_string_interp_axioms() {
+        // OX7 InterpStr step (2026-05-28): `toString` must
+        // land in the bootstrapped env so the
+        // `s!"…{x}…"` desugar in `leo4_translate`
+        // (`InterpStr` arm) resolves at elab time.
+        // `String.append` was already shipped by
+        // OxiLean's `init_builtin_env`; the install loop
+        // skips it but the post-condition still holds.
+        let env = bootstrap_env().expect("bootstrap must succeed");
+        for name in STRING_INTERP_AXIOMS {
+            assert!(
+                env.contains(&Name::str(*name)),
+                "string-interp axiom `{name}` must be installed"
+            );
+        }
     }
 
     #[test]

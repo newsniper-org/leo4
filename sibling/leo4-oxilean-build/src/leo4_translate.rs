@@ -968,6 +968,83 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             let body_loc = translate_expr_located(body)?;
             Ok(OxExpr::Lam(ox_binders, Box::new(body_loc)))
         }
+        // OX7 (2026-05-28): `s!"text {x} more"` Lean 4
+        // interpolation strings. The PEG lowers them to
+        // `InterpStr(Vec<InterpPart>)` where each part is
+        // either a `Text(String)` literal segment or a
+        // `Hole(Expr)` interpolated subexpression.
+        //
+        // The OxiLean surface AST has a `StringInterp`
+        // variant but its `StringPart::Interpolation` is
+        // token-level (`Vec<Token>`), not expression-level
+        // — there is no direct map from `InterpPart::Hole(Expr)`
+        // to `StringPart::Interpolation(Vec<Token>)` without
+        // reconstructing tokens.
+        //
+        // Instead, lower to a `String.append` concatenation
+        // chain — semantically equivalent and uses only
+        // primitives already available in the env:
+        //
+        //   s!"a{x}b"  =>  String.append "a"
+        //                    (String.append (toString x) "b")
+        //
+        // `String.append` is installed by OxiLean's
+        // `init_builtin_env`; `toString` is registered as a
+        // leaf axiom via `STRING_INTERP_AXIOMS` in
+        // `leo4_env_bootstrap` so the parser-desugared
+        // identifier resolves without `NameNotFound`.
+        //
+        // Empty parts list (rare but possible — e.g. `s!""`
+        // before the PEG splits into a single Text arm)
+        // degrades to `Lit(String(""))`.
+        L4Expr::InterpStr(parts) => {
+            if parts.is_empty() {
+                return Ok(OxExpr::Lit(OxLit::String(String::new())));
+            }
+            // Convert each `InterpPart` to a `Located<OxExpr>`
+            // suitable for feeding the `String.append` chain.
+            let mut pieces: Vec<Located<OxExpr>> =
+                Vec::with_capacity(parts.len());
+            for part in parts {
+                let piece = match part {
+                    oxilean_parse_peg::InterpPart::Text(s) => {
+                        OxExpr::Lit(OxLit::String(s.clone()))
+                    }
+                    oxilean_parse_peg::InterpPart::Hole(e) => {
+                        let inner = translate_expr_located(e)?;
+                        let head = Located::new(
+                            OxExpr::Var("toString".to_string()),
+                            dummy_span(),
+                        );
+                        OxExpr::App(Box::new(head), Box::new(inner))
+                    }
+                };
+                pieces.push(Located::new(piece, dummy_span()));
+            }
+            // Right-fold into a `String.append` chain:
+            //   [a, b, c] => append a (append b c)
+            // For a single piece this just returns the piece's
+            // inner expression unchanged.
+            let mut iter = pieces.into_iter().rev();
+            // Safe: parts.is_empty() handled above, so `pieces`
+            // is non-empty and the first `next()` yields a value.
+            let mut acc = iter.next().expect("non-empty pieces");
+            for left in iter {
+                let head = Located::new(
+                    OxExpr::Var("String.append".to_string()),
+                    dummy_span(),
+                );
+                let head_left = Located::new(
+                    OxExpr::App(Box::new(head), Box::new(left)),
+                    dummy_span(),
+                );
+                acc = Located::new(
+                    OxExpr::App(Box::new(head_left), Box::new(acc)),
+                    dummy_span(),
+                );
+            }
+            Ok(acc.value)
+        }
         // OX7 (γ, 2026-05-27): name the variant in the
         // diagnostic so production logs say *which*
         // shape forced the legacy-walker fallback. The
@@ -1551,5 +1628,99 @@ mod tests {
         let decls = parse_decls(r#"infix:65 " + " => HAdd.hAdd"#).expect("must parse");
         let err = translate_decl(&decls[0]).expect_err("DSL must be Unsupported");
         assert!(matches!(err, TranslateError::Unsupported(s) if s.contains("DSL")));
+    }
+
+    // ─── OX7 (2026-05-28) — InterpStr lowering ─────────────
+
+    #[test]
+    fn interp_str_two_part_text_hole_lowers_to_concat() {
+        // `def s (n : Nat) : String := s!"x={n}"` →
+        //   ty:  Pi([n:Nat], String)
+        //   val: Lam([n], App(App(Var("String.append"),
+        //                         Lit("x=")),
+        //                     App(Var("toString"),
+        //                         Var("n"))))
+        let src = r#"def s (n : Nat) : String := s!"x={n}""#;
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0])
+            .expect("OX7 InterpStr arm must translate")
+            .value;
+        let OxDecl::Definition { val, .. } = d else {
+            panic!("expected Definition")
+        };
+        let OxExpr::Lam(_binders, body) = val.value else {
+            panic!("expected Lam wrapping body")
+        };
+        // Expect: App(App(Var("String.append"), Lit("x=")),
+        //              App(Var("toString"), Var("n")))
+        let OxExpr::App(head_left, rhs) = body.value else {
+            panic!("expected outer App for String.append-chain head")
+        };
+        let OxExpr::App(head, lhs) = head_left.value else {
+            panic!("expected nested App for String.append's first arg")
+        };
+        assert!(
+            matches!(head.value, OxExpr::Var(ref s) if s == "String.append"),
+            "head must be Var(\"String.append\")"
+        );
+        assert!(
+            matches!(lhs.value, OxExpr::Lit(OxLit::String(ref s)) if s == "x="),
+            "first append arg must be the leading text literal"
+        );
+        // Second append arg: `toString n`.
+        let OxExpr::App(ts_head, ts_arg) = rhs.value else {
+            panic!("expected `toString` App for Hole part")
+        };
+        assert!(
+            matches!(ts_head.value, OxExpr::Var(ref s) if s == "toString"),
+            "Hole must lower through Var(\"toString\")"
+        );
+        assert!(
+            matches!(ts_arg.value, OxExpr::Var(ref s) if s == "n"),
+            "toString's arg must be the original hole expression"
+        );
+    }
+
+    #[test]
+    fn interp_str_pure_text_lowers_to_single_string_lit() {
+        // `s!"hello"` with no `{…}` parts still parses as
+        // InterpStr (one Text part). The right-fold over a
+        // single piece must surface the bare literal, not a
+        // degenerate `String.append` application.
+        let src = r#"def s : String := s!"hello""#;
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else {
+            panic!("expected Definition")
+        };
+        assert!(
+            matches!(
+                val.value,
+                OxExpr::Lit(OxLit::String(ref s)) if s == "hello"
+            ),
+            "single-Text InterpStr must collapse to a plain string literal"
+        );
+    }
+
+    #[test]
+    fn interp_str_hole_only_lowers_to_bare_to_string() {
+        // `s!"{n}"` — a single Hole, no surrounding text.
+        // Should land as `toString n` (no `String.append`).
+        let src = r#"def s (n : Nat) : String := s!"{n}""#;
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else {
+            panic!("expected Definition")
+        };
+        let OxExpr::Lam(_binders, body) = val.value else {
+            panic!("expected Lam")
+        };
+        let OxExpr::App(head, arg) = body.value else {
+            panic!("expected App(toString, n)")
+        };
+        assert!(
+            matches!(head.value, OxExpr::Var(ref s) if s == "toString")
+        );
+        assert!(matches!(arg.value, OxExpr::Var(ref s) if s == "n"));
     }
 }
