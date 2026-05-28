@@ -245,10 +245,28 @@ fn expand_one(item: &ImportItem, mangling: &serde_json::Value) -> syn::Result<To
 
     let lean = format_ident!("lean");
 
-    // Encode each arg via `<T as LeanMarshal>::canonical_encode`.
-    let encode_stmts = arg_idents.iter().zip(arg_types.iter()).map(|(name, ty)| {
-        quote! { <#ty as ::leo4::LeanMarshal>::canonical_encode(&#name, &mut args); }
-    });
+    // Encode each arg. Regular `T: LeanMarshal` types go through
+    // `canonical_encode`; bare-fn types
+    // (`fn(T₁,…,Tₙ) -> R`) take the Phase 10-B1.x outbound path
+    // — register the closure in `lean.callback_registry()`, then
+    // encode the minted `callback_id` (u64 LE) as the wire slot.
+    // The RAII `RegistrationGuard` stays in scope until the
+    // wrapper returns, enforcing the per-call lifetime contract
+    // (SPEC §13a).
+    let encode_stmts: Vec<TokenStream> = arg_idents
+        .iter()
+        .zip(arg_types.iter())
+        .enumerate()
+        .map(|(idx, (name, ty))| {
+            if let Type::BareFn(bare) = ty {
+                outbound_callback_encode(idx, name, bare, &lean)
+            } else {
+                quote! {
+                    <#ty as ::leo4::LeanMarshal>::canonical_encode(&#name, &mut args);
+                }
+            }
+        })
+        .collect();
 
     let arg_decls = arg_idents.iter().zip(arg_types.iter()).map(|(name, ty)| {
         quote! { #name: #ty }
@@ -307,6 +325,70 @@ fn expand_one(item: &ImportItem, mangling: &serde_json::Value) -> syn::Result<To
 /// Map a Rust type (as parsed by `syn`) to its IDL counterpart so
 /// we can mangle it the same way the Lake plugin does. Returns
 /// `None` for types outside the recognised set.
+/// #75 step 2 — emit the register + encode shim for a single
+/// `fn(T₁,…,Tₙ) -> R` argument. The minted `callback_id` (u64
+/// LE) goes into the canonical args buffer; the
+/// `RegistrationGuard` is bound to a local that stays in scope
+/// for the rest of the wrapper body, so the callback survives
+/// the boundary call and gets purged on wrapper return (SPEC
+/// §13a's per-call lifetime contract enforced by RAII).
+fn outbound_callback_encode(
+    idx: usize,
+    name: &syn::Ident,
+    bare: &syn::TypeBareFn,
+    lean: &syn::Ident,
+) -> TokenStream {
+    use proc_macro2::Span;
+    let id_var = syn::Ident::new(&format!("__leo4_cb_id_{idx}"), Span::call_site());
+    let guard_var = syn::Ident::new(
+        &format!("__leo4_cb_guard_{idx}"),
+        Span::call_site(),
+    );
+
+    let arg_decode_idents: Vec<syn::Ident> = (0..bare.inputs.len())
+        .map(|i| syn::Ident::new(&format!("__leo4_cb_arg_{idx}_{i}"), Span::call_site()))
+        .collect();
+    let arg_types: Vec<&Type> = bare.inputs.iter().map(|a| &a.ty).collect();
+    let ret_ty: Type = match &bare.output {
+        ReturnType::Default => syn::parse_quote!(()),
+        ReturnType::Type(_, ty) => (**ty).clone(),
+    };
+
+    quote! {
+        // Type-erased adapter: decode args via LeanMarshal, call
+        // the user's bare fn, encode the return value.
+        let (#id_var, #guard_var) = ::std::sync::Arc::clone(#lean.callback_registry())
+            .register(move |__leo4_cb_args: &[u8]|
+                -> ::core::result::Result<::std::vec::Vec<u8>, ::leo4::LeanError>
+            {
+                let __leo4_cb_off: usize = 0;
+                #(
+                    let (#arg_decode_idents, __leo4_cb_off) = {
+                        let (v, n) = <#arg_types as ::leo4::LeanMarshal>::canonical_decode(
+                            __leo4_cb_args,
+                            __leo4_cb_off,
+                        )?;
+                        (v, n)
+                    };
+                )*
+                let __leo4_cb_ret = (#name)(#(#arg_decode_idents),*);
+                let mut __leo4_cb_out: ::std::vec::Vec<u8> =
+                    ::std::vec::Vec::new();
+                <#ret_ty as ::leo4::LeanMarshal>::canonical_encode(
+                    &__leo4_cb_ret,
+                    &mut __leo4_cb_out,
+                );
+                let _ = __leo4_cb_off;
+                ::core::result::Result::Ok(__leo4_cb_out)
+            });
+        // Keep the guard alive until the wrapper returns. The
+        // `_` prefix suppresses unused-binding warnings while
+        // still extending the binding's lifetime.
+        let _ = &#guard_var;
+        args.extend_from_slice(&#id_var.to_le_bytes());
+    }
+}
+
 fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
     if let Type::Tuple(t) = ty {
         if t.elems.is_empty() {
@@ -316,6 +398,38 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
         let inners: ::std::option::Option<Vec<IDLType>> =
             t.elems.iter().map(rust_type_to_idl).collect();
         return inners.map(IDLType::Tuple);
+    }
+    // Phase 10-B1.x outbound callback recognition (#75 step 2,
+    // 2026-05-28). `fn(T₁,…,Tₙ) -> R` bare function-pointer types
+    // in `leo4::import!` signatures lower to the same
+    // `IDLType::Fn` slot that `LeanCallback<R, Args>` uses on the
+    // inbound side — wire form is identical (u64 callback_id),
+    // SPEC §13a. The macro then emits a register + encode +
+    // call + decode shim around the user's `fn` pointer.
+    if let Type::BareFn(bare) = ty {
+        // Skip exotic bare-fn surfaces (variadic, unsafe, extern
+        // ABI): leo4 boundary closures are always plain Rust
+        // `fn(...) -> R`.
+        if bare.lifetimes.is_some()
+            || bare.unsafety.is_some()
+            || bare.abi.is_some()
+            || bare.variadic.is_some()
+        {
+            return None;
+        }
+        let args: ::std::option::Option<Vec<IDLType>> = bare
+            .inputs
+            .iter()
+            .map(|a| rust_type_to_idl(&a.ty))
+            .collect();
+        let ret = match &bare.output {
+            ReturnType::Default => return None,
+            ReturnType::Type(_, t) => rust_type_to_idl(t)?,
+        };
+        return Some(IDLType::Fn {
+            args: args?,
+            ret: Box::new(ret),
+        });
     }
     let Type::Path(p) = ty else { return None };
     if p.qself.is_some() {
@@ -558,6 +672,47 @@ mod tests {
         );
 
         let ty: Type = syn::parse_str("MyCustom").unwrap();
+        assert_eq!(rust_type_to_idl(&ty), None);
+    }
+
+    #[test]
+    fn rust_type_to_idl_bare_fn_outbound_callback() {
+        // `fn(u64) -> u64` — the natural outbound shape.
+        // Same `IDLType::Fn` slot as `LeanCallback<u64, (u64,)>`
+        // so they share the wire encoding (u64 callback_id).
+        let ty: Type = syn::parse_str("fn(u64) -> u64").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: vec![IDLType::U64],
+                ret: Box::new(IDLType::U64),
+            })
+        );
+
+        let ty: Type = syn::parse_str("fn(u32, u32) -> bool").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: vec![IDLType::U32, IDLType::U32],
+                ret: Box::new(IDLType::Bool),
+            })
+        );
+
+        // 0-arg bare fn → fn() -> R.
+        let ty: Type = syn::parse_str("fn() -> u64").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: Vec::new(),
+                ret: Box::new(IDLType::U64),
+            })
+        );
+
+        // Exotic surfaces rejected: `unsafe fn` / `extern fn`.
+        let ty: Type = syn::parse_str("unsafe fn(u64) -> u64").unwrap();
+        assert_eq!(rust_type_to_idl(&ty), None);
+
+        let ty: Type = syn::parse_str(r#"extern "C" fn(u64) -> u64"#).unwrap();
         assert_eq!(rust_type_to_idl(&ty), None);
     }
 

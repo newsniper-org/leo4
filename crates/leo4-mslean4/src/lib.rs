@@ -248,6 +248,15 @@ pub struct Lean {
     /// itself is `!Sync`. The mutex is contended only on first call
     /// per mangled name.
     call_cache: std::sync::Mutex<HashMap<String, LeoCallShimFn>>,
+    /// Outbound callback registry — minted ids live here for the
+    /// duration of a single boundary call (#75 step 2, 2026-05-28).
+    /// `leo4::import!`-emitted wrappers register each `fn(...)`
+    /// arg before encoding its `callback_id` into the args buffer,
+    /// then drop the [`RegistrationGuard`] on return. The impl
+    /// side (mslean4 LECQ frame / oxilean evaluator re-entry)
+    /// dispatches `invoke(id, args)` back into this registry when
+    /// the receiving Lean closure fires.
+    callback_registry: std::sync::Arc<leo4_abi::RustCallbackRegistry>,
 }
 
 // SAFETY: the cached function pointers are valid for the lifetime of
@@ -393,7 +402,23 @@ impl Lean {
             so_path: so_path.as_ref().to_path_buf(),
             lean_dec_ref: dec_ref_cold_fn,
             call_cache: std::sync::Mutex::new(HashMap::new()),
+            callback_registry: std::sync::Arc::new(
+                leo4_abi::RustCallbackRegistry::new(),
+            ),
         })
+    }
+
+    /// Access the per-`Lean` outbound callback registry (#75
+    /// step 2, 2026-05-28). `leo4::import!` wrappers use this to
+    /// register Rust closures that get passed across the boundary
+    /// as `fn(...) -> R` arguments. The impl-side dispatcher
+    /// (mslean4 LECQ frame consumer / oxilean evaluator hook) is
+    /// responsible for calling [`RustCallbackRegistry::invoke`]
+    /// when the receiving Lean closure dereferences a
+    /// `callback_id` minted into this registry.
+    #[must_use]
+    pub fn callback_registry(&self) -> &std::sync::Arc<leo4_abi::RustCallbackRegistry> {
+        &self.callback_registry
     }
 
     /// Dispatch one shim entry point by mangled body.
