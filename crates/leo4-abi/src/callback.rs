@@ -21,7 +21,9 @@
 //!   encode/decode; runtime wiring lands per-impl.
 
 use core::marker::PhantomData;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::{
     error::{error_codes, LeanError},
@@ -188,6 +190,173 @@ impl<R, Args> LeanMarshal for LeanCallback<R, Args> {
     }
 }
 
+// ─── Outbound direction (P0b step 1, 2026-05-28) ────────────
+
+/// Type-erased Rust callback stored in [`RustCallbackRegistry`].
+/// Receives args as canonical-ABI bytes, returns canonical-ABI
+/// bytes for the result (or a `LeanError` to propagate back).
+pub type ErasedRustCallback =
+    Arc<dyn Fn(&[u8]) -> Result<Vec<u8>, LeanError> + Send + Sync>;
+
+/// Main-side registry for Rust closures that are passed across
+/// the leo4 boundary as function-arrow arguments (`fn(...) -> R`
+/// in `leo4::import!` declarations). Pairs with the inbound
+/// [`LeanCallback<R, Args>`]: that one holds an id minted on the
+/// *other* side; this one mints ids on *this* side.
+///
+/// Per-call lifetime: the macro-emitted wrapper allocates fresh
+/// ids on entry, encodes them into the args buffer, calls the
+/// shim, then drops the registration on return. Concrete
+/// allocation/deallocation API is exposed via [`Self::register`]
+/// + [`RegistrationGuard`] (RAII).
+///
+/// Thread-safety: behind an internal `Mutex<HashMap>`. The
+/// callback closures themselves are `Send + Sync`.
+///
+/// **NOT exposed in v0.** This commit ships the registry as the
+/// substrate for the macro substitution (P0b step 2) that lands
+/// in the follow-up. v0 users with hand-written boundary callers
+/// can construct one explicitly; the `leo4::import!` macro
+/// substitution + impl-side wiring (adapter for oxilean, IPC
+/// frame for mslean4) is what turns this into a first-class
+/// surface.
+pub struct RustCallbackRegistry {
+    next_id: AtomicU64,
+    callbacks: Mutex<HashMap<u64, ErasedRustCallback>>,
+}
+
+impl Default for RustCallbackRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RustCallbackRegistry {
+    /// Construct an empty registry. The first id minted is `1`
+    /// (id `0` is the wire-level null sentinel per SPEC §13a).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            next_id: AtomicU64::new(1),
+            callbacks: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Register a callback and return its freshly-minted
+    /// `callback_id` along with an RAII guard. Dropping the
+    /// guard deregisters the callback. Callers MUST hold the
+    /// guard for the entire duration of any boundary call that
+    /// passes the id, and MUST drop it before the call returns
+    /// — id lifetimes are per-call-scope per SPEC §13a.
+    ///
+    /// The closure receives canonical-ABI args bytes (encoded
+    /// upstream by the boundary's invoker) and returns
+    /// canonical-ABI return bytes (decoded downstream by the
+    /// boundary's invoker). For typed Rust `Fn(...) -> R`
+    /// closures, the macro substitution layer (P0b step 2)
+    /// will generate the encode/decode shim automatically;
+    /// for hand-written callers, build the byte-shaped
+    /// closure yourself.
+    pub fn register<F>(self: &Arc<Self>, callback: F) -> (u64, RegistrationGuard)
+    where
+        F: Fn(&[u8]) -> Result<Vec<u8>, LeanError> + Send + Sync + 'static,
+    {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        debug_assert!(id != 0, "RustCallbackRegistry: id 0 is reserved (SPEC §13a)");
+        let arc: ErasedRustCallback = Arc::new(callback);
+        self.callbacks
+            .lock()
+            .expect("RustCallbackRegistry mutex poisoned at register")
+            .insert(id, arc);
+        let guard = RegistrationGuard {
+            registry: Arc::clone(self),
+            id,
+        };
+        (id, guard)
+    }
+
+    /// Look up a callback by id and invoke it with `args`.
+    ///
+    /// Used by the boundary adapter (oxilean) or dispatcher
+    /// (mslean4) when the receiving side dereferences a
+    /// callback id during a boundary call's body.
+    ///
+    /// # Errors
+    /// `INVALID_HANDLE` if no callback is registered for `id`
+    /// (either it was never registered or the guard was
+    /// dropped early). Propagates whatever `LeanError` the
+    /// callback itself returns.
+    pub fn invoke(&self, id: u64, args: &[u8]) -> Result<Vec<u8>, LeanError> {
+        let cb = self
+            .callbacks
+            .lock()
+            .expect("RustCallbackRegistry mutex poisoned at invoke")
+            .get(&id)
+            .cloned();
+        let cb = cb.ok_or_else(|| {
+            LeanError::new(
+                error_codes::INVALID_HANDLE,
+                format!(
+                    "RustCallbackRegistry::invoke: callback_id {id} not \
+                     registered (either never minted or guard dropped early)"
+                ),
+            )
+        })?;
+        cb(args)
+    }
+
+    /// Diagnostic: number of currently-registered callbacks.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.callbacks
+            .lock()
+            .map(|c| c.len())
+            .unwrap_or(0)
+    }
+
+    /// `true` iff no callbacks are registered.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Forcibly deregister an id. Normally called by
+    /// [`RegistrationGuard::drop`]; exposed for symmetry +
+    /// for tests that bypass the guard.
+    pub fn deregister(&self, id: u64) {
+        self.callbacks
+            .lock()
+            .expect("RustCallbackRegistry mutex poisoned at deregister")
+            .remove(&id);
+    }
+}
+
+/// RAII handle returned by [`RustCallbackRegistry::register`].
+/// Dropping the guard removes the callback from the registry —
+/// SPEC §13a's per-call lifetime contract enforced by the type
+/// system rather than convention.
+pub struct RegistrationGuard {
+    registry: Arc<RustCallbackRegistry>,
+    id: u64,
+}
+
+impl RegistrationGuard {
+    /// The minted `callback_id`. Identical to the first
+    /// element of the `register(...)` tuple — kept here so
+    /// the guard alone is sufficient for callers that want to
+    /// forward only the id.
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+impl Drop for RegistrationGuard {
+    fn drop(&mut self) {
+        self.registry.deregister(self.id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +439,64 @@ mod tests {
         let s = format!("{cb:?}");
         assert!(s.contains("99"));
         assert!(s.contains("bound: false"));
+    }
+
+    // ─── RustCallbackRegistry (P0b step 1) ─────────────────
+
+    #[test]
+    fn rust_callback_registry_mints_nonzero_ids() {
+        let reg = Arc::new(RustCallbackRegistry::new());
+        let (id1, _g1) = reg.register(|_args: &[u8]| Ok(Vec::new()));
+        let (id2, _g2) = reg.register(|_args: &[u8]| Ok(Vec::new()));
+        assert_ne!(id1, 0, "id 0 reserved as null sentinel");
+        assert_ne!(id2, 0);
+        assert_ne!(id1, id2, "each register call must mint a fresh id");
+    }
+
+    #[test]
+    fn rust_callback_registry_invoke_routes_to_callback() {
+        let reg = Arc::new(RustCallbackRegistry::new());
+        let (id, _guard) = reg.register(|args: &[u8]| {
+            // Echo args+1 byte
+            let mut out = args.to_vec();
+            out.push(1);
+            Ok(out)
+        });
+        let out = reg.invoke(id, &[10, 20]).unwrap();
+        assert_eq!(out, vec![10, 20, 1]);
+    }
+
+    #[test]
+    fn rust_callback_registry_guard_drop_deregisters() {
+        let reg = Arc::new(RustCallbackRegistry::new());
+        let (id, guard) = reg.register(|_args: &[u8]| Ok(Vec::new()));
+        assert_eq!(reg.len(), 1);
+        drop(guard);
+        assert_eq!(reg.len(), 0, "guard drop must purge the callback");
+        let err = reg.invoke(id, &[]).unwrap_err();
+        assert_eq!(err.code, error_codes::INVALID_HANDLE);
+    }
+
+    #[test]
+    fn rust_callback_registry_invoke_unknown_id_yields_invalid_handle() {
+        let reg = Arc::new(RustCallbackRegistry::new());
+        let err = reg.invoke(0xDEAD_BEEF, &[]).unwrap_err();
+        assert_eq!(err.code, error_codes::INVALID_HANDLE);
+    }
+
+    #[test]
+    fn rust_callback_registry_supports_concurrent_register_invoke() {
+        let reg = Arc::new(RustCallbackRegistry::new());
+        let n = 32;
+        let guards: Vec<_> = (0..n)
+            .map(|i| {
+                let want = i as u8;
+                reg.register(move |_args: &[u8]| Ok(vec![want]))
+            })
+            .collect();
+        for (i, (id, _g)) in guards.iter().enumerate() {
+            let r = reg.invoke(*id, &[]).unwrap();
+            assert_eq!(r, vec![i as u8]);
+        }
     }
 }

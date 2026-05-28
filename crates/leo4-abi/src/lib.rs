@@ -25,7 +25,10 @@ pub mod callback;
 pub mod rust_exports;
 pub mod rust_native;
 
-pub use callback::{CallbackInvoker, LeanCallback};
+pub use callback::{
+    CallbackInvoker, ErasedRustCallback, LeanCallback, RegistrationGuard,
+    RustCallbackRegistry,
+};
 pub use error::{error_codes, LeanError};
 pub use marshal::LeanMarshal;
 pub use rust_native::{LeanProc, LeanProcInvoker};
