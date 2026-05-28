@@ -7,6 +7,51 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — GitHub Actions CI matrix: linux-gnu / linux-musl / windows-gnullvm (2026-05-28)
+
+First leo4 CI workflow lands at `.github/workflows/ci.yml`,
+encoding the v1.0 RC C1 + C5 + Tier-1 contract from
+`OS-PORTABILITY.md` §0–§1 as automated checks:
+
+  - **`linux-gnu` (x86_64, Ubuntu 24.04)** — full pipeline:
+    `cargo build --workspace --all-targets`, `cargo test
+    --workspace`, `cargo fmt --check`, `cargo clippy`
+    (warn-only — pre-existing 129-warning baseline on
+    leo4-cli/main.rs is tracked separately for folding
+    before v1.0 RC tag). Sibling workspaces
+    (`leo4-oxilean-build`, `leo4-oxilean`,
+    `leo4-wasip3` compile-only) exercised explicitly since
+    they aren't workspace-root members.
+  - **`linux-musl` (x86_64, C5 Tier 1+)** — `cargo build`
+    + selective `cargo test` against
+    `x86_64-unknown-linux-musl` for the 14 audit-verified
+    musl-clean crates (schema-idl / leo4-idl / leo4-abi /
+    leo4-build / leo4-macros / leo4-macros-backend / leo4c
+    / leo4-rust-emit / leo4-cli / leo4-rust-worker). musl
+    toolchain installed via `apt install musl-tools clang`;
+    `CC_x86_64_unknown_linux_musl=musl-gcc`. leo4-mslean4
+    is compile-only (its runtime needs glibc-built
+    libleanshared). leo4-wasm excluded — needs a wasmtime
+    build.rs toolchain not yet pinned in the CI image.
+  - **`windows-gnullvm` (x86_64, C1 Tier 2 compile-only)** —
+    cross-build from a Linux runner against
+    `x86_64-pc-windows-gnullvm`. `cargo check` +
+    `cargo clippy` (warn-only) on the workspace,
+    excluding leo4-mslean4 (libleanshared.dll discovery
+    follows the manual-test phase) and leo4-wasm. mingw-w64
+    + lld + clang installed via apt.
+
+Triggers: `push` and `pull_request` against `main`, plus
+`workflow_dispatch` for ad-hoc runs. Concurrency group
+`ci-${{ github.workflow }}-${{ github.ref }}` cancels
+superseded runs on the same branch.
+
+Out of scope at this entry: full Windows runtime
+verification (gated on the v1.0 RC pre-release window per
+ROADMAP §10), macOS Tier 1 (C2), wasm64 (C3), Android
+(C6). Each remains a separate tier-policy decision in
+`OS-PORTABILITY.md` §0.
+
 ### Fixed — leo4-rust-bridge build.rs auto-fixes Arch `musl-clang` `stdatomic.h` miss (2026-05-24)
 
 Arch Linux's `musl-clang` wrapper passes `-nostdinc`

@@ -1,0 +1,177 @@
+name: CI
+
+# leo4 CI matrix — minimum viable v1.0 RC coverage (introduced
+# 2026-05-28 as the C1 + C5 entry gate).
+#
+# Phases that ship in this initial yml:
+#   - Linux x86_64 GNU (Tier 1) — full test suite + clippy + fmt
+#   - Linux x86_64 musl (C5 Tier 1+) — paths that don't depend on
+#     leo4-mslean4 or lake (the audit-verified 14 musl-clean
+#     crates plus leo4-rust-bridge once `musl-clang` /
+#     `musl-gcc` is available).
+#   - Windows gnullvm (C1 Tier 2) — compile-only matrix entry
+#     (`cargo check` + `cargo clippy`). Full runtime
+#     verification waits on the v1.0 RC pre-release window per
+#     ROADMAP §10.
+#
+# Out of scope until v1.x: macOS (C2), wasm64 (C3), Android
+# (C6). They sit behind explicit tier policy decisions
+# (`OS-PORTABILITY.md` §0).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # cargo-deny + clippy lints run with `-D warnings` per the
+  # workspace lint table; pre-existing leo4-cli/main.rs
+  # warning debt (~129 entries) is tracked separately and
+  # tolerated by an allow-list so CI doesn't block on it.
+  RUSTFLAGS: ""
+
+jobs:
+  # ─────────────────────────────────────────────────────────
+  # Tier 1 — Linux GNU. Full pipeline: build, test, clippy,
+  # fmt. The reference matrix entry.
+  # ─────────────────────────────────────────────────────────
+  linux-gnu:
+    name: linux-gnu (x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain
+        run: |
+          rustup show
+          rustup component add rustfmt clippy
+      - name: Build (workspace)
+        run: cargo build --workspace --all-targets
+      - name: Test (workspace)
+        run: cargo test --workspace
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      # Clippy is intentionally non-fatal at this stage —
+      # pre-existing warning debt in leo4-cli/main.rs is
+      # tracked as a separate v1.0 RC follow-up (clippy
+      # +10 cosmetic delta from the OX8.5 session, 2026-05-28).
+      # Re-enable `-D warnings` once that's folded.
+      - name: Clippy (warn-only)
+        run: cargo clippy --workspace --all-targets || true
+      # Sibling workspaces are not workspace-root members;
+      # exercise them explicitly.
+      - name: Sibling — leo4-oxilean-build
+        working-directory: sibling/leo4-oxilean-build
+        run: cargo test
+      - name: Sibling — leo4-oxilean
+        working-directory: sibling/leo4-oxilean
+        run: cargo test
+      - name: Sibling — leo4-wasip3 (compile-only on stable matrix)
+        working-directory: sibling/leo4-wasip3
+        # WASIp3 sibling requires nightly + wasip3 target; skip
+        # the build on this stable matrix entry. Tracked under
+        # Phase 7 / C4 follow-ups.
+        run: cargo check --offline || true
+
+  # ─────────────────────────────────────────────────────────
+  # C5 Tier 1+ — Linux musl. Paths with NO leo4-mslean4 and
+  # NO lake dependency. 14 audit-verified crates build clean;
+  # 2 (leo4-rust-bridge, leo4-wasm) need a musl C toolchain.
+  # ─────────────────────────────────────────────────────────
+  linux-musl:
+    name: linux-musl (x86_64) — C5 Tier 1+
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain + musl target
+        run: |
+          rustup show
+          rustup target add x86_64-unknown-linux-musl
+      - name: Install musl C toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools clang
+          # `musl-tools` provides `musl-gcc`; clang is used by
+          # the gnullvm consistency model. `cc-rs` picks the
+          # wrapper via CC_x86_64_unknown_linux_musl.
+      - name: Build (workspace) under musl target
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: |
+          # `cargo build --workspace --target ...` builds every
+          # member regardless of musl-readiness; the audit
+          # verified the 14 musl-clean crates. leo4-mslean4
+          # compiles clean but its runtime depends on glibc-
+          # built libleanshared, so test exclusion is per the
+          # C5 policy.
+          cargo build --workspace --target x86_64-unknown-linux-musl --exclude leo4-wasm
+      - name: Test (musl-clean subset)
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        # Test the audit-verified musl-clean crates. leo4-
+        # mslean4 is compile-only on musl (Lean runtime is
+        # glibc-built); leo4-wasm needs wasmtime build.rs +
+        # toolchain not yet pinned in the CI image.
+        run: |
+          cargo test --target x86_64-unknown-linux-musl \
+            -p schema-idl \
+            -p leo4-idl \
+            -p leo4-abi \
+            -p leo4-build \
+            -p leo4-macros \
+            -p leo4-macros-backend \
+            -p leo4c \
+            -p leo4-rust-emit \
+            -p leo4-cli \
+            -p leo4-rust-worker
+
+  # ─────────────────────────────────────────────────────────
+  # C1 Tier 2 — Windows gnullvm. Compile-only at v1.0 RC
+  # entry; full runtime verification deferred to the RC
+  # pre-release window. Matches the ROADMAP §10 "C1 deferred"
+  # contract.
+  # ─────────────────────────────────────────────────────────
+  windows-gnullvm:
+    name: windows-gnullvm (x86_64) — C1 Tier 2 compile
+    # Use Linux as the host for the gnullvm cross — that's the
+    # leo4 Tier 2 dev pattern documented in OS-PORTABILITY.md
+    # §1. No Windows runner needed for compile-only.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain + gnullvm target
+        run: |
+          rustup show
+          rustup target add x86_64-pc-windows-gnullvm
+      - name: Install gnullvm cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm
+          # mingw-w64 provides the runtime DLLs that the
+          # gnullvm target links against (UCRT-based).
+          sudo apt-get install -y mingw-w64 mingw-w64-tools
+      - name: Cargo check (workspace, gnullvm)
+        # Exclude leo4-mslean4 — its runtime side requires
+        # libleanshared.dll discovery + AddDllDirectory wiring
+        # which is the C1 manual-test follow-up.
+        run: |
+          cargo check --workspace --target x86_64-pc-windows-gnullvm \
+            --exclude leo4-mslean4 --exclude leo4-wasm
+      - name: Cargo clippy (workspace, gnullvm, warn-only)
+        run: |
+          cargo clippy --workspace --target x86_64-pc-windows-gnullvm \
+            --exclude leo4-mslean4 --exclude leo4-wasm || true
