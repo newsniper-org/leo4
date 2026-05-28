@@ -376,6 +376,27 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
             let e = args.get(1).and_then(rust_type_to_idl).map(Box::new);
             Result(Box::new(t), e)
         }
+        // Phase 10-B1.x — function-arrow params crossing the boundary
+        // as Lean closures appear in user exports as
+        // `LeanCallback<R, Args>`. The second generic is either a
+        // tuple of arg types (n-ary) or a single type (1-arg shorthand).
+        "LeanCallback" => {
+            let args = args_of_seg();
+            let ret = rust_type_to_idl(args.first()?)?;
+            let args_param = args.get(1)?;
+            let arrow_args: Vec<IDLType> = match args_param {
+                Type::Tuple(t) => {
+                    let collected: ::std::option::Option<Vec<IDLType>> =
+                        t.elems.iter().map(rust_type_to_idl).collect();
+                    collected?
+                }
+                _ => vec![rust_type_to_idl(args_param)?],
+            };
+            Fn {
+                args: arrow_args,
+                ret: Box::new(ret),
+            }
+        }
         _ => return None,
     })
     .or_else(|| {
@@ -538,6 +559,61 @@ mod tests {
 
         let ty: Type = syn::parse_str("MyCustom").unwrap();
         assert_eq!(rust_type_to_idl(&ty), None);
+    }
+
+    #[test]
+    fn rust_type_to_idl_lean_callback_single_arg() {
+        // `LeanCallback<u64, (u64,)>` (1-tuple wrap of single arg)
+        let ty: Type = syn::parse_str("LeanCallback<u64, (u64,)>").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: vec![IDLType::U64],
+                ret: Box::new(IDLType::U64),
+            })
+        );
+    }
+
+    #[test]
+    fn rust_type_to_idl_lean_callback_zero_args() {
+        // `LeanCallback<String, ()>` — the empty-tuple second
+        // generic encodes a 0-arg arrow `fn() -> String`.
+        let ty: Type = syn::parse_str("LeanCallback<String, ()>").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: Vec::new(),
+                ret: Box::new(IDLType::String),
+            })
+        );
+    }
+
+    #[test]
+    fn rust_type_to_idl_lean_callback_multi_arg() {
+        // `LeanCallback<bool, (u32, u32)>` — 2-ary arrow.
+        let ty: Type = syn::parse_str("LeanCallback<bool, (u32, u32)>").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: vec![IDLType::U32, IDLType::U32],
+                ret: Box::new(IDLType::Bool),
+            })
+        );
+    }
+
+    #[test]
+    fn rust_type_to_idl_lean_callback_bare_single_type() {
+        // Sugar: when the second generic is a single type rather
+        // than a 1-tuple, treat it as a single-arg arrow.
+        // `LeanCallback<u64, u32>` ≡ `LeanCallback<u64, (u32,)>`.
+        let ty: Type = syn::parse_str("LeanCallback<u64, u32>").unwrap();
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Fn {
+                args: vec![IDLType::U32],
+                ret: Box::new(IDLType::U64),
+            })
+        );
     }
 
     #[test]

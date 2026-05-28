@@ -153,6 +153,12 @@ macro_rules! tuple_impl {
     };
 }
 
+// 1-tuple `(T,)`. The IDL has no `tuple<T>` (a singleton wraps `T`
+// directly), but the Rust type `(T,)` shows up in
+// `LeanCallback<R, (T,)>` for single-arg function-arrow params
+// (Phase 10-B1.x). Wire form is identical to `T` alone — no
+// outer framing.
+tuple_impl!(A);
 tuple_impl!(A, B);
 tuple_impl!(A, B, C);
 tuple_impl!(A, B, C, D);
