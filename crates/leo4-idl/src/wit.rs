@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use schema_idl::idl::*;
+use schema_idl::idl::{IDLType, UserDecl, Schema, FuncDecl};
 
 /// Convert any identifier-like string to a WIT-friendly kebab-case form.
 ///
@@ -110,7 +110,7 @@ fn lower_type(
     self_name: Option<&str>,
     needs: &mut BTreeSet<SideAlias>,
 ) -> String {
-    use IDLType::*;
+    use IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool, Char, String, BigNat, BigInt, List, Option, Result, Tuple, Record, Variant, Enum, Flags, Resource, Io, Self_, SelfApp, Cyc, Fn};
     match t {
         U8 => "u8".into(),
         U16 => "u16".into(),
@@ -215,7 +215,7 @@ fn render_variant_case_payload(
 /// True iff `t` (transitively, but never through a nominal type's body)
 /// contains a `Self` / `Self<…>` token.
 fn type_contains_self(t: &IDLType) -> bool {
-    use IDLType::*;
+    use IDLType::{Self_, SelfApp, List, Option, Io, Result, Tuple, Record, Variant, Resource, Fn};
     match t {
         Self_ | SelfApp(_) => true,
         List(t) | Option(t) | Io(t) => type_contains_self(t),

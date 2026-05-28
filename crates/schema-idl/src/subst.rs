@@ -31,7 +31,7 @@ use crate::idl::{IDLType, UserDecl};
 /// reference resolves at a different layer (variant helper emission).
 #[must_use]
 pub fn substitute(ty: &IDLType, env: &[(String, IDLType)]) -> IDLType {
-    use IDLType::*;
+    use IDLType::{Record, Variant, Resource, List, Option, Result, Tuple, Io, SelfApp, Fn};
     let look = |name: &str| env.iter().find(|(n, _)| n == name).map(|(_, t)| t.clone());
     match ty {
         Record { fqn, args } if args.is_empty() => {

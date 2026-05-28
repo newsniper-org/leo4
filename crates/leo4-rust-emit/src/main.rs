@@ -9,11 +9,11 @@
 //! Loads the user cdylib via `dlopen`, resolves the
 //! `leo4_rust_describe_exports` extern, walks the `EXPORTS`
 //! slice, computes the canonical IDL form + its FNV-1a-64
-//! schema_hash, and writes two files into `--out-dir`:
+//! `schema_hash`, and writes two files into `--out-dir`:
 //!
 //! - `<pkg>.leo4-rust-exports.idl` — pretty canonical IDL.
-//! - `<pkg>.leo4-rust-handshake` — JSON metadata (schema_hash,
-//!   abi_version, cdylib_path, exports table).
+//! - `<pkg>.leo4-rust-handshake` — JSON metadata (`schema_hash`,
+//!   `abi_version`, `cdylib_path`, exports table).
 //!
 //! See `SPEC/reverse-direction.md` §7, §8 for the file
 //! contracts.
@@ -190,7 +190,7 @@ unsafe fn load_exports(cdylib: &Path) -> Result<Vec<EntryView>, String> {
     let mut ptr: *const ExportEntry = std::ptr::null();
     let mut len: usize = 0;
     // SAFETY: outparams are valid; symbol matches signature.
-    let rc = unsafe { sym(&mut ptr, &mut len) };
+    let rc = unsafe { sym(&raw mut ptr, &raw mut len) };
     if rc != 0 {
         return Err(format!("leo4_rust_describe_exports returned {rc}"));
     }
@@ -299,7 +299,7 @@ fn idl_form_of(mangle: &str) -> String {
 }
 
 fn idl_to_surface(t: &schema_idl::IDLType) -> String {
-    use schema_idl::IDLType::*;
+    use schema_idl::IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool, Char, String, BigInt, BigNat, List, Option, Result, Tuple, Record};
     match t {
         U8 => "u8".into(),
         U16 => "u16".into(),
@@ -351,7 +351,7 @@ fn idl_to_surface(t: &schema_idl::IDLType) -> String {
 /// result / tuple, records with FQN). Returns the parsed IDL
 /// plus the unconsumed tail.
 fn parse_mangle(s: &str) -> Result<(schema_idl::IDLType, &str), String> {
-    use schema_idl::IDLType::*;
+    use schema_idl::IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool, Char, String, BigInt, BigNat, List, Option, Record};
     let s = s.trim();
     for (tok, ty) in [
         ("u8", U8),
@@ -416,7 +416,7 @@ fn compute_schema_hash(canonical: &str) -> String {
 const BASE32_LC: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 
 fn base32lc(input: &[u8]) -> String {
-    let mut out = String::with_capacity(((input.len() * 8) + 4) / 5);
+    let mut out = String::with_capacity((input.len() * 8).div_ceil(5));
     let mut buf: u32 = 0;
     let mut bits: u32 = 0;
     for &b in input {
@@ -541,12 +541,9 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
     let mut all_mapped = true;
     for (i, m) in e.param_types.iter().enumerate() {
         param_idents.push(format!("a{i}"));
-        match lean_type_of_mangle(m) {
-            Some(t) => param_lean_tys.push(t),
-            None => {
-                all_mapped = false;
-                param_lean_tys.push(format!("/- unmapped: {m} -/ String"));
-            }
+        if let Some(t) = lean_type_of_mangle(m) { param_lean_tys.push(t) } else {
+            all_mapped = false;
+            param_lean_tys.push(format!("/- unmapped: {m} -/ String"));
         }
     }
     let ret_ty = if e.ret_type.is_empty() {
@@ -721,8 +718,7 @@ fn current_utc_iso() -> String {
     // No chrono dependency — format manually as RFC 3339 in UTC.
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let (year, month, day, hour, minute, second) = secs_to_ymdhms(secs);
     format!(
         "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
@@ -788,9 +784,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 fn derive_pkg_name(cdylib: &Path) -> String {
     let stem = cdylib
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "exports".into());
+        .file_stem().map_or_else(|| "exports".into(), |s| s.to_string_lossy().into_owned());
     stem.strip_prefix("lib").map(str::to_owned).unwrap_or(stem)
 }
 
@@ -951,7 +945,7 @@ mod tests {
             logical_name: "ping".into(),
             mangled: "leo4_rust__ping".into(),
             param_types: vec![],
-            ret_type: "".into(),
+            ret_type: String::new(),
             isolated: false,
             abi_version: 1,
         }];

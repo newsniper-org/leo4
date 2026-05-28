@@ -14,13 +14,13 @@ use crate::idl::IDLType;
 /// Lean identifiers (`@[export ident]` rejects dashes).
 #[must_use]
 pub fn fqn_seg(fqn: &str) -> String {
-    fqn.replace('.', "_").replace('-', "_")
+    fqn.replace(['.', '-'], "_")
 }
 
 /// Type encoding per SPEC/mangling.md §2.
 #[must_use]
 pub fn mangle_type(t: &IDLType) -> String {
-    use IDLType::*;
+    use IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool, Char, String, BigInt, BigNat, List, Option, Result, Tuple, Record, Variant, Enum, Flags, Resource, Io, Self_, SelfApp, Cyc, Fn};
     match t {
         U8 => "u8".into(),
         U16 => "u16".into(),
@@ -82,7 +82,7 @@ fn join_underscore(ts: &[IDLType]) -> String {
 /// parameter types verbatim.
 #[must_use]
 pub fn mangle(pkg: &str, iface: &str, fname: &str, args: &[IDLType], schema_hash: Hash) -> String {
-    let pkg_seg = pkg.replace(':', "_").replace('-', "_");
+    let pkg_seg = pkg.replace([':', '-'], "_");
     let args_seg = args.iter().map(mangle_type).collect::<Vec<_>>().join("_");
     format!(
         "leo4__{pkg_seg}__{iface}__{fname}__{args_seg}__h{}",

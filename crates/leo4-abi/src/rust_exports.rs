@@ -44,7 +44,7 @@ pub struct ExportEntry {
     /// The C-linkage symbol the dispatcher reaches via
     /// `dlsym` / `GetProcAddress`. Format:
     /// `leo4_rust__<fname>__<param_mangles>` (no `__h<hash>`
-    /// suffix — schema_hash lives in the handshake JSON only;
+    /// suffix — `schema_hash` lives in the handshake JSON only;
     /// see `SPEC/reverse-direction.md` §2).
     pub mangled: &'static str,
 

@@ -36,7 +36,7 @@ use crate::{
 /// - **oxilean** (rust-native / rust-transpile): the in-process
 ///   evaluator re-entry path documented in
 ///   `docs/ox8-3-callback-hook-design.md`. `invoke_bytes` resolves
-///   `callback_id` through the OxiLean `CallbackRegistry`
+///   `callback_id` through the `OxiLean` `CallbackRegistry`
 ///   (OX8.3a) and re-enters the evaluator on the registered
 ///   `FfiValue::Fn`.
 /// - **mslean4**: emits a `LECQ` frame (`SPEC/reverse-direction.md`

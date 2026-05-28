@@ -9,7 +9,7 @@
 //! ## Scope today (C4 + C4.x)
 //!
 //! - `Lean::open(handshake_path)` parses the handshake JSON, verifies
-//!   `abi_version`, captures the schema_hash + target_module fields.
+//!   `abi_version`, captures the `schema_hash` + `target_module` fields.
 //! - `Lean::schema_hash()` / `target_module()` / `abi_version()`
 //!   getters.
 //! - `Lean::call(mangled, args)` returns `LEO4_ERR_RUST_DLSYM_FAILED`
@@ -255,7 +255,7 @@ mod tests {
     /// `echo '(component)' | wasm-tools parse`. Used as a
     /// "smoke test" fixture — opens cleanly, instantiates with
     /// no imports needed, but has no `exports` interface so
-    /// `call(…)` returns DLSYM_FAILED.
+    /// `call(…)` returns `DLSYM_FAILED`.
     const EMPTY_COMPONENT_BYTES: &[u8] = &[
         0x00, 0x61, 0x73, 0x6d, // \0asm magic
         0x0d, 0x00, 0x01, 0x00, // component encoding header (version 0x000d 0001)

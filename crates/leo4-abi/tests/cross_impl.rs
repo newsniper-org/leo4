@@ -53,7 +53,7 @@ fn rust_bytes(name: &str) -> Result<Vec<u8>, String> {
             _ => return Err(format!("unknown char fixture {val}")),
         }),
         "string" => encode_to_vec(&match val {
-            "empty" => "".to_string(),
+            "empty" => String::new(),
             "hello" => "hello".to_string(),
             "han" => "안녕".to_string(),
             _ => return Err(format!("unknown string fixture {val}")),

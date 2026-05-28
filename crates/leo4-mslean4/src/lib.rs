@@ -113,7 +113,7 @@ fn parse_handshake(path: &Path) -> LeanResult<HandshakeMeta> {
     }
     let abi_version = u32::try_from(
         v.get("abi_version")
-            .and_then(|x| x.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .ok_or_else(|| LeanError::host("handshake.abi_version missing"))?,
     )
     .map_err(|e| LeanError::host(format!("abi_version out of u32 range: {e}")))?;
@@ -166,7 +166,7 @@ type VoidFn = unsafe extern "C" fn();
 type ModInitFn = unsafe extern "C" fn(u8) -> *mut c_void;
 /// `lean_dec_ref` is `static inline` in `lean.h`; only its cold
 /// fall-through `lean_dec_ref_cold` is `LEAN_EXPORT`'d. We dlsym
-/// the cold path and inline the fast-path m_rc decrement ourselves.
+/// the cold path and inline the fast-path `m_rc` decrement ourselves.
 type LeanDecRefColdFn = unsafe extern "C" fn(*mut c_void);
 /// `lean_dec_ref` fast path (re-implemented in Rust below) compatible
 /// with `LeanDecRefColdFn`; stored on `Lean` so `LeanRef::Drop` can
@@ -187,8 +187,8 @@ type LeanIoResultShowErrorFn = unsafe extern "C" fn(*mut c_void);
 /// ```
 ///
 /// `lean_io_result_is_ok(r)` is `lean_ptr_tag(r) == 0`, i.e. byte 7
-/// equals 0. This is stable across all Tier-1 Linux x86_64 builds
-/// of Lean (ABI is the Itanium C++ ABI / sysv x86_64 ABI here,
+/// equals 0. This is stable across all Tier-1 Linux `x86_64` builds
+/// of Lean (ABI is the Itanium C++ ABI / sysv `x86_64` ABI here,
 /// neither of which reorders bit-fields).
 const LEAN_OBJECT_TAG_OFFSET: usize = 7;
 
@@ -207,7 +207,7 @@ unsafe fn lean_dec_ref_inline(o: *mut c_void, cold: LeanDecRefColdFn) {
     if o.is_null() {
         return;
     }
-    let rc_ptr = o as *mut i32;
+    let rc_ptr = o.cast::<i32>();
     let rc = unsafe { *rc_ptr };
     if rc > 1 {
         unsafe { *rc_ptr = rc - 1 };
@@ -436,7 +436,7 @@ impl Lean {
                 args.len(),
                 ret.as_mut_ptr(),
                 ret.len(),
-                &mut ret_len,
+                &raw mut ret_len,
             )
         };
         match rc {

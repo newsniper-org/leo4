@@ -335,7 +335,7 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
             })
             .collect()
     };
-    use IDLType::*;
+    use IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, Record, F32, F64, Bool, Char, String, List, Option, Result, Fn};
     Some(match name.as_str() {
         "u8" => U8,
         "u16" => U16,
@@ -399,7 +399,7 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
         }
         _ => return None,
     })
-    .or_else(|| {
+    .or({
         // Fall through to handle Type::Tuple via the outer caller —
         // the closure above returns None for unrecognised idents,
         // and Some(...) for the matched arms; .or_else here is dead.
@@ -786,13 +786,14 @@ mod tests {
 ///
 /// Generic parameters carry through; each generic gets a
 /// `: ::leo4::LeanMarshal` bound on the synthesised impl.
+#[must_use] 
 pub fn expand_derive_lean_marshal(input: TokenStream) -> TokenStream {
     let derive_input: syn::DeriveInput = match syn::parse2(input) {
         Ok(d) => d,
         Err(e) => return e.to_compile_error(),
     };
 
-    let is_resource = derive_input.attrs.iter().any(|a| is_leo4_resource(a));
+    let is_resource = derive_input.attrs.iter().any(is_leo4_resource);
 
     match (&derive_input.data, is_resource) {
         (syn::Data::Struct(s), true)  => expand_derive_resource(&derive_input, s),
@@ -1156,6 +1157,7 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
 /// #[allow(non_upper_case_globals)]
 /// static __LEO4_EXPORT_add: ::leo4::__private::ExportEntry = …;
 /// ```
+#[must_use] 
 pub fn expand_export(args: TokenStream, input: TokenStream) -> TokenStream {
     let attrs = match ExportAttrs::parse_from_args(args.clone()) {
         Ok(a) => a,
@@ -1354,7 +1356,7 @@ fn expand_export_inner(
     };
 
     // Per-parameter IDL string literals for the linkme entry.
-    let param_type_lits = param_mangles.iter().map(|s| s.as_str());
+    let param_type_lits = param_mangles.iter().map(std::string::String::as_str);
 
     Ok(quote! {
         // Original user function — kept unchanged so the user

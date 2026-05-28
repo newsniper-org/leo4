@@ -7,7 +7,7 @@
 //! 1. Opens the cdylib via `dlopen` / `LoadLibrary`.
 //! 2. Walks the cdylib's `EXPORTS` slice through
 //!    `leo4_rust_describe_exports`, computes the same FNV-1a-64
-//!    schema_hash that `leo4-rust-emit` writes to the handshake
+//!    `schema_hash` that `leo4-rust-emit` writes to the handshake
 //!    file, and sends a handshake frame back to the dispatcher.
 //! 3. Enters a request loop: read a request frame, `dlsym` the
 //!    requested mangled symbol (cached after first lookup),
@@ -147,7 +147,7 @@ struct EntryView {
     #[allow(dead_code)]
     isolated: bool,
     /// Reserved — Phase 9.X will gate per-entry behaviour on
-    /// the abi_version stored here vs the worker's
+    /// the `abi_version` stored here vs the worker's
     /// `ABI_VERSION`.
     #[allow(dead_code)]
     abi_version: u32,
@@ -168,7 +168,7 @@ fn load_entries(lib: &libloading::Library) -> Result<Vec<EntryView>, String> {
     let mut ptr: *const ExportEntry = std::ptr::null();
     let mut len: usize = 0;
     // SAFETY: out-pointers are valid; symbol signature matches.
-    let rc = unsafe { sym(&mut ptr, &mut len) };
+    let rc = unsafe { sym(&raw mut ptr, &raw mut len) };
     if rc != 0 {
         return Err(format!("leo4_rust_describe_exports rc={rc}"));
     }
@@ -557,7 +557,7 @@ fn invoke_wrapper(
             ret_len = 0;
             // SAFETY: wrapper signature is the canonical-ABI shape.
             let rc = unsafe {
-                wrapper(args_ptr, args_len, ret_ptr, ret_cap, &mut ret_len)
+                wrapper(args_ptr, args_len, ret_ptr, ret_cap, &raw mut ret_len)
             };
             if rc == LEO4_ERR_BUFFER_TOO_SMALL {
                 // Wrapper wrote the required size into ret_len.
@@ -574,28 +574,25 @@ fn invoke_wrapper(
         }
     }));
 
-    match call_result {
-        Ok((rc, used, detail)) => {
-            let body = if rc == LEO4_OK {
-                ret_buf[..used].to_vec()
-            } else {
-                Vec::new()
-            };
-            (rc, body, detail)
-        }
-        Err(_) => {
-            let _ = std::io::stderr().flush();
-            // The wrapper's own catch_unwind should have caught
-            // any user-fn panic. If we are here, the panic
-            // originated outside the wrapper plumbing. Try to
-            // emit a final response with the panic code and
-            // then abort so the dispatcher respawns.
-            // The dispatcher reads EOF after the message;
-            // since the call frame won't actually be sent (we
-            // can't safely return to the request loop), we
-            // abort here.
-            process::abort();
-        }
+    if let Ok((rc, used, detail)) = call_result {
+        let body = if rc == LEO4_OK {
+            ret_buf[..used].to_vec()
+        } else {
+            Vec::new()
+        };
+        (rc, body, detail)
+    } else {
+        let _ = std::io::stderr().flush();
+        // The wrapper's own catch_unwind should have caught
+        // any user-fn panic. If we are here, the panic
+        // originated outside the wrapper plumbing. Try to
+        // emit a final response with the panic code and
+        // then abort so the dispatcher respawns.
+        // The dispatcher reads EOF after the message;
+        // since the call frame won't actually be sent (we
+        // can't safely return to the request loop), we
+        // abort here.
+        process::abort();
     }
 }
 

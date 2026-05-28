@@ -28,6 +28,7 @@
 
 /// Trial-division primality test.
 #[leo4::export]
+#[must_use] 
 pub fn is_prime(n: u64) -> bool {
     if n < 2 {
         return false;
@@ -35,12 +36,12 @@ pub fn is_prime(n: u64) -> bool {
     if n < 4 {
         return true;
     }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return false;
     }
     let mut d: u64 = 3;
     while d.saturating_mul(d) <= n {
-        if n % d == 0 {
+        if n.is_multiple_of(d) {
             return false;
         }
         d += 2;
@@ -53,6 +54,7 @@ pub fn is_prime(n: u64) -> bool {
 /// function from inside one (no recursion-across-boundary; the
 /// inner call stays in Rust).
 #[leo4::export]
+#[must_use] 
 pub fn next_prime(n: u64) -> u64 {
     let mut candidate = n.saturating_add(1);
     loop {
@@ -71,6 +73,7 @@ pub fn next_prime(n: u64) -> u64 {
 /// inner loop so the dispatcher / worker IPC overhead is
 /// dwarfed by the actual compute.
 #[leo4::export]
+#[must_use] 
 pub fn count_primes_below(n: u64) -> u64 {
     let mut count: u64 = 0;
     let mut k: u64 = 2;
@@ -86,16 +89,17 @@ pub fn count_primes_below(n: u64) -> u64 {
 /// Smallest prime factor of `n`, or `None` for `n < 2`.
 /// Exercises `Option<u64>` in the return position.
 #[leo4::export]
+#[must_use] 
 pub fn factor_smallest(n: u64) -> Option<u64> {
     if n < 2 {
         return None;
     }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return Some(2);
     }
     let mut d: u64 = 3;
     while d.saturating_mul(d) <= n {
-        if n % d == 0 {
+        if n.is_multiple_of(d) {
             return Some(d);
         }
         d += 2;

@@ -299,7 +299,7 @@ fn nominal_derive_check() {
     );
 }
 
-/// Verifies that `Lean::open` rejects a shim whose schema_hash_bytes
+/// Verifies that `Lean::open` rejects a shim whose `schema_hash_bytes`
 /// disagrees with the shim's compiled-in `leo4_schema_hash_be` array.
 fn handshake_mismatch_check() -> Result<(), leo4::LeanError> {
     let handshake_path = env!("LEO4_HANDSHAKE_FILE");

@@ -353,7 +353,7 @@ pub fn parse_raw(input: &str) -> Result<RawSchema, ParseError> {
             decls.extend(iface.decls.iter().cloned());
             (iface.name.clone(), decls, iface.funcs.clone())
         }
-        None => ("".to_string(), top_nominal_decls.clone(), Vec::new()),
+        None => (String::new(), top_nominal_decls.clone(), Vec::new()),
     };
 
     Ok(RawSchema {
@@ -537,8 +537,8 @@ fn resolve_type(
 /// Augment `shapes` with `TypeVar` entries for the enclosing decl's
 /// generic-parameter binders. Used so a field type that references
 /// `T0` resolves to a nullary placeholder rather than `UnknownNominal`.
-fn shapes_with_typars<'a>(
-    base: &'a HashMap<String, Shape>,
+fn shapes_with_typars(
+    base: &HashMap<String, Shape>,
     generics: &[String],
 ) -> HashMap<String, Shape> {
     let mut map = base.clone();

@@ -167,7 +167,7 @@ impl LeanMarshal for f64 {
 
 impl LeanMarshal for bool {
     fn canonical_encode(&self, buf: &mut Vec<u8>) {
-        buf.push(if *self { 1 } else { 0 });
+        buf.push(u8::from(*self));
     }
     fn canonical_decode(buf: &[u8], off: usize) -> Result<(Self, usize), LeanError> {
         need(buf, off, 1, "bool")?;
@@ -208,7 +208,7 @@ mod tests {
 
     fn round_trip<T: LeanMarshal + PartialEq + std::fmt::Debug + Clone>(v: T, expected_len: usize) {
         let buf = encode_to_vec(&v);
-        assert_eq!(buf.len(), expected_len, "encoded length for {:?}", v);
+        assert_eq!(buf.len(), expected_len, "encoded length for {v:?}");
         let decoded: T = decode_from_slice(&buf).unwrap();
         assert_eq!(decoded, v);
     }

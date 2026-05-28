@@ -176,7 +176,7 @@ impl WasmInstance for WasmtimeInstance {
             })?;
         let call_fn = self
             .instance
-            .get_func(&mut self.store, &call_idx)
+            .get_func(&mut self.store, call_idx)
             .ok_or_else(|| {
                 LeanError::new(
                     LEO4_ERR_RUST_DLSYM_FAILED,
@@ -247,7 +247,7 @@ impl WasmInstance for WasmtimeInstance {
 }
 
 /// Pull `(code, message)` out of a `lean-error` record `Val`.
-/// Returns a (LEO4_ERR_RUST_PANIC, "<malformed>") fallback if
+/// Returns a (`LEO4_ERR_RUST_PANIC`, "<malformed>") fallback if
 /// the shape doesn't match.
 fn decode_lean_error_record(v: &Val) -> (u32, String) {
     let fallback = (LEO4_ERR_RUST_PANIC, "<malformed lean-error record>".to_string());

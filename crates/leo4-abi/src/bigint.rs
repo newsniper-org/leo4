@@ -24,7 +24,7 @@ impl BigInt {
             Self::default()
         } else if n < 0 {
             // i64::MIN has |n| = 1 << 63 which is exactly fits a u64.
-            let mag = (n as i128).unsigned_abs() as u64;
+            let mag = i128::from(n).unsigned_abs() as u64;
             Self {
                 negative: true,
                 magnitude: BigNat::from_u64(mag),

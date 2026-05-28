@@ -35,7 +35,7 @@ use crate::LeanError;
 /// swap impls at runtime without touching its own type
 /// parameters.
 pub trait LeanProc: Send + Sync {
-    /// Recompute the schema_hash from the loaded module's
+    /// Recompute the `schema_hash` from the loaded module's
     /// `@[leo4_export]` declarations. Must produce the same
     /// 13-char base32lc value `leo4-rust-emit` (or the impl-
     /// specific build tool that filled this role) recorded
@@ -60,7 +60,7 @@ pub trait LeanProc: Send + Sync {
     /// `LeanError` on dispatch failure (unknown mangled
     /// name → `UNKNOWN_FUNCTION` 0x06) or in-Lean exception
     /// (impl-flavoured passthrough; typically
-    /// `LEO4_ERR_RUST_PANIC` 0x0002_0001).
+    /// `LEO4_ERR_RUST_PANIC` `0x0002_0001`).
     fn call(&self, mangled: &str, args: &[u8]) -> Result<Vec<u8>, LeanError>;
 }
 
@@ -73,7 +73,7 @@ pub trait LeanProc: Send + Sync {
 /// **all** `#[leo4::export]`s of the linked cdylib (dispatch
 /// happens inside the callback by looking up `mangled`).
 ///
-/// For OxiLean specifically: the adapter calls
+/// For `OxiLean` specifically: the adapter calls
 /// `oxilean_kernel::ExternRegistry::register(decl)` with
 /// `lib_name = "leo4-rust-bridge"` and a closure that
 /// delegates to `LeanProcInvoker::invoke`. See
@@ -112,7 +112,7 @@ mod tests {
     // unimplementable.
     struct DummyProc;
     impl LeanProc for DummyProc {
-        fn schema_hash(&self) -> &str {
+        fn schema_hash(&self) -> &'static str {
             "0000000000000"
         }
         fn abi_version(&self) -> u32 {

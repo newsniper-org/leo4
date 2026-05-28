@@ -9,7 +9,7 @@
 //! C entry point. This helper exists so that:
 //!   * the error code is reachable through a documented code path;
 //!   * Phase 5 (`leo4-mslean4`) can plug in by replacing the
-//!     "shim_hash" source with a `libloading` symbol lookup.
+//!     "`shim_hash`" source with a `libloading` symbol lookup.
 
 use crate::error::{error_codes, LeanError};
 

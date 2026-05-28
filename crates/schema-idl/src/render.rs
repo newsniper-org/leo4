@@ -41,7 +41,7 @@ fn decl_band(d: &UserDecl) -> u8 {
 
 /// IDL textual form of one type. Matches `Leo4Plugin.Mangling.idlForm`.
 pub fn idl_form(t: &IDLType) -> String {
-    use IDLType::*;
+    use IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, F32, F64, Bool, Char, String, BigInt, BigNat, List, Option, Result, Tuple, Record, Variant, Enum, Flags, Resource, Io, Self_, SelfApp, Cyc, Fn};
     match t {
         U8 => "u8".into(),
         U16 => "u16".into(),
@@ -110,6 +110,7 @@ fn generic_header(generics: &[String]) -> String {
     }
 }
 
+#[must_use] 
 pub fn user_decl_to_idl(d: &UserDecl) -> String {
     match d {
         UserDecl::Record { fqn, generics, fields } => {
@@ -174,6 +175,7 @@ pub fn user_decl_to_idl(d: &UserDecl) -> String {
 
 /// Collapse all runs of ASCII whitespace to a single space and trim.
 /// Matches `Leo4Plugin.Mangling.collapseWhitespace`.
+#[must_use] 
 pub fn collapse_whitespace(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut saw_space = true;

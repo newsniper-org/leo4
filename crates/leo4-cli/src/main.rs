@@ -22,7 +22,7 @@
 //!   Detects direction from `Cargo.toml` (`crate-type =
 //!   ["cdylib"]` ⇒ reverse, else forward), then executes the
 //!   pipeline end-to-end: Lake build, plugin/emit invocation,
-//!   Cargo build or final lean_exe build, then runs the binary
+//!   Cargo build or final `lean_exe` build, then runs the binary
 //!   with the matching env matrix wired up.
 //!
 //! Both `create` and `init` support `--forward` (default) and
@@ -187,7 +187,7 @@ enum ImplKind {
     /// Lean impl via direct in-process Rust call.
     /// Currently deferred (`SPEC/rust-native-lean.md` §8).
     RustNative,
-    /// `leo4-oxilean-build` transpile path — OxiLean's
+    /// `leo4-oxilean-build` transpile path — `OxiLean`'s
     /// `oxilean-codegen::rust_target_backend` lowers Lean
     /// source to a plain Rust crate at build time; the user
     /// then calls it as ordinary Rust. Bypasses the
@@ -354,15 +354,15 @@ fn run_create(
     // adapter.
     match (direction.clone(), impl_kind.clone()) {
         (Direction::Forward, _) => {
-            scaffold_forward_full(&dir, &project_name, &leo4_root_str)?
+            scaffold_forward_full(&dir, &project_name, &leo4_root_str)?;
         }
         (Direction::Reverse, ImplKind::Mslean4 | ImplKind::RustNative) => {
-            scaffold_reverse_full(&dir, &project_name, &leo4_root_str)?
+            scaffold_reverse_full(&dir, &project_name, &leo4_root_str)?;
         }
         (Direction::Reverse, ImplKind::RustTranspile) => {
             scaffold_reverse_rust_transpile_full(
                 &dir, &project_name, &leo4_root_str,
-            )?
+            )?;
         }
     }
     write_leo4_toml(&dir, impl_kind.marker_str())?;
@@ -604,8 +604,7 @@ fn run_init(
         }
         MigrationOutcome::MigratedFromLegacyMarker(kind) => {
             println!(
-                "leo4 init: integrated {direction:?} scaffold into {dir:?}; migrated legacy .leo4-impl ({}) → leo4.toml",
-                kind
+                "leo4 init: integrated {direction:?} scaffold into {dir:?}; migrated legacy .leo4-impl ({kind}) → leo4.toml"
             );
         }
         MigrationOutcome::WroteDefault => {
@@ -763,8 +762,8 @@ fn resolve_run_impl(dir: &Path, cli_impl: Option<&ImplKind>) -> Result<ImplKind,
         Err(ConfigError::NotFound) => {
             // Fall back to legacy marker.
             if let Some(legacy) = read_impl_marker(dir) {
-                if let Some(want) = cli_impl {
-                    if want != &legacy {
+                if let Some(want) = cli_impl
+                    && want != &legacy {
                         return Err(format!(
                             "run: legacy `.leo4-impl` marker says `{}`, but you passed \
                              `--impl {}`. Migrate the project with `leo4 init` so the \
@@ -773,7 +772,6 @@ fn resolve_run_impl(dir: &Path, cli_impl: Option<&ImplKind>) -> Result<ImplKind,
                             want.marker_str(),
                         ));
                     }
-                }
                 return Ok(legacy);
             }
             // No config + no marker + maybe an explicit
@@ -1113,7 +1111,7 @@ fn user_cargo_has_transpiled_dep(cargo_toml: &Path, crate_name: &str) -> bool {
 /// `rust-transpile` branch invokes `leo4-oxilean-build
 /// --mode reverse` to emit `lean/<Iface>/Rust.lean`,
 /// then `cargo run` on the user binary (which uses the
-/// `leo4-oxilean` adapter to drive the OxiLean
+/// `leo4-oxilean` adapter to drive the `OxiLean`
 /// evaluator on `lean/Main.lean`).
 fn run_reverse(
     dir: &Path,
@@ -1233,11 +1231,11 @@ fn run_reverse_mslean4(
 ///   3. `cargo run -p <pkg>` — user binary calls the
 ///      `leo4-oxilean` adapter (`OxiLeanInvoker` +
 ///      `register_export_callback` + `ExternResolver`)
-///      to drive the OxiLean evaluator on
+///      to drive the `OxiLean` evaluator on
 ///      `lean/Main.lean`.
 ///
 /// No lake. No leanc. No Lean toolchain on the user's
-/// machine. The OxiLean evaluator (consumed through
+/// machine. The `OxiLean` evaluator (consumed through
 /// `leo4-oxilean`) handles `@[extern]` dispatch via
 /// the callback registry landed in OX8.3a/b/c.
 fn run_reverse_rust_transpile(
@@ -1405,7 +1403,7 @@ fn scaffold_reverse_full(dir: &Path, name: &str, leo4_root: &str) -> Result<(), 
 /// `run_reverse_rust_transpile` pipeline (OX8.4) via
 /// `leo4-oxilean-build --mode reverse` + the user binary
 /// calling into the `leo4-oxilean` adapter to run
-/// `lean/Main.lean` under OxiLean's evaluator.
+/// `lean/Main.lean` under `OxiLean`'s evaluator.
 fn scaffold_reverse_rust_transpile_full(
     dir: &Path,
     name: &str,
@@ -1465,7 +1463,7 @@ fn main() {
 /// module dir produced by `lake run Leo4Rust/regenerate`.
 fn gitignore_reverse_lean(iface: &str) -> String {
     format!(
-        r#"# Lake-local build cache + dep manifest (regenerated on every `lake build`).
+        r"# Lake-local build cache + dep manifest (regenerated on every `lake build`).
 .lake/
 lake-manifest.json
 
@@ -1476,7 +1474,7 @@ lake-manifest.json
 # `lake run Leo4Rust/regenerate` / `leo4 run` from the cdylib's
 # EXPORTS slice). Regenerated on every build.
 {iface}/
-"#
+"
     )
 }
 
@@ -1484,23 +1482,23 @@ lake-manifest.json
 /// scaffold (alongside the Cargo crate). `cargo` already ignores
 /// `target/` but we set it explicitly so users running `git init`
 /// from a fresh `leo4 create` get a complete starting state.
-const GITIGNORE_REVERSE_ROOT: &str = r#"# Cargo
+const GITIGNORE_REVERSE_ROOT: &str = r"# Cargo
 /target/
 
 # IDE
 /.idea/
 /.vscode/
 .DS_Store
-"#;
+";
 
 /// `.gitignore` block for the forward-direction scaffold's `lean/`
 /// dir. The plugin-emitted `.lake/build/leo4/` files (schema /
 /// mangling / handshake) are regenerated every `lake exe leo4plugin`
 /// run; the user shouldn't commit them.
-const GITIGNORE_FORWARD_LEAN: &str = r#"# Lake-local build cache + dep manifest (regenerated on every `lake build`).
+const GITIGNORE_FORWARD_LEAN: &str = r"# Lake-local build cache + dep manifest (regenerated on every `lake build`).
 .lake/
 lake-manifest.json
-"#;
+";
 
 const SAMPLE_LEAN_FORWARD: &str = r#"import Leo4
 
@@ -1649,7 +1647,7 @@ def main : IO Unit := do
 
 fn readme_forward(name: &str, _leo4_root: &str) -> String {
     format!(
-        r#"# {name}
+        r"# {name}
 
 leo4 forward-direction scaffold. Lean exports
 `hello : String` and `add (a b : UInt64) : UInt64`; Rust calls
@@ -1676,14 +1674,14 @@ Expected:
 hello from Lean
 2 + 3 = 5
 ```
-"#
+"
     )
 }
 
 fn readme_reverse(name: &str, iface: &str, leo4_root: &str) -> String {
     let crate_name = name.replace('-', "_");
     format!(
-        r#"# {name}
+        r"# {name}
 
 leo4 reverse-direction scaffold. Rust exposes `double` and
 `greet` via `#[leo4::export]`; Lean calls them.
@@ -1726,7 +1724,7 @@ LEO4_RUST_HANDSHAKE_PKG={crate_name} \
 LEO4_RUST_HANDSHAKE_IFACE={iface} \
   ./.lake/build/bin/{crate_name}
 ```
-"#
+"
     )
 }
 
@@ -1765,7 +1763,7 @@ leo4-oxilean = {{ path = "{leo4_root}/sibling/leo4-oxilean" }}
 fn lib_rs_reverse_rust_transpile(name: &str) -> String {
     let crate_name = name.replace('-', "_");
     format!(
-        r#"//! `{name}` — leo4 rust-transpile reverse-direction demo.
+        r"//! `{name}` — leo4 rust-transpile reverse-direction demo.
 //!
 //! The functions tagged with `#[leo4::export]` below land in
 //! the cdylib's `EXPORTS` slice. `leo4-oxilean-build --mode
@@ -1794,7 +1792,7 @@ pub fn add(a: u64, b: u64) -> u64 {{
 fn _unused_to_avoid_warning() {{
     let _ = stringify!({crate_name});
 }}
-"#
+"
     )
 }
 
@@ -1882,7 +1880,7 @@ def main : IO Unit := do
 
 fn readme_reverse_rust_transpile(name: &str, iface: &str, leo4_root: &str) -> String {
     format!(
-        r#"# {name}
+        r"# {name}
 
 leo4 **rust-transpile reverse-direction** scaffold (OX8.5,
 2026-05-28). Rust exposes `#[leo4::export]` functions; Lean
@@ -1927,7 +1925,7 @@ plug in the dispatch loop (see the comment in `src/main.rs`).
 
 See `SPEC/ox8-rust-transpile-reverse.md` + `docs/ox8-1-
 leo4-oxilean-audit.md` for the architectural context.
-"#
+"
     )
 }
 
@@ -2000,14 +1998,11 @@ fn abs(p: &Path) -> Result<PathBuf, String> {
 }
 
 fn dir_basename(dir: &Path) -> String {
-    dir.file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "leo4-app".into())
+    dir.file_name().map_or_else(|| "leo4-app".into(), |s| s.to_string_lossy().into_owned())
 }
 
 fn resolve_leo4_root(p: Option<PathBuf>) -> String {
-    p.map(|x| x.display().to_string())
-        .unwrap_or_else(|| "../leo4".to_string())
+    p.map_or_else(|| "../leo4".to_string(), |x| x.display().to_string())
 }
 
 fn read_cargo_pkg_name(p: &Path) -> Option<String> {

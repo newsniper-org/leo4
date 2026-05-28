@@ -95,7 +95,7 @@ mod tests {
                 0,
                 ret.as_mut_ptr(),
                 ret.len(),
-                &mut ret_len,
+                &raw mut ret_len,
             )
         };
         assert!(

@@ -45,7 +45,7 @@ pub enum IDLType {
     /// escape their group or that point past the group's last member.
     Cyc(u32),
     /// `fn(T1, …, Tn) -> R` — first-class function-arrow type (Phase
-    /// 10-B1, 2026-05-21). Wire format is a single `u64` callback_id
+    /// 10-B1, 2026-05-21). Wire format is a single `u64` `callback_id`
     /// per `SPEC/canonical-abi.md` §15. Mangles as
     /// `A_<tuple-of-args>_<ret>_a` per `SPEC/mangling.md` §2 (filling
     /// the previously-TBD function-arrow slot).
@@ -134,6 +134,7 @@ impl UserDecl {
     /// itself; a `Mutual` group yields its member decls in source
     /// order. Other passes that need a flat list of nominal types
     /// (e.g. handler resolution) should iterate through this.
+    #[must_use] 
     pub fn leaves(&self) -> Box<dyn Iterator<Item = &UserDecl> + '_> {
         match self {
             UserDecl::Mutual { members } => Box::new(members.iter()),

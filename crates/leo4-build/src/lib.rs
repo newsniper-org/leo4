@@ -109,7 +109,7 @@ pub struct WireOutput {
 }
 
 fn io_err(msg: impl Into<String>) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, msg.into())
+    std::io::Error::other(msg.into())
 }
 
 // ─── Phase 9-2: reverse-direction (Rust → Lean) build-script helper ──
