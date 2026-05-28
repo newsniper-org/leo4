@@ -933,6 +933,218 @@ fn cli_multi_decl_cross_fn_call() {
 // `NameNotFound("double")` assertion no longer holds.
 
 #[test]
+#[ignore = "OX7 A4 — user-defined namespaced `def NAME.method` head is \
+            not yet accepted by oxilean-parse-peg's `definition` rule \
+            (uses `ident()` which rejects `.`); follow-up will either \
+            relax that to `ident_raw()` or route user-namespace methods \
+            through `namespace … end` + pure_emit Namespace flattening. \
+            Pin: cli_user_namespace_method_smoke_currently_fails_at_parse. \
+            Re-enable once both surfaces land."]
+fn cli_user_namespace_method_smoke() {
+    // OX7 user-namespace method smoke (2026-05-28) — A4
+    // remaining from OX7 γ-1'. OxiLean fork commit
+    // `81a0fdc` added the `Proj("foo", _, Const("MyType"))`
+    // → composite `Const("MyType.foo")` fast-path inside
+    // `to_lcnf::convert_proj`, and primitives like
+    // `UInt64.add` already exercise it. This test pins
+    // down the *user-defined* namespace case end-to-end:
+    // a user `def MyBox.unwrap …` referenced via
+    // method-style `MyBox.unwrap n` from another decl in
+    // the same crate must:
+    //
+    //   1. transpile successfully (cross-fn env threading
+    //      lands the prior decl in the env so elab of the
+    //      caller succeeds),
+    //   2. lower the namespace lookup through the
+    //      composite-Const fast-path (no `_xN` placeholder
+    //      leaks into the App head),
+    //   3. emit a real `fn MyBox_unwrap` (dot → underscore
+    //      via `rust_target_backend::mangle_name`) and a
+    //      `fn caller` body that calls it by that name.
+    //
+    // Reference fixture pattern: `cli_multi_decl_cross_fn_call`.
+    //
+    // STATUS (2026-05-28): RED — the PEG rule
+    // `definition` in `oxilean-parse-peg/src/lib.rs:1252`
+    // binds `name:ident()`, and `ident()` is the no-dot
+    // form (line 772). `def MyBox.unwrap …` therefore
+    // fails at parse with `UnexpectedToken { expected:
+    // [":="], got: Dot }`. The companion `namespace MyBox
+    // def unwrap … end MyBox` form parses cleanly but
+    // `pure_emit::transpile_source_to_pure_fns_inner`
+    // only handles `OxDecl::Definition` — it silently
+    // drops `OxDecl::Namespace`, so no `fn` is emitted
+    // either way. Both gaps need closing before this
+    // green test runs. Pin
+    // `cli_user_namespace_method_smoke_currently_fails_at_parse`
+    // (below) captures the current failure surface.
+    let dir = tmp_dir("user_namespace_method");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Box.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def MyBox.unwrap (n : UInt64) : UInt64 := n\n\
+         def caller (n : UInt64) : UInt64 := MyBox.unwrap n\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=user_namespace_method_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_path = out_dir.join("src").join("lib.rs");
+    assert!(lib_path.exists(), "src/lib.rs must exist");
+    let lib_text = std::fs::read_to_string(&lib_path).expect("read lib.rs");
+
+    // 1. The namespaced def lands as `fn MyBox_unwrap`
+    //    (rust_target_backend::mangle_name maps `.` → `_`).
+    assert!(
+        lib_text.contains("fn MyBox_unwrap"),
+        "lib.rs missing `fn MyBox_unwrap`:\n{lib_text}"
+    );
+
+    // 2. The caller is also emitted.
+    assert!(
+        lib_text.contains("fn caller"),
+        "lib.rs missing `fn caller`:\n{lib_text}"
+    );
+
+    // 3. The caller's body calls `MyBox_unwrap` by name —
+    //    proves the composite-Const fast-path resolved
+    //    user-defined namespaces, not just stdlib ones.
+    assert!(
+        lib_text.contains("MyBox_unwrap("),
+        "fn caller body must call `MyBox_unwrap(...)`:\n{lib_text}"
+    );
+
+    // 4. Negative invariant: no `_xN` placeholder in the
+    //    App head — the projection on `Const("MyBox")` was
+    //    elided to the composite const, not left as a
+    //    `LcnfLetValue::Proj` with an anonymous let-binding.
+    //    The exact shape we guard against is `_x0(` or
+    //    similar appearing as a call target inside
+    //    `caller`'s body. We scan only `caller`'s body
+    //    region to keep this robust against `_x0`-style
+    //    parameter placeholders elsewhere.
+    let caller_marker = "fn caller";
+    if let Some(caller_start) = lib_text.find(caller_marker) {
+        let body_slice = &lib_text[caller_start..];
+        // Take roughly up to the next `\n}` (end of fn).
+        let body_end = body_slice.find("\n}").unwrap_or(body_slice.len());
+        let body = &body_slice[..body_end];
+        // Walk through and check no `_x<digit>(` call
+        // appears — that would mean an unresolved
+        // const-projection leaked as a placeholder call.
+        for (idx, _) in body.match_indices("_x") {
+            let rest = &body[idx + 2..];
+            let after_digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+            // `_xN(` is the bad pattern (placeholder used
+            // as a callee). `_xN` followed by anything
+            // else (space, `,`, `)`, etc.) is just a
+            // parameter / let-binding reference and is OK.
+            if after_digits.starts_with('(') && after_digits.len() < rest.len() {
+                panic!(
+                    "fn caller body has `_xN(` placeholder call — \
+                     composite-Const fast-path did NOT fire for \
+                     user namespace `MyBox.unwrap`:\n{body}"
+                );
+            }
+        }
+    } else {
+        panic!("fn caller marker not found in lib.rs:\n{lib_text}");
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_user_namespace_method_smoke_currently_fails_at_parse() {
+    // OX7 A4 pin (2026-05-28) — captures the current
+    // failure surface of user-defined `def MyBox.unwrap …`
+    // so that closing either of the two underlying gaps
+    // (PEG `definition` accepting `ident_raw`, or
+    // `pure_emit` flattening `OxDecl::Namespace`) becomes
+    // visible: this pin breaks the moment the parse error
+    // goes away, which is the signal to delete the pin
+    // and unmute `cli_user_namespace_method_smoke`.
+    //
+    // Mirrors the historical `_currently_fails_at_elab`
+    // pin pattern that accompanied the multi-decl cross-fn
+    // smoke before that gap closed.
+    let dir = tmp_dir("user_namespace_method_pin");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Box.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def MyBox.unwrap (n : UInt64) : UInt64 := n\n\
+         def caller (n : UInt64) : UInt64 := MyBox.unwrap n\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=user_namespace_method_pin_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+
+    // Exit 1 = transpile failure (parse error surfaced
+    // through `LeanError(DECODE_ERROR)`), NOT 2 (usage).
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "user-namespaced def must currently fail at parse with exit 1. stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // The PEG rule binds `name:ident()` on `definition`,
+    // so the dot in `MyBox.unwrap` is read as the start of
+    // a `Dot` token where `:=` was expected. Surface that
+    // substring so the pin breaks visibly the moment the
+    // PEG accepts dotted def heads.
+    assert!(
+        stderr.contains("Dot") || stderr.contains("parse_decl"),
+        "stderr must surface the current parse failure: {stderr}"
+    );
+    // No crate emitted on parse failure.
+    assert!(
+        !out_dir.join("Cargo.toml").exists(),
+        "Cargo.toml must NOT exist on parse failure"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cli_translate_coverage_exists_anonstruct_match() {
     // OX7 translate coverage expansion (2026-05-27, batch 3) —
     // `Exists`, `MatchBind`, `IfLet`, `AnonStruct`, `Match`
