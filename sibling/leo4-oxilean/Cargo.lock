@@ -25,19 +25,3 @@ version = "0.1.2"
 dependencies = [
  "oxilean-kernel",
 ]
-
-[[patch.unused]]
-name = "oxilean-codegen"
-version = "0.1.2"
-
-[[patch.unused]]
-name = "oxilean-elab"
-version = "0.1.2"
-
-[[patch.unused]]
-name = "oxilean-meta"
-version = "0.1.2"
-
-[[patch.unused]]
-name = "oxilean-parse"
-version = "0.1.2"
