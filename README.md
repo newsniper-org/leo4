@@ -351,6 +351,30 @@ not require `elan` on the host; the system-installed Lean of that
 version works. (The CI matrix container uses `elan` internally so it
 can switch between matrix versions.)
 
+### Cloning — submodules required
+
+leo4 vendors its OxiLean fork (branch `0.1.3-leo4-ox7`) as a git
+submodule at `sibling/oxilean/`. The rust-transpile path
+(`--impl rust-transpile`), the `leo4-oxilean-build` CLI, and
+the `leo4-oxilean` adapter all path-dep into that submodule's
+crates, so a plain `git clone` without submodule init produces
+an empty `sibling/oxilean/` directory and Cargo will refuse
+the build with `couldn't read … Cargo.toml` errors.
+
+Two safe initial-clone forms:
+
+```bash
+git clone --recursive https://github.com/<owner>/leo4
+# or, post-clone, in an existing checkout:
+git submodule update --init --recursive
+```
+
+Subsequent pulls that bump submodule references need
+`git submodule update --init --recursive` again, or the fork
+will track an outdated commit. The CI workflow uses
+`actions/checkout@v4` with `submodules: recursive` so CI
+matches a fresh `--recursive` clone.
+
 Common recipes (run from repo root):
 
 ```bash

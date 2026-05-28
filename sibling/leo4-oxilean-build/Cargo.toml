@@ -61,6 +61,27 @@ libloading = "0.8"
 # boundary inside `transpile_source*`.
 oxilean-parse-peg = { path = "../oxilean/oxilean-parse-peg" }
 
+# H — `[patch.crates-io]` policy (locked 2026-05-28). This
+# crate is *only* consumed as a CLI binary (spawned by the
+# lake plugin in OX1 step b + by the leo4-cli runner). It is
+# NEVER imported as a library dep from a downstream Cargo
+# manifest. That distinction is load-bearing: the patch
+# block below only applies at this crate's workspace root,
+# so if any external manifest ever wrote
+# `leo4-oxilean-build = { path = … }`, the patches would be
+# silently ignored and `oxilean-kernel = "=0.1.2"` would
+# resolve against crates.io — exactly the bug that bit
+# `leo4-oxilean` in OX8.5 and required a switch to direct
+# `path =` deps (commit `2d4f769`, 2026-05-28).
+#
+# Keeping the `version + [patch.crates-io]` pattern here is
+# intentional: stand-alone builds
+# (`cd sibling/leo4-oxilean-build && cargo build`) succeed,
+# and we don't have to inline the fork-only oxilean-parse /
+# -elab / -meta dep ladder into every consumer. The cost
+# (cannot become a library dep without losing the patches)
+# is acceptable for a binary-only crate.
+#
 # OxiLean toolchain layered up to codegen. The transpile
 # pipeline:
 #   oxilean-parse  → parse Lean source
