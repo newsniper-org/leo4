@@ -48,6 +48,15 @@ leo4-abi = { path = "../../crates/leo4-abi", features = ["rust-exports"] }
 # sites resolve unchanged.
 leo4-oxilean-bootstrap = { path = "../leo4-oxilean-bootstrap" }
 
+# Translator leaf crate (task #78 follow-up, 2026-05-28) —
+# OX6 step 13 PEG → legacy-Decl translator. Previously
+# vendored at `src/leo4_translate.rs` (~1730 LOC);
+# extracted to share the single source of truth with
+# `sibling/leo4-oxilean-runner/`. The module at
+# `src/leo4_translate.rs` is now a 1-line `pub use
+# leo4_oxilean_translate::*;` shim.
+leo4-oxilean-translate = { path = "../leo4-oxilean-translate" }
+
 # OX8.2b — `--mode reverse` cdylib loader. The CLI opens the
 # user cdylib via `Library::new`, resolves the C entry
 # `leo4_rust_describe_exports`, and walks the returned

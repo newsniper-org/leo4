@@ -118,6 +118,57 @@ Windows API, available regardless of which Windows target is
 chosen — the gnullvm choice is about ABI alignment and C
 ergonomics, not about access to system calls.
 
+**Windows NT kernel version floor — 10.0 or newer (locked
+2026-05-28).** leo4 has **no plan** to officially support
+Windows NT kernel versions below 10.0 (i.e. Windows 7,
+Windows 8, Windows 8.1, Windows Server 2008 R2, 2012, and
+2012 R2). leo4 doesn't go out of its way to *break* on
+older kernels — the gnullvm target's compile output should
+still load on those systems — but every Tier 2 manual test,
+every CI matrix row, and every future runtime regression
+fix is calibrated against NT ≥ 10.0 (i.e. Windows 10,
+Windows 11, Server 2016, 2019, 2022, 2025+). Reports
+against pre-10.0 kernels are out of scope; users running
+those environments are on their own to patch around any
+breakage they encounter.
+
+The chosen floor matches three concurrent ecosystem
+constraints:
+
+  - **UCRT availability**: the gnullvm target links the
+    Universal C Runtime, which Microsoft began shipping
+    by default on Windows 10. Older kernels need an
+    out-of-band UCRT installation, which leo4 does not
+    document or test.
+  - **`CreateProcessW` + `CreateNamedPipeW` semantics**:
+    the Phase 9-4c reverse-direction worker spawn / IPC
+    code uses the wide-string forms exclusively. The wide
+    forms have always been on NT, but the message-mode
+    pipe + overlapped I/O behaviour that the dispatcher
+    relies on has only been *stable* (no kernel-side
+    regressions in observable behaviour) since 10.0.
+  - **rustc Tier 2 baseline**: the upstream
+    `x86_64-pc-windows-gnullvm` target's Tier 2
+    documentation calibrates its own test matrix against
+    Windows 10. Following the same baseline keeps leo4's
+    target-support story consistent with rustc's.
+
+**Reconsideration clause — UCRT drop-in replacement.** If a
+**drop-in replacement for the Universal C Runtime** that
+supports legacy Windows kernels (NT 6.1 / 6.2 / 6.3, i.e.
+Windows 7 / 8 / 8.1 / Server 2008 R2 / 2012 / 2012 R2)
+becomes available with a license and maintenance posture
+acceptable for leo4 to redistribute (or document the user
+installing) — and the UCRT pin above is the *only*
+remaining barrier — leo4 is open to **reconsidering**
+official support for those older kernels conditional on
+that UCRT replacement. This is not a commitment to ship
+that support; it is a commitment to **revisit the
+decision** if and when such a replacement crystallises. The
+other two constraints (`CreateProcessW` / pipe semantics,
+rustc Tier 2 baseline) are independent and would need
+their own reassessment paths.
+
 A new commit that adds a `#[cfg(target_os = …)]`, `cfg(unix)`,
 `cfg(windows)`, `cfg(target_family = …)`, or a `System.os` /
 `System.Platform`-driven Lean branch **outside an identified

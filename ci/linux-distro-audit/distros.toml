@@ -1,0 +1,108 @@
+# Linux distro audit data — driven by
+# `ci/linux-distro-audit/audit-runner.py`, invoked via
+# `just linux-distro-audit <distro>`.
+#
+# Each `[distros.<id>]` entry is a self-contained recipe for
+# launching a container of that distro, installing the
+# toolchain leo4 needs, and running the audit payload
+# (`audit-payload.sh`). The runner reads this file at run time
+# — there is NO distro-name hard-coded anywhere in
+# `audit-runner.py`. Add a new distro by appending a table
+# here; the runner picks it up on the next invocation.
+#
+# Schema (per-distro):
+#   image           = OCI image reference (mandatory)
+#   setup           = list of shell snippets executed in
+#                     order before the audit payload runs
+#                     (e.g. package installs, toolchain
+#                     bootstrap)
+#   audit_targets   = list of `--target` triples to drive
+#                     the audit payload through (each runs
+#                     a fresh cargo build + selective test)
+#   needs_rustup    = true → rustup install path is run as
+#                     part of the canned setup before
+#                     `setup` snippets fire. Default false
+#                     (distro ships a usable rustc).
+#   note            = free-text comment surfaced in the
+#                     runner's banner; helps humans
+#                     correlate `just linux-distro-audit <id>`
+#                     output with the policy table in
+#                     OS-PORTABILITY.md §0.1.
+
+# ─── Arch Linux ────────────────────────────────────────────
+# Reference distro: leo4's primary dev host runs Arch + the
+# `musl-clang` packaging quirk auto-fix lives in
+# leo4-rust-bridge's build.rs (`OS-PORTABILITY.md` §0.1).
+[distros.archlinux]
+image = "docker.io/library/archlinux:latest"
+setup = [
+    "pacman -Syu --noconfirm",
+    "pacman -S --noconfirm base-devel git curl clang lld llvm musl rustup",
+    "rustup toolchain install stable",
+    "rustup default stable",
+    "rustup target add x86_64-unknown-linux-musl",
+]
+audit_targets = ["x86_64-unknown-linux-musl"]
+note = "Primary dev host. Validates the `musl-clang` `stdatomic.h` auto-fix in leo4-rust-bridge."
+
+# ─── Debian 13 (Trixie) ────────────────────────────────────
+# Current Debian stable as of 2026-05-28 (released
+# 2025-08-09). Reference for the apt-based mainstream
+# distros (Ubuntu LTS uses the same musl-tools / clang
+# packaging shape).
+[distros.debian-13]
+image = "docker.io/library/debian:13"
+setup = [
+    "apt-get update",
+    "apt-get install -y --no-install-recommends ca-certificates curl gcc clang lld musl-tools git",
+    "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable -t x86_64-unknown-linux-musl",
+]
+needs_rustup = true
+audit_targets = ["x86_64-unknown-linux-musl"]
+note = "Current Debian stable (Trixie). apt-based reference; mirrors Ubuntu / Mint packaging."
+
+# ─── Ubuntu 26.04 LTS ──────────────────────────────────────
+# Current Ubuntu LTS as of 2026-05-28 (released 2026-04).
+# Same family as Debian 13; pinned separately so the manual
+# audit matches what users on the most-recent LTS see.
+[distros."ubuntu-26.04"]
+image = "docker.io/library/ubuntu:26.04"
+setup = [
+    "apt-get update",
+    "apt-get install -y --no-install-recommends ca-certificates curl gcc clang lld musl-tools git",
+    "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable -t x86_64-unknown-linux-musl",
+]
+needs_rustup = true
+audit_targets = ["x86_64-unknown-linux-musl"]
+note = "Latest Ubuntu LTS as of 2026-05-28. Drop-in successor to the 24.04 LTS image the CI matrix used at workflow-bootstrap time."
+
+# ─── Fedora 44 ─────────────────────────────────────────────
+# Current Fedora release as of 2026-05-28 (released
+# 2026-04). dnf-based reference. musl support requires the
+# `musl-libc-static` + `musl-gcc` packages.
+[distros.fedora-44]
+image = "docker.io/library/fedora:44"
+setup = [
+    "dnf install -y gcc clang lld musl-gcc musl-libc-static rustup git",
+    "rustup-init -y --default-toolchain stable -t x86_64-unknown-linux-musl",
+]
+audit_targets = ["x86_64-unknown-linux-musl"]
+note = "Latest Fedora as of 2026-05-28. Validates musl-gcc package availability outside Arch + apt."
+
+# ─── Alpine 3.22 ───────────────────────────────────────────
+# Current Alpine stable as of 2026-05-28 (released
+# 2026-05). Alpine ships musl as the *system* libc, so the
+# musl target is effectively the native target. The audit
+# checks that leo4's `--target x86_64-unknown-linux-musl`
+# cross-compile works inside Alpine even though `--target`
+# is nominally redundant.
+[distros."alpine-3.22"]
+image = "docker.io/library/alpine:3.22"
+setup = [
+    "apk add --no-cache build-base clang lld musl-dev rust cargo git curl",
+    # rustup is unusual on Alpine; we rely on the system rustc.
+    "rustc --version",
+    "cargo --version",
+]
+audit_targets = ["x86_64-unknown-linux-musl"]
+note = "musl-native distro. Smoke-tests that leo4 doesn't tacitly require glibc on the host."

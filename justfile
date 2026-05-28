@@ -188,6 +188,19 @@ ci-image:
 ci-clean-cache:
     -docker volume rm leo4-matrix-cache
 
+# Linux distro audit — launch a container of `<distro>`, install
+# its toolchain, run the leo4 musl audit (`ci/linux-distro-audit/
+# audit-payload.sh`). NO hard-coding: distro data lives in
+# `ci/linux-distro-audit/distros.toml`; the runner picks up new
+# `[distros.<id>]` tables on the next invocation. Pass `--list`
+# to enumerate known ids without launching anything.
+#
+#   just linux-distro-audit archlinux
+#   just linux-distro-audit debian-12
+#   just linux-distro-audit --list
+linux-distro-audit *DISTRO:
+    python3 ci/linux-distro-audit/audit-runner.py {{DISTRO}}
+
 # Nuke build outputs.
 clean:
     cargo clean

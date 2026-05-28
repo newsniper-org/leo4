@@ -394,10 +394,19 @@ version = "0.0.0"
 dependencies = [
  "leo4-abi",
  "leo4-oxilean-bootstrap",
+ "leo4-oxilean-translate",
  "libloading",
  "oxilean-codegen",
  "oxilean-elab",
  "oxilean-kernel",
+ "oxilean-parse",
+ "oxilean-parse-peg",
+]
+
+[[package]]
+name = "leo4-oxilean-translate"
+version = "0.0.0"
+dependencies = [
  "oxilean-parse",
  "oxilean-parse-peg",
 ]

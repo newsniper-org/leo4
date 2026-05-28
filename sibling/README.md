@@ -51,6 +51,21 @@ Current siblings:
   in v0.1.3-leo4-ox7); the runner surfaces a clean error
   pointing at that gap once the rest of the pipeline
   succeeds.
+- **`leo4-oxilean-bootstrap/`** — leaf crate for the
+  OX5-oxi env bootstrap (`bootstrap_env`,
+  `add_leo4_primitives`, `LEO4_PRIMITIVE_TYPES`,
+  `ARITHMETIC_TC_PROJECTIONS`, `STRING_INTERP_AXIOMS`).
+  Single source of truth shared by `leo4-oxilean-build`
+  (CLI) and `leo4-oxilean-runner` (scaffold helper) — both
+  consume via `path =` and re-export from the shim file
+  they used to vendor (commit `41542da`, task #78).
+- **`leo4-oxilean-translate/`** — leaf crate for the OX6
+  step 13 translator (`translate_decl`,
+  `oxilean_parse_peg::Decl` → `oxilean_parse::Decl`).
+  Single source of truth shared by the same two consumers
+  as `leo4-oxilean-bootstrap` (2026-05-28, task #78
+  follow-up). Replaces the ~1730-line vendor that used to
+  live in each consumer's `src/leo4_translate.rs`.
 - **`mathlib-bridge-test/`** — Lake package pulling Mathlib +
   `Leo4`. Type-checks every `Leo4.MathlibBridge.*` module
   end-to-end. Mathlib's cold build is 1-2 hours, so this isn't on
