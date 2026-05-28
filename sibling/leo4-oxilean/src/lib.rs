@@ -279,6 +279,78 @@ impl OxiLeanInvoker {
         registry_ref.invoke(callback_id, args)
     }
 
+    /// P0b #75 step 3 + #76 IO walker integration
+    /// (2026-05-29) — register a *bridge* callback for
+    /// `<mangled>` that the OxiLean evaluator hits when
+    /// the user's Lean code dereferences a Rust closure
+    /// passed in via a `leo4::import!`-emitted wrapper.
+    ///
+    /// The bridge's body unpacks the args as
+    /// `(callback_id: u64, rest: &[u8])` — first 8 bytes
+    /// little-endian — and forwards to
+    /// [`Self::invoke_outbound`]. This is the missing
+    /// piece between "Lean closure invoked inside the IO
+    /// action" and "Rust closure registered in the
+    /// outbound `RustCallbackRegistry`".
+    ///
+    /// Pair with [`Self::register_export`] for the same
+    /// `mangled` (so the evaluator's metadata side knows
+    /// about the symbol) before driving the walker. The
+    /// `mangled` value is the symbol the wrapper Lean
+    /// source's `@[extern "<mangled>"]` clause names.
+    ///
+    /// # Errors
+    /// Same as [`Self::register_export_callback`]: mutex
+    /// poisoning surfaces as `OOM` with a clear message;
+    /// successful registration cannot fail today.
+    pub fn register_outbound_dispatch_callback(
+        &self,
+        mangled: &str,
+    ) -> Result<(), LeanError> {
+        let outbound_slot = self.outbound.clone();
+        let mangled_owned = mangled.to_string();
+        self.register_export_callback(mangled, move |args| {
+            // Unpack callback_id + rest.
+            if args.len() < 8 {
+                return Err(oxilean_kernel::ffi::ExternCallError::CallbackFailed(
+                    format!(
+                        "leo4-oxilean outbound bridge `{mangled_owned}`: \
+                         args shorter than 8 bytes (need callback_id u64 LE \
+                         prefix); have {} bytes",
+                        args.len()
+                    ),
+                ));
+            }
+            let mut id_bytes = [0u8; 8];
+            id_bytes.copy_from_slice(&args[..8]);
+            let callback_id = u64::from_le_bytes(id_bytes);
+            let rest = &args[8..];
+
+            let slot = outbound_slot.lock().unwrap_or_else(|e| e.into_inner());
+            let registry = slot.clone().ok_or_else(|| {
+                oxilean_kernel::ffi::ExternCallError::CallbackFailed(
+                    format!(
+                        "leo4-oxilean outbound bridge `{mangled_owned}`: no \
+                         outbound RustCallbackRegistry attached; call \
+                         `attach_outbound_registry` at adapter init."
+                    ),
+                )
+            })?;
+            drop(slot);
+
+            registry
+                .invoke(callback_id, rest)
+                .map_err(|e| {
+                    oxilean_kernel::ffi::ExternCallError::CallbackFailed(
+                        format!(
+                            "leo4-oxilean outbound bridge `{mangled_owned}` \
+                             (callback_id={callback_id}): {e}"
+                        ),
+                    )
+                })
+        })
+    }
+
     /// OX8.3c (2026-05-28) — register a Rust closure as
     /// the runtime callback for a previously-registered
     /// `#[leo4::export]` mangled body. Pair with
@@ -752,5 +824,79 @@ mod tests {
         inv.attach_outbound_registry(reg);
         let err = inv.invoke_outbound(0xDEAD_BEEF, &[]).unwrap_err();
         assert_eq!(err.code, leo4_abi::error::error_codes::INVALID_HANDLE);
+    }
+
+    // ─── #76 P0c outbound dispatch bridge ──────────────
+
+    #[test]
+    fn outbound_bridge_routes_callback_id_to_registry() {
+        let inv = OxiLeanInvoker::new();
+        let mangled = "leo4__bridge__test__cb__h0a_a";
+
+        // Bridge needs the metadata entry first (paired
+        // register_export call).
+        inv.register_export(mangled).unwrap();
+
+        // Outbound registry pre-populated with one
+        // callback that doubles a u8.
+        let reg: Arc<leo4_abi::RustCallbackRegistry> =
+            Arc::new(leo4_abi::RustCallbackRegistry::new());
+        let (id, _guard) = reg.register(|args: &[u8]| {
+            assert_eq!(args.len(), 1, "callback expects 1 byte");
+            Ok(vec![args[0].wrapping_mul(2)])
+        });
+        inv.attach_outbound_registry(reg);
+
+        // Bridge: any inbound call to `mangled` unpacks
+        // (callback_id, rest) and forwards to invoke_outbound.
+        inv.register_outbound_dispatch_callback(mangled).unwrap();
+
+        // Simulate the evaluator firing the bridge with
+        // the args [callback_id_le ‖ 0x15].
+        let mut args = id.to_le_bytes().to_vec();
+        args.push(0x15);
+        let out = <OxiLeanInvoker as LeanProcInvoker>::invoke(&inv, mangled, &args)
+            .expect("bridge dispatch should succeed");
+        assert_eq!(out, vec![0x2A]);
+    }
+
+    #[test]
+    fn outbound_bridge_rejects_short_args() {
+        let inv = OxiLeanInvoker::new();
+        let mangled = "leo4__bridge__test__cb_short__h0b_a";
+        inv.register_export(mangled).unwrap();
+        let reg: Arc<leo4_abi::RustCallbackRegistry> =
+            Arc::new(leo4_abi::RustCallbackRegistry::new());
+        inv.attach_outbound_registry(reg);
+        inv.register_outbound_dispatch_callback(mangled).unwrap();
+
+        // Only 4 bytes — bridge needs at least 8 for the
+        // callback_id LE prefix.
+        let err = <OxiLeanInvoker as LeanProcInvoker>::invoke(&inv, mangled, &[1, 2, 3, 4])
+            .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("8 bytes") || msg.contains("shorter"),
+            "error should mention the short-args case: {msg}"
+        );
+    }
+
+    #[test]
+    fn outbound_bridge_without_attached_registry_surfaces_clear_error() {
+        let inv = OxiLeanInvoker::new();
+        let mangled = "leo4__bridge__test__no_reg__h0c_a";
+        inv.register_export(mangled).unwrap();
+        inv.register_outbound_dispatch_callback(mangled).unwrap();
+        // Don't attach an outbound registry.
+
+        let mut args = 42u64.to_le_bytes().to_vec();
+        args.push(0x99);
+        let err = <OxiLeanInvoker as LeanProcInvoker>::invoke(&inv, mangled, &args)
+            .unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("no outbound") || msg.contains("attach_outbound_registry"),
+            "error should mention the unattached-registry case: {msg}"
+        );
     }
 }
