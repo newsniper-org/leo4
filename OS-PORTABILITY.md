@@ -132,13 +132,26 @@ Server 2008 R2 / 2012 / 2012 R2 / 2016 / 2019 / 2022 / 2025+).
 Microsoft itself supports UCRT on these older NT releases
 *conditional on the KB update being installed*; leo4 keeps
 its own support window aligned with that contract instead
-of inventing a narrower one. The KB update is the user's
-responsibility — they install it the same way they apply
-any other Microsoft update (Windows Update or the
-KB-specific download from Microsoft). leo4 does **not**
-package or redistribute the Microsoft-supplied KB; release
-docs simply note the prerequisite + link to Microsoft's
-own KB pages.
+of inventing a narrower one.
+
+**KB installation is downstream's problem, not leo4's.**
+leo4 is a library + toolchain consumed by downstream
+developers who ship their own end-user applications. The
+question of "is the appropriate UCRT KB present on the
+end-user's machine?" is **the downstream application
+developer's deployment concern** — they decide whether to
+support legacy Windows kernels in their own product, and
+if so, how to communicate the KB prerequisite to their
+end-users (installer step, README, Windows Update
+requirement, redistributable bundle subject to Microsoft's
+own redistribution license, etc.). leo4 takes no position
+on which choice they make. leo4's responsibility ends at
+"the gnullvm output links against UCRT and works on any
+NT where UCRT is present"; the actual presence of UCRT on
+end-user machines is outside leo4's scope.
+
+leo4 does **not** package, redistribute, or document an
+end-user-facing UCRT install flow.
 
 Newer kernels (NT ≥ 10.0) ship UCRT bundled by default and
 need no KB hunting; older kernels require the appropriate
