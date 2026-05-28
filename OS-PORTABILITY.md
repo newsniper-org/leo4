@@ -136,10 +136,14 @@ The chosen floor matches three concurrent ecosystem
 constraints:
 
   - **UCRT availability**: the gnullvm target links the
-    Universal C Runtime, which Microsoft began shipping
-    by default on Windows 10. Older kernels need an
-    out-of-band UCRT installation, which leo4 does not
-    document or test.
+    Universal C Runtime, which Microsoft began **bundling
+    by default** on Windows 10. UCRT itself is *officially
+    supported* down to **Windows 7 SP1 with KB3118401**
+    and **Windows Vista SP2 with KB2999226**, so an
+    appropriately-patched legacy system can technically
+    load gnullvm output; leo4 simply does not document,
+    test, or ship that out-of-band UCRT installation
+    path.
   - **`CreateProcessW` + `CreateNamedPipeW` semantics**:
     the Phase 9-4c reverse-direction worker spawn / IPC
     code uses the wide-string forms exclusively. The wide
@@ -168,6 +172,18 @@ decision** if and when such a replacement crystallises. The
 other two constraints (`CreateProcessW` / pipe semantics,
 rustc Tier 2 baseline) are independent and would need
 their own reassessment paths.
+
+Note that the Microsoft-official KB3118401 (Win 7 SP1) /
+KB2999226 (Vista SP2) UCRT update packages already cover
+the runtime side down to NT 6.0 / 6.1 in principle. If the
+user community would rather lift the floor by **packaging
+those KB updates as a leo4 prerequisite** (instead of a
+true drop-in replacement) and accept Vista as the absolute
+minimum, that's a parallel reconsideration path — same
+"revisit, not commit" stance applies. The current §1 floor
+of NT ≥ 10.0 reflects the **default installation contract**
+(no KB hunting required), not a hard technical limit of
+the gnullvm output.
 
 A new commit that adds a `#[cfg(target_os = …)]`, `cfg(unix)`,
 `cfg(windows)`, `cfg(target_family = …)`, or a `System.os` /
