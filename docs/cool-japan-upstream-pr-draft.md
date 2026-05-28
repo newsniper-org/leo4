@@ -2,12 +2,18 @@
 
 > Status: **DRAFT**, ready for human review before posting.
 >
+> Last refresh: 2026-05-28 (post-P1/P2/P3 work session).
+>
 > Branch under contribution: `0.1.3-leo4-ox7`, rebased onto
 > `cool-japan/oxilean` `46ad852` (the v0.1.3 base used by leo4).
-> Total diff vs `origin/0.1.3`: **52 commits, +7892 / -3 lines** in 11
+> Total diff vs `origin/0.1.3`: **53 commits, +7962 / -3 lines** in 12
 > files. Roughly 5740 lines are a new sibling crate (`oxilean-parse-peg`);
 > the rest is additive to `oxilean-codegen`, `oxilean-kernel`, and
-> `oxilean-runtime`.
+> `oxilean-runtime`. **leo4-side CI** (`.github/workflows/ci.yml`,
+> 2026-05-28) covers `linux-gnu` (full), `linux-musl` (C5 Tier 1+
+> subset), and `windows-gnullvm` (C1 Tier 2 compile-only) — every
+> contribution below builds clean across all three matrix entries
+> with the fork submodule pinned to HEAD.
 
 ## 1. Executive summary
 
@@ -94,10 +100,11 @@ unaffected:
 | `4e82655` (OX7 `ite`) | `@ite α c inst t e` → native `if cond { t } else { e }`. |
 | `bd1a77f` (OX7 Bool lit) | `Bool.true` / `Bool.false` → native `true` / `false`. |
 | `da49bec` (OX7 `HPow`) | `HPow.hPow lhs rhs` → `lhs.pow(rhs)` method call (Rust has no `**`). |
-| *(planned)* | String-literal coercion in `let _: String = "…"` sites — emit `.to_string()` when the bind type is `String` (caught by 2026-05-28 T7 re-run on Linux). One-line patch in `compile_arg` String arm; folded into this PR series before submission. |
+| `de4268d` (OX7 String-lit) | `let _: String = "…"` sites coerce the literal via `.to_string()`. Landed 2026-05-28 after T7 re-run on Linux exposed the gap; narrow scope (only when bind type is exactly `RustType::RustString` AND the RHS is exactly `RustExpr::Lit(RustLit::Str(_))`). |
 
-Test counts: 4708 → 4714 lib (+6, one spike per fold). Workspace
-clippy clean.
+Test counts: 4708 → 4716 lib (+8 total — one spike per fold,
+plus two positive/negative tests for the String-literal coercion).
+Workspace clippy clean.
 
 **Note.** The `convert_fvar` re-substitution discussed in
 `docs/ox7-1b-elab-bloat-findings.md` (issue 1b-α) is *not* in this
@@ -173,10 +180,10 @@ Aggregate counts on the fork's HEAD vs `origin/0.1.3`:
 | Crate | Pre | Post | Δ |
 |---|---|---|---|
 | `oxilean-parse-peg` | n/a | 288 lib + 1 integration | new |
-| `oxilean-codegen` | 4708 lib + 6 int | 4714 lib + 6 int | +6 |
+| `oxilean-codegen` | 4708 lib + 6 int | 4716 lib + 6 int | +8 |
 | `oxilean-kernel` | 3307 | 3313 | +6 |
 | `oxilean-runtime` | 1162 | 1169 | +7 |
-| **Workspace** | 32 415 / 0 fail | 32 421+ / 0 fail | +25 (incl. parse-peg) |
+| **Workspace** | 32 415 / 0 fail | 32 423+ / 0 fail | +27 (incl. parse-peg) |
 
 `cargo clippy --workspace --tests -- -D warnings` is clean on HEAD.
 
@@ -203,11 +210,57 @@ pub fn hello() -> String {
 ```
 
 `add` compiles and runs end-to-end (`add(1, 2) == 3`,
-`add(40, 2) == 42`). `hello` exposes an OX7 leftover — string
-literals at `let`-binding sites aren't coerced to `String` (`expected
-`String`, found `&str``). One-line codegen fix; tracked as the OX7
-String-literal coercion follow-up and slated for the same upstream
-PR series.
+`add(40, 2) == 42`). `hello` exposed an OX7 leftover —
+string literals at `let`-binding sites weren't coerced to
+`String` (`expected `String`, found `&str``); now fixed in
+fork commit `de4268d` (2026-05-28). Re-run after the
+codegen bump produces:
+
+```text
+pub fn hello() -> String {
+    let _x0: String = "hello from Lean".to_string();
+    _x0
+}
+pub fn add(_x0: u64, _x1: u64) -> u64 {
+    (_x0 + _x1)
+}
+```
+
+Both `cargo build` of the transpiled crate and the user
+binary's `cargo run` (printing `add(1, 2) = 3` /
+`add(40, 2) = 42`) succeed.
+
+### Multi-decl cross-fn coverage, leo4-side (2026-05-28)
+
+A separate follow-up (`leo4-oxilean-build` commit `ff87ae6`)
+landed leo4-side env threading: the per-source decl loop
+clones the caller's `Environment` once at entry and threads
+a `&mut local_env` through every decl's elab, adding each
+`PendingDecl::Definition` into `local_env` immediately
+after elaboration succeeds (`local_env.add(Declaration::
+Definition { … })`). With that change in place, a fixture
+like
+
+```text
+def double    (n : UInt64) : UInt64 := n + n
+def quadruple (n : UInt64) : UInt64 := double (double n)
+```
+
+now transpiles end-to-end — `quadruple`'s body resolves
+`double` via the `Const`-name path landed by `3a99c0c`
+(OX7 1a). The previously-`#[ignore]`'d
+`cli_multi_decl_cross_fn_call` test is green; the
+companion pin test that captured the `NameNotFound`
+failure surface is deleted.
+
+This change is leo4-side (it lives in
+`sibling/leo4-oxilean-build/`, not in the OxiLean fork),
+but it's worth flagging in the upstream conversation: the
+maintainers may want to mirror the env-threading helper
+inside `oxilean-elab` itself (a `multi_decl_elab` helper
+that wraps `elaborate_decl` + per-decl env extension)
+once a second consumer asks for it. Out of scope for this
+PR series; noted here so it surfaces during review.
 
 **Backport target: v0.1.4.** All changes are MSRV-clean
 (`rust-version = "1.70"`). Only G1 adds a third-party dep (`peg`,
