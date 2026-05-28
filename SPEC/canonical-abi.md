@@ -197,8 +197,13 @@ handle:u64
 
 - A `resource` parameter without modifier is **borrowed**: the callee may
   not retain the handle past the call.
-- An `own<R>` modifier (TODO: add to IDL grammar) transfers ownership; the
-  callee is responsible for `dec_rc` (or equivalent) eventually.
+- An `own<R>` modifier transfers ownership; the callee is responsible
+  for `dec_rc` (or equivalent) eventually. Surface syntax + IDL grammar:
+  `SPEC/idl-grammar.ebnf` `owned_type` production (Phase 10-B1.x
+  reservation, 2026-05-28). Wire form is identical to the underlying
+  type; mangling is `w_<mangle(T)>_w` so the borrow → own change rotates
+  the schema hash. Runtime enforcement (dec_rc accounting on the
+  receiving side) lands per-impl as a separate sub-phase.
 - Functions returning a `resource` always transfer ownership.
 
 ### Reference counting

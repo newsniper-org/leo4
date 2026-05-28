@@ -125,6 +125,18 @@ mangle_type(fn(T1,…,Tn) -> R) = "A_" ++ mangle_type(tuple<T1,…,Tn>)
                               -- don't collide with the outer `_a`
                               -- terminator. A 0-arg fn mangles as
                               -- `A_T__t_R_a` (empty tuple body).
+
+mangle_type(own<T>)           = "w_" ++ mangle_type(T) ++ "_w"
+                              -- Phase 10-B1.x reservation (2026-05-28):
+                              -- ownership-transfer modifier on a
+                              -- resource (or, reserved, a function-arrow
+                              -- value). Wire form is identical to the
+                              -- underlying T — `own<…>` is a typed
+                              -- marker, not an extra frame — but the
+                              -- mangling differs from bare `T` so the
+                              -- schema hash rotates on a borrow → own
+                              -- change. Runtime enforcement is per-impl;
+                              -- v0 grammar / mangling support only.
 ```
 
 ### Fully-qualified names

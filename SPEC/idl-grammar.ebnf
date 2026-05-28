@@ -100,7 +100,7 @@ resource_body   = "{" , { func_decl } , "}" ;
 
 type            = primitive | builtin_generic | named_type | record_type
                 | variant_type | tuple_type | flag_type | enum_type
-                | io_type | self_type | cyc_type ;                                 (* [leo4] io_type, self_type, cyc_type *)
+                | io_type | self_type | cyc_type | fn_type | owned_type ;         (* [leo4] io_type, self_type, cyc_type, fn_type (Phase 10-B1), owned_type (Phase 10-B1.x reservation) *)
 
 primitive       = "u8" | "u16" | "u32" | "u64"
                 | "i8" | "i16" | "i32" | "i64"
@@ -125,6 +125,27 @@ self_type       = "Self" , [ "<" , type , { "," , type } , ">" ] ;              
    Singleton groups normalise `Cyc<0>` back to `Self` in canonical-form output. *)
 cyc_type        = "Cyc" , "<" , unsigned_int , ">" ;                               (* [leo4] *)
 unsigned_int    = digit , { digit } ;                                              (* [leo4] zero-or-more decimal digits, no sign *)
+
+(* Phase 10-B1 (2026-05-21): first-class function-arrow type for closures
+   crossing the leo4 boundary. Wire form is a single `u64 callback_id`
+   (SPEC/canonical-abi.md §13a); mangling is `A_<tuple-of-args>_<ret>_a`
+   (SPEC/mangling.md §2). Re-entrant dispatch runtime is per-impl —
+   oxilean lands callback runtime as Phase 10-B1.x; mslean4 ships the
+   IPC LECQ/LECR frame runtime as a separate sub-phase (SPEC/reverse-
+   direction.md §10a). A 0-arg arrow `fn() -> R` is permitted. *)
+fn_type         = "fn" , "(" , [ type , { "," , type } ] , ")" , "->" , type ;     (* [leo4] *)
+
+(* Ownership transfer modifier (Phase 10-B1.x reservation, 2026-05-28).
+   Without `own<…>` a `resource` argument is borrowed — callee MUST NOT
+   retain the handle past the enclosing call. With `own<R>` ownership
+   transfers and the callee owns `dec_rc` (or the impl-equivalent). The
+   modifier may also wrap a `fn_type` (`own<fn(…) -> R>`) to mark a
+   transferable closure, also reserved-but-unspecified at v0.
+   Wire form: identical to the underlying type — `own<…>` is a typed
+   marker on top of the regular encoding, not an extra frame. Mangling
+   rotates the schema hash (`w_<mangle(T)>_w`) so a borrow→own change in
+   a published interface forces consumers to re-handshake. *)
+owned_type      = "own" , "<" , type , ">" ;                                       (* [leo4] *)
 
 builtin_generic = "list" , "<" , type , ">"
                 | "option" , "<" , type , ">"
