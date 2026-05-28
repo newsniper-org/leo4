@@ -1366,3 +1366,96 @@ counterpart to the dispatcher's `CreateNamedPipeA` /
 backoff for the narrow race where the worker process
 starts before the dispatcher has registered the
 pipe name with the OS.
+
+= Update — 2026-05-29: callback runtime + IO walker
+
+The implementer-from-scratch path crosses the
+function-arrow callback ABI runtime when the boundary
+crate is taught to support `fn(...) -> R` parameters.
+The shape of the implementation that finally landed:
+
+== Substrate (leo4-abi)
+
+A `RustCallbackRegistry` struct holds an
+`AtomicU64`-minted id counter plus a
+`Mutex<HashMap<u64, Arc<dyn Fn(&[u8]) -> Result<Vec<u8>,
+LeanError> + Send + Sync>>>`. Registration returns a
+`RegistrationGuard` whose `Drop` deregisters; that
+binds the per-call-scope lifetime contract from SPEC
+§13a to the type system rather than convention.
+
+If you were implementing this from scratch, the
+temptation is to use a thread-local. Resist it. The
+adapter side needs to clone the `Arc` into the
+boundary call's environment, and threading the same
+Arc through `Lean` (`leo4-mslean4`) and
+`OxiLeanInvoker` (`leo4-oxilean`) gives you exactly
+one source of truth without any thread-affinity
+gotchas.
+
+== Macro layer (leo4-macros-backend)
+
+The new path lives entirely in `rust_type_to_idl` and
+`outbound_callback_encode`. For each `Type::BareFn`
+parameter, the macro emits:
+
+1. `let (__cb_id_<n>, __cb_guard_<n>) = Arc::clone(lean.callback_registry()).register(move |bytes| { decode; call user fn; encode; });`
+2. `let _ = &__cb_guard_<n>;` — extend lifetime to
+   wrapper's end.
+3. `args.extend_from_slice(&__cb_id_<n>.to_le_bytes());`
+
+The user's `fn` pointer (or `impl Fn(...)` that
+implicitly coerces to `fn(...)`) gets wrapped in a
+byte-shaped adapter that decodes args via `LeanMarshal`
+per the bare fn's input type list, calls the user
+function, and encodes the return.
+
+== Adapter routing (leo4-oxilean)
+
+Three new methods on `OxiLeanInvoker`:
+- `attach_outbound_registry(Arc<RustCallbackRegistry>)`
+- `outbound_registry() -> Option<Arc<…>>`
+- `invoke_outbound(callback_id, args) -> Result<Vec<u8>, LeanError>`
+
+Plus a bridge helper
+`register_outbound_dispatch_callback(mangled)` that
+converts a single `@[extern]` mangled symbol into the
+per-call canonical-ABI shape: 8-byte LE callback_id
+prefix, rest is the callback's own args.
+
+== Driver IO walker (fork-side `oxilean_runtime::driver`)
+
+The walker's job is to take an elaborated `def main :
+IO α := body` and walk `body` to its IO effects under
+an installed `ExternResolver`. The v0 shapes:
+
+- `IO.pure` / `Pure.pure` const (nullary) — terminal.
+- `App(IO.pure, x)` — terminal (result discarded).
+- `App(App(App(App(IO.bind, α), β), m), k)` (arity-4
+  with implicits) — walk m, walk k.
+- `App(App(Bind.bind, m), k)` (arity-2, post-implicit-
+  erasure) — same as above.
+- `@[extern]` `Const` reductions —
+  `dispatch_extern_const(env, registry, resolver,
+  name, &[])` returns `Resolved(bytes)`; effect fires.
+
+Everything else surfaces `DriverError::NotYetImplemented`
+with the offending expression's debug repr. The
+deliberately narrow recognised set keeps the gap visible.
+
+When you implement your own walker, the temptation is
+to "interpret everything" — to lift the entire IO monad
+into Rust evaluation. Resist that too. The path of
+least surprise is to recognise specific named shapes
+and bail clearly on unrecognised ones, letting the
+embedder (leo4 or otherwise) extend the walker per
+their needs.
+
+== Distro audit
+
+The `just linux-distro-audit <distro>` recipe drives
+per-distro container builds. The data-vs-code split is
+load-bearing: `distros.toml` carries every distro-
+specific thing (image, setup, audit targets); the
+Python runner has no hardcoded distro name. Adding a
+new distro is purely TOML.

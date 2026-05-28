@@ -656,18 +656,33 @@ all wait for the v1.0 RC window or later.
       `Lean::callback_registry()` accessor (`32f26a7`),
       `OxiLeanInvoker::attach_outbound_registry` +
       `invoke_outbound` (`521979e`).
-    - **#76 P0c IO walker v0 for `oxilean_runtime::driver` —
-      PARTIAL**. Fork `8b2af9f` lands the v0 walker
-      (recognises `IO.pure` shape only); the full IO walker
-      body (`IO.bind` / `@[extern]` dispatch / `EStateM`
-      lowering / outbound callback dispatch hook) returns
-      `DriverError::NotYetImplemented` with the offending
-      expression's debug repr — the gap is concretely
-      identified per-shape.
-    - **Cool-japan API coordination draft** —
-      `docs/cool-japan-driver-api-coordination-draft.md`
-      (discussion-only). Posted post-RC alongside the
-      OX7/OX8 upstream PR.
+    - **#76 P0c IO walker for `oxilean_runtime::driver` —
+      partial (2026-05-29 update)**. Fork `8b2af9f` lands
+      the v0 walker (`IO.pure` shape); `d357a01` extends
+      coverage to `IO.bind` (arity-4 + arity-2) +
+      `@[extern]` Const dispatch via
+      `dispatch_extern_const`. leo4 main bumps
+      (`c0f81c7`) the submodule + adapts
+      leo4-oxilean-runner's caller. `44bb382` lands the
+      leo4-oxilean outbound dispatch bridge
+      (`register_outbound_dispatch_callback`) — when the
+      walker fires the bridge, the leo4-side
+      `RustCallbackRegistry::invoke` chain runs.
+      Remaining shapes (`EStateM` lowerings,
+      beta-application of `k` with concrete result from
+      `m`, walker-side canonical-ABI encoding of args
+      into resolver buffer) return
+      `DriverError::NotYetImplemented` with offending
+      expr's debug repr.
+    - **Cool-japan API coordination** — discussion
+      posted at
+      [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+      2026-05-28; `docs/cool-japan-driver-api-
+      coordination-draft.md` revised in sync as the
+      signature evolved (`d357a01`'s `extern_registry`
+      parameter added 2026-05-29). Body PR submission
+      deferred until explicit maintainer feedback
+      arrives.
     - **mslean4 LECQ/LECR forward+callback runtime** —
       separate sub-phase (post-RC). SPEC §10a text
       generalisation + IPC frame routing.

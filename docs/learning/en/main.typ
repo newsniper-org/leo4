@@ -503,3 +503,118 @@ If you read the learning material end-to-end before
 2026-05-24, no architectural decision changed — this
 update is about *which* RC blockers landed and which
 user-visible surface expanded.
+
+= Update — 2026-05-29
+
+After the 2026-05-24 RC progress batch, three further
+work streams landed before the v1.0 RC tag. None of
+them change the architecture, but they change which
+surfaces a user can rely on today.
+
+== Function-arrow callback ABI (Phase 10-B1.x)
+
+The Phase 10-B1 work mangled the function-arrow type at
+the IDL + wire layer on 2026-05-21. The runtime side
+landed across 2026-05-28..29 in two halves:
+
+*Outbound direction* (Rust passes a Rust closure to Lean
+through `leo4::import!`):
+
+- `leo4-abi` now ships `RustCallbackRegistry` — a
+  main-side per-`Lean` registry that mints `u64`
+  `callback_id`s, stores the closure under that id, and
+  enforces the per-call lifetime contract through an
+  RAII `RegistrationGuard`. Drop deregisters.
+- `Lean::callback_registry()` exposes the per-instance
+  Arc<RustCallbackRegistry> so the macro layer can grab
+  it without needing thread-local state.
+- The `leo4::import!` macro recognises `fn(T₁,…,Tₙ) -> R`
+  parameter types automatically: the emitted wrapper
+  registers the closure on entry, encodes the
+  `callback_id` (u64 LE) into the canonical args buffer,
+  calls the shim, then drops the guard on return.
+  Generic `impl Fn(...) -> R` intentionally not
+  supported — users pass `fn` pointers and explicit
+  state through other channels.
+- `OxiLeanInvoker::attach_outbound_registry(...)` /
+  `invoke_outbound(...)` / `register_outbound_dispatch_callback(...)`
+  wire the dispatch back: when the OxiLean evaluator
+  reaches a Lean closure dereference (the Lean side of
+  the boundary calls the Rust `fn`), the bridge
+  callback unpacks `(callback_id, rest) = (u64 LE
+  prefix, &args[8..])` and forwards to the registered
+  closure.
+
+*Inbound direction* (Rust receives a Lean closure into a
+`#[leo4::export]` body) was wired in `83cbbcc`
+(2026-05-28) via `LeanCallback<R, Args>` + the
+`CallbackInvoker` trait. The two halves use the same
+`callback_id: u64` wire shape (SPEC §13a), differing
+only in which side mints and which side dereferences.
+
+== `oxilean_runtime::driver` IO walker (#76 P0c)
+
+The fork branch `0.1.3-leo4-ox7` grew a new
+`oxilean_runtime::driver` module that drives an
+elaborated `def main : IO α := …` to its IO effects under
+an installed `ExternResolver`. The walker as of
+2026-05-29 recognises:
+
+- `IO.pure` / `Pure.pure` — nullary terminal (action
+  complete, result discarded).
+- `IO.bind α β m k` (arity-4) and `Bind.bind m k`
+  (arity-2 after implicit erasure) — walk `m` then `k`.
+  Beta-application of `k` with a concrete result feed
+  from `m` is the next sub-step.
+- `@[extern]`-attributed `Const` reductions —
+  `dispatch_extern_const` against the supplied
+  `ExternRegistry`; resolver returns drive the action
+  forward.
+
+Everything else returns
+`DriverError::NotYetImplemented` with the offending
+expression's debug repr in the reason field —
+downstream knows exactly which shape needs wiring.
+
+The upstream API is being discussed at
+`cool-japan/oxilean#2`; submission of a body PR is
+deferred until the API shape gets explicit maintainer
+feedback.
+
+== Distro audit infra + Windows support floor
+
+A new `just linux-distro-audit <distro>` recipe lands at
+`ci/linux-distro-audit/`. Distros are data-driven via
+`distros.toml`; the runner picks up new entries
+automatically with no hard-coded distro names in the
+Python driver. Initial set (current stable as of
+2026-05-29): archlinux, debian-13, ubuntu-26.04,
+fedora-44, alpine-3.22.
+
+The Windows support floor is now pinned to UCRT's own
+officially-supported range: Windows Vista SP2 +
+KB2999226 (NT 6.0) or Windows 7 SP1 + KB3118401
+(NT 6.1), through Windows 11 / Server 2025+. The KB
+install is the *downstream application developer's*
+deployment concern — leo4 doesn't redistribute or
+document an end-user-facing UCRT install flow.
+
+== Leaf-crate dedup
+
+Two sibling leaf crates land to dedupe code previously
+vendored twice (in `sibling/leo4-oxilean-build/` and
+`sibling/leo4-oxilean-runner/`):
+
+- `sibling/leo4-oxilean-bootstrap/` — OX5-oxi env
+  bootstrap + leo4 boundary primitive axioms.
+- `sibling/leo4-oxilean-translate/` — OX6 step 13 PEG →
+  legacy-Decl translator.
+
+Both consumers' previous ~1880-LOC vendored copies
+collapse to one-line `pub use <leaf>::*;` re-export
+shims.
+
+If you read the learning material end-to-end before
+2026-05-29, the architectural picture is unchanged —
+this update is about *which* runtime surfaces are now
+callable and which were dedup'd into leaf crates.

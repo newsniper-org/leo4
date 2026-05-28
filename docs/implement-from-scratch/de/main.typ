@@ -1314,3 +1314,89 @@ des Dispatchers. Einen 10×-Retry mit linearem
 Backoff für das schmale Rennen einbauen, in dem der
 Worker-Prozess startet, bevor der Dispatcher den
 Pipe-Namen beim OS registriert hat.
+
+= Update — 2026-05-29: Callback-Runtime + IO-Walker
+
+Der Implementor-from-Scratch-Pfad kreuzt die Function-
+Arrow-Callback-ABI-Runtime, sobald die Boundary-Crate
+gelehrt wird, `fn(...) -> R`-Parameter zu unterstützen.
+Die Gestalt der Implementierung, die schließlich landete:
+
+== Substrat (leo4-abi)
+
+Ein `RustCallbackRegistry`-Struct hält einen
+`AtomicU64`-geprägten ID-Zähler plus
+`Mutex<HashMap<u64, Arc<dyn Fn(&[u8]) -> Result<Vec<u8>,
+LeanError> + Send + Sync>>>`. Registrierung gibt einen
+`RegistrationGuard` zurück, dessen `Drop` deregistriert;
+das bindet den Per-Call-Scope-Lifetime-Vertrag aus SPEC
+§13a an das Typsystem statt an Konvention.
+
+Wer das von Grund auf implementiert, ist versucht, ein
+Thread-Local zu nehmen. Widerstehen Sie. Die Adapter-
+Seite muss den `Arc` in die Boundary-Call-Umgebung
+klonen, und denselben Arc durch `Lean` (leo4-mslean4)
+und `OxiLeanInvoker` (leo4-oxilean) zu fädeln liefert
+genau eine Quelle der Wahrheit ohne Thread-Affinität-
+Fallstricke.
+
+== Makro-Schicht (leo4-macros-backend)
+
+Der neue Pfad lebt komplett in `rust_type_to_idl` und
+`outbound_callback_encode`. Für jeden
+`Type::BareFn`-Parameter emittiert das Makro:
+
+1. `let (__cb_id_<n>, __cb_guard_<n>) =
+   Arc::clone(lean.callback_registry()).register(...);`
+2. `let _ = &__cb_guard_<n>;` — Lifetime bis zum
+   Wrapper-Ende erweitern.
+3. `args.extend_from_slice(&__cb_id_<n>.to_le_bytes());`
+
+== Adapter-Routing (leo4-oxilean)
+
+Drei neue Methoden auf `OxiLeanInvoker`:
+- `attach_outbound_registry(...)`
+- `outbound_registry() -> Option<...>`
+- `invoke_outbound(id, args) -> Result<...>`
+
+Plus ein Bridge-Helper
+`register_outbound_dispatch_callback(mangled)`, der ein
+einzelnes `@[extern]`-gemangeltes Symbol in die Per-
+Call-Canonical-ABI-Form übersetzt: 8-Byte-LE-
+callback_id-Präfix, Rest sind die Args des Callbacks
+selbst.
+
+== Driver-IO-Walker (fork-seitig `oxilean_runtime::driver`)
+
+Die Aufgabe des Walkers ist, ein elaboriertes
+`def main : IO α := body` zu nehmen und `body` unter
+einem installierten `ExternResolver` zu seinen IO-
+Effekten zu walken. Die v0-Shapes:
+
+- `IO.pure` / `Pure.pure` Const (nullary) — Terminal.
+- `App(IO.pure, x)` — Terminal.
+- `App(App(App(App(IO.bind, α), β), m), k)` (Arität 4) —
+  walke m, walke k.
+- `App(App(Bind.bind, m), k)` (Arität 2) — gleich.
+- `@[extern]` `Const`-Reduktion —
+  `dispatch_extern_const(env, registry, resolver, name,
+  &[])` liefert `Resolved(bytes)`; Effekt feuert.
+
+Alles andere oberflächt `DriverError::NotYetImplemented`
+mit der Debug-Repräsentation des Ausdrucks. Die bewusst
+schmale erkannte Menge hält die Lücke sichtbar.
+
+Wenn Sie Ihren eigenen Walker implementieren, ist die
+Versuchung, "alles zu interpretieren", auch dort. Auch
+widerstehen. Der Pfad der geringsten Überraschung ist,
+spezifische benannte Shapes zu erkennen und bei nicht
+erkannten klar abzubrechen.
+
+== Distro-Audit
+
+Das `just linux-distro-audit <distro>`-Rezept treibt
+Per-Distro-Container-Builds. Die Daten-vs-Code-Trennung
+ist tragend: `distros.toml` trägt alles Distro-
+Spezifische (Image, Setup, Audit-Targets); der Python-
+Runner hat keinen hartcodierten Distro-Namen. Ein neues
+Distro hinzuzufügen ist rein TOML.

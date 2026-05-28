@@ -737,16 +737,29 @@ would be expensive to relitigate:
       invoke_outbound}` (`521979e`). Generic
       `impl Fn(...)` intentionally not supported in v0
       — users pass `fn` pointers + explicit state.
-    - **#76 P0c IO walker — v0 + API coord draft**
-      (2026-05-28). Fork `8b2af9f` lands the v0 walker
-      recognising `IO.pure` shape only; everything
-      else returns `DriverError::NotYetImplemented`
-      with a precise expr debug repr. API coordination
-      draft at `docs/cool-japan-driver-api-
-      coordination-draft.md` is **discussion-only** —
-      7 explicit questions for cool-japan maintainers
-      *before* committing to body PR signature. Both
-      upstream coordinations deferred to post-RC.
+    - **#76 P0c IO walker — coverage grows**
+      (2026-05-28..29). Sub-commit timeline:
+      - Fork `f9bfd45` (2026-05-28) — module + stub.
+      - Fork `8b2af9f` (2026-05-28) — v0 walker (`IO.pure`).
+      - Fork `d357a01` (2026-05-29) — `IO.bind α β m k`
+        (arity-4 + arity-2 `Bind.bind m k`) + `@[extern]`
+        Const dispatch via `dispatch_extern_const`.
+        Signature change: `run_main` / `run_main_with_args`
+        gain `extern_registry: &ExternRegistry`.
+      - leo4 main `c0f81c7` (2026-05-29) — submodule bump
+        + leo4-oxilean-runner caller adapt.
+      - leo4 main `44bb382` (2026-05-29) — leo4-oxilean
+        `register_outbound_dispatch_callback` bridge that
+        converts a single `@[extern]`-mangled symbol into
+        the `(callback_id LE prefix, rest)` shape +
+        forwards to `invoke_outbound`.
+
+      The cool-japan API coordination is **posted** at
+      [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2);
+      `docs/cool-japan-driver-api-coordination-draft.md`
+      tracks the signature evolution. No maintainer
+      feedback yet (as of 2026-05-29). Body PR submission
+      stays deferred until feedback arrives.
     - **leo4-oxilean-bootstrap + leo4-oxilean-translate
       leaf crates** — extracted from the two consumers
       that previously vendored ~1880 LOC between them

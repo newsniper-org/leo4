@@ -310,8 +310,7 @@ impl RustCallbackRegistry {
     pub fn len(&self) -> usize {
         self.callbacks
             .lock()
-            .map(|c| c.len())
-            .unwrap_or(0)
+            .map_or(0, |c| c.len())
     }
 
     /// `true` iff no callbacks are registered.

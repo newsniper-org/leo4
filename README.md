@@ -16,11 +16,30 @@ byte-identical mangling across **70 mangled instantiations**
 (29 logical entries) with schema_hash `qi5gb74dbjyxo` between
 the Lean plugin and the Rust `schema-idl` crate.
 
-**v1.0 RC progress (2026-05-28 update)** — most v1.0
+**v1.0 RC progress (2026-05-29 update)** — most v1.0
 RC blockers cleared. The remaining gauge is the
-`oxilean_runtime::driver` IO walker body (v0 walker
-landed; `IO.bind` / `@[extern]` / `EStateM` shape
-coverage pending). Recent batch:
+`oxilean_runtime::driver` IO walker; the walker now
+covers `IO.pure`, `IO.bind` (arity-4 + arity-2), and
+`@[extern]` Const dispatch — `EStateM` lowerings +
+beta-application of `k` with concrete result from `m`
+remain. Recent batch:
+
+- **#76 P0c IO walker coverage** (2026-05-29). Fork
+  `d357a01` adds `IO.bind` + `@[extern]` Const
+  dispatch on top of the 2026-05-28 v0 walker. leo4
+  main bumps the fork + adapts the runner caller
+  (`c0f81c7`) and lands the leo4-oxilean outbound
+  dispatch bridge (`44bb382`) — when the walker
+  fires a Lean closure dereference, the
+  `register_outbound_dispatch_callback` shim unpacks
+  `(callback_id, rest)` and forwards to
+  `OxiLeanInvoker::invoke_outbound`. The cool-japan
+  driver API coordination is posted at
+  [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2);
+  body PR submission deferred until explicit
+  maintainer feedback.
+
+Recent batch (2026-05-28):
 
 - **Phase 10-B1.x callback ABI runtime** (2026-05-28).
   Three leo4-side steps + fork-side v0 IO walker:

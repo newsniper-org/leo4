@@ -380,3 +380,87 @@ v0.1.0 cut 以降の変更を圧縮してまとめたもの。
 読者にとってアーキテクチャ判断は変わっていない —
 今回の更新は、どの RC blocker が land し、どの
 user-visible surface が拡張されたかの記録。
+
+= 更新 — 2026-05-29
+
+2026-05-24 RC 進捗バッチの後、v1.0 RC タグまでに 3 つの
+作業ストリームが追加で land。アーキテクチャは無変更;
+ユーザーが頼れる表面が何かが変わった。
+
+== 関数矢印 callback ABI (Phase 10-B1.x)
+
+Phase 10-B1 の IDL + ワイヤ層 (function-arrow 型 mangling)
+は 2026-05-21 に landed。ランタイム側は 2026-05-28..29
+の間で 2 段階で landed:
+
+*アウトバウンド方向* (Rust が `leo4::import!` 経由で
+Rust closure を Lean に渡す):
+
+- `leo4-abi` の新 `RustCallbackRegistry` — main 側
+  per-`Lean` registry が `u64` `callback_id` を発行し
+  closure を保存。RAII `RegistrationGuard` で per-call
+  lifetime を強制。
+- `Lean::callback_registry()` でマクロ層がスレッドローカル
+  なしに registry へアクセス。
+- `leo4::import!` マクロが `fn(T₁,…,Tₙ) -> R` を自動認識:
+  register-encode-call-decode-deregister シーケンスを emit。
+  Generic `impl Fn(...) -> R` は意図的に非対応。
+- `OxiLeanInvoker::{attach_outbound_registry,
+  invoke_outbound, register_outbound_dispatch_callback}` —
+  OxiLean evaluator が Lean closure を dereference する
+  と bridge callback が `(callback_id, rest) = (u64 LE
+  prefix, &args[8..])` に unpack し、登録された closure
+  に forward。
+
+*インバウンド方向* (Rust が `#[leo4::export]` body で
+Lean closure を引数として受ける) は `83cbbcc` で
+`LeanCallback<R, Args>` + `CallbackInvoker` trait として
+wire 済み。双方向で同じ `callback_id: u64` ワイヤ形式
+(SPEC §13a)。
+
+== `oxilean_runtime::driver` IO walker (#76 P0c)
+
+fork branch `0.1.3-leo4-ox7` に新モジュール
+`oxilean_runtime::driver`。`def main : IO α := …` を
+`ExternResolver` 下で実行。2026-05-29 時点で認識する
+shape:
+
+- `IO.pure` / `Pure.pure` — nullary 終端。
+- `IO.bind α β m k` (arity-4) / `Bind.bind m k`
+  (arity-2, implicit erasure 後) — `m` walk 後 `k` walk。
+- `@[extern]` `Const` reduction — `dispatch_extern_const`
+  経由 resolver 呼び出し。
+
+それ以外は `DriverError::NotYetImplemented` と
+offending expr の debug repr を返す。cool-japan との
+API 協議が `cool-japan/oxilean#2` で進行中; body PR の
+提出は maintainer フィードバック後に延期。
+
+== Distro audit インフラ + Windows サポート floor
+
+`just linux-distro-audit <distro>` recipe を導入
+(`ci/linux-distro-audit/`)。distro 定義は `distros.toml`
+データドリブン; Python ドライバーに distro 名のハード
+コードなし。初期 5 種 (2026-05-29 時点 stable):
+archlinux, debian-13, ubuntu-26.04, fedora-44,
+alpine-3.22。
+
+Windows サポート floor を UCRT 自体の公式サポート範囲
+に pin: Windows Vista SP2 + KB2999226 (NT 6.0) または
+Windows 7 SP1 + KB3118401 (NT 6.1) 以降。KB インストール
+は *downstream アプリ開発者* の deployment 関心事 —
+leo4 は再配布せず、エンドユーザー向けインストール フロー
+を文書化しない。
+
+== Leaf crate dedup
+
+`leo4-oxilean-build` + `leo4-oxilean-runner` で vendoring
+されていた ~1880 LOC を 2 つの leaf crate に切り出し:
+
+- `sibling/leo4-oxilean-bootstrap/` — OX5-oxi env
+  bootstrap。
+- `sibling/leo4-oxilean-translate/` — OX6 step 13
+  translator。
+
+両 consumer の vendor file は 1 行 `pub use <leaf>::*;`
+re-export shim に圧縮。

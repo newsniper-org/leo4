@@ -375,3 +375,80 @@ v0.1.0 cut 이후 진행된 변경 사항 압축 정리.
 독자라면 아키텍처 결정은 변하지 않았음 — 이 업데이트는
 어떤 RC blocker 가 land 했고 어떤 user-visible
 surface 가 확장되었는지를 기록.
+
+= 업데이트 — 2026-05-29
+
+2026-05-24 RC 진행 배치 이후 v1.0 RC 태그 전까지 세 가지
+work stream이 더 land됨. 아키텍처는 변경 없음; 사용자가
+의존할 수 있는 표면이 무엇인지가 바뀜.
+
+== 함수-화살표 callback ABI (Phase 10-B1.x)
+
+Phase 10-B1의 IDL + 와이어 레이어 (function-arrow 타입
+mangling)는 2026-05-21에 land. 런타임 측은 2026-05-28..29
+사이에 두 반쪽으로 나뉘어 land:
+
+*Outbound 방향* (Rust가 `leo4::import!`을 통해 Rust closure를
+Lean에게 전달):
+
+- `leo4-abi`에 `RustCallbackRegistry` 추가 — 메인 측
+  per-`Lean` registry로 `u64` `callback_id` 발급 + closure
+  보관. RAII `RegistrationGuard`가 per-call lifetime 강제.
+- `Lean::callback_registry()` 로 매크로가 thread-local 없이
+  registry에 접근.
+- `leo4::import!` 매크로가 `fn(T₁,…,Tₙ) -> R` 인자를 자동
+  인식: register-encode-call-decode-deregister 시퀀스 emit.
+  Generic `impl Fn(...) -> R`는 의도적 미지원.
+- `OxiLeanInvoker::{attach_outbound_registry,
+  invoke_outbound, register_outbound_dispatch_callback}` —
+  OxiLean evaluator가 Lean closure를 dereference하면 bridge
+  callback이 `(callback_id, rest) = (u64 LE prefix,
+  &args[8..])`로 unpack하고 등록된 closure로 forward.
+
+*Inbound 방향* (Rust가 `#[leo4::export]` body에서 Lean
+closure를 인자로 받음)은 `83cbbcc`에서 `LeanCallback<R, Args>`
++ `CallbackInvoker` trait으로 wire-up. 양방향 모두 같은
+`callback_id: u64` 와이어 형태 (SPEC §13a).
+
+== `oxilean_runtime::driver` IO walker (#76 P0c)
+
+fork branch `0.1.3-leo4-ox7`에 새 `oxilean_runtime::driver`
+모듈. `def main : IO α := …`을 `ExternResolver` 하에서
+실행. 2026-05-29 기준 인식되는 shape:
+
+- `IO.pure` / `Pure.pure` — nullary terminal.
+- `IO.bind α β m k` (arity-4) / `Bind.bind m k` (arity-2,
+  implicit erasure 후) — `m` walk 후 `k` walk.
+- `@[extern]` `Const` reduction — `dispatch_extern_const`
+  통해 resolver 호출.
+
+나머지는 `DriverError::NotYetImplemented`와 함께
+offending expr debug repr 반환. cool-japan과 API 협의가
+`cool-japan/oxilean#2`에서 진행 중; body PR 제출은
+maintainer 피드백 후로 연기.
+
+== Distro audit 인프라 + Windows 지원 floor
+
+`just linux-distro-audit <distro>` recipe 도입
+(`ci/linux-distro-audit/`). distro 정의는 `distros.toml`
+data-driven; Python 드라이버에 distro 이름 하드코딩 없음.
+초기 5개 (2026-05-29 기준 stable): archlinux, debian-13,
+ubuntu-26.04, fedora-44, alpine-3.22.
+
+Windows 지원 floor를 UCRT 자체의 공식 지원 범위로 pin:
+Windows Vista SP2 + KB2999226 (NT 6.0) 또는 Windows 7 SP1
++ KB3118401 (NT 6.1) 이상. KB 설치는 *downstream 앱
+개발자*의 deployment 사안 — leo4가 redistribute하거나
+end-user-facing install flow를 문서화하지 않음.
+
+== Leaf crate dedup
+
+`leo4-oxilean-build` + `leo4-oxilean-runner`가 vendor했던
+~1880 LOC를 두 leaf crate로 분리:
+
+- `sibling/leo4-oxilean-bootstrap/` — OX5-oxi env bootstrap.
+- `sibling/leo4-oxilean-translate/` — OX6 step 13
+  translator.
+
+두 consumer의 vendor file은 1-line `pub use <leaf>::*;`
+re-export shim으로 압축.

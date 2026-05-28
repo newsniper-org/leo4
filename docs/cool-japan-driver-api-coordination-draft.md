@@ -1,11 +1,14 @@
 # cool-japan/oxilean — `oxilean_runtime::driver` API coordination draft
 
-> Status: **DISCUSSION-ONLY DRAFT** (2026-05-28). NOT a PR
-> request. Posted to the cool-japan/oxilean tracker as a
-> design discussion before any body-level patch lands
-> upstream.
+> Status: **DISCUSSION POSTED** at
+> [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+> on 2026-05-28; awaiting maintainer feedback (no comments
+> as of the 2026-05-29 revision). This document is the
+> leo4-side companion to the upstream issue — kept in
+> sync as the API shape gets refined.
 >
-> Companion to the OX7 / OX8 contribution series at
+> NOT a PR request — discussion only. Companion to the
+> OX7 / OX8 contribution series at
 > `docs/cool-japan-upstream-pr-draft.md`. That doc covers
 > the codegen folds + the `oxilean-parse-peg` donation —
 > things that are functionally complete on the fork side
@@ -64,7 +67,7 @@ Two paths forward:
 
 ## Proposed API surface
 
-### `pub fn run_main(env, resolver, name) -> Result<(), DriverError>`
+### `pub fn run_main(env, extern_registry, resolver, name) -> Result<(), DriverError>`
 
 Convenience wrapper around `run_main_with_args` with an
 empty program-args slot:
@@ -72,23 +75,34 @@ empty program-args slot:
 ```rust
 pub fn run_main(
     env: &Environment,
+    extern_registry: &ExternRegistry,
     resolver: SharedExternResolver,
     main_name: &Name,
 ) -> Result<(), DriverError>;
 ```
+
+**Signature note (2026-05-29 revision)**: the fork's
+walker landings (`d357a01`) added `extern_registry:
+&ExternRegistry` as the second parameter. The IO walker
+consults the registry via `dispatch_extern_const` to
+recognise `@[extern]`-attributed `Const` reductions, so
+the registry has to be reachable. Embedders typically
+pass the same registry handle they used to install
+`@[extern]` metadata at elaboration time.
 
 Drives `def <name> : IO α := …` (or `def <name> : IO
 Unit := …`) to its IO effects under the installed
 `resolver`. Result discarded (α may be any type; the
 runtime cares only that effects fire).
 
-### `pub fn run_main_with_args(env, resolver, name, args) -> Result<(), DriverError>`
+### `pub fn run_main_with_args(env, extern_registry, resolver, name, args) -> Result<(), DriverError>`
 
 The longer form, for `def main : List String → IO α`:
 
 ```rust
 pub fn run_main_with_args(
     env: &Environment,
+    extern_registry: &ExternRegistry,
     resolver: SharedExternResolver,
     main_name: &Name,
     args: &[&str],
@@ -151,17 +165,26 @@ is cheap.
 
 ## What's already in the fork (for reference)
 
-Fork commit `f9bfd45` (2026-05-28) lands the module +
-the public surface above with a stub body. Fork commit
-`8b2af9f` (2026-05-28) lands the v0 walker — `IO.pure`
-shape only — which is enough to make the API contract
-exercise itself in a real test:
+Fork commits (chronological):
+  - `f9bfd45` (2026-05-28) — module + public surface
+    with a stub body.
+  - `8b2af9f` (2026-05-28) — v0 walker recognising the
+    `IO.pure` shape.
+  - `d357a01` (2026-05-29) — IO.bind (arity-4 + arity-2)
+    + `@[extern]` Const dispatch via
+    `dispatch_extern_const`. Adds the
+    `extern_registry: &ExternRegistry` parameter to the
+    public signature (breaking change vs. the earlier
+    stub; documented in the signature note above).
+
+The latest commit is enough to drive both terminal IO.pure
+and a one-call `@[extern]` dispatch end-to-end:
 
 ```rust
 let mut env = Environment::new();
 env.add(Declaration::Definition { /* main : IO Unit := IO.pure () */ })?;
 let resolver: SharedExternResolver = Arc::new(MyResolver::new());
-oxilean_runtime::driver::run_main(&env, resolver, &Name::str("main"))?;
+oxilean_runtime::driver::run_main(&env, &extern_registry, resolver, &Name::str("main"))?;
 ```
 
 That call walks to completion on the fork today. Every

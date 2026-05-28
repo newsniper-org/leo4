@@ -1171,3 +1171,85 @@ ledger の 3 項目 (`.so` 拡張子の hardcode,
 client-side counterpart。OS にパイプ名が register
 される前に worker が spawn される狭い race に対し
 10x linear backoff retry を入れる。
+
+= 更新 — 2026-05-29: callback ランタイム + IO walker
+
+実装者視点で boundary crate を `fn(...) -> R` パラメータ
+対応にするには function-arrow callback ABI ランタイムを
+通る必要がある。最終的に land した実装の形:
+
+== 基盤 (leo4-abi)
+
+`RustCallbackRegistry` 構造体 — `AtomicU64` で mint
+する id カウンタ + `Mutex<HashMap<u64, Arc<dyn Fn(&[u8])
+-> Result<Vec<u8>, LeanError> + Send + Sync>>>`。
+register は RAII `RegistrationGuard` を返し、Drop で
+deregister。SPEC §13a の per-call-scope ライフタイム
+コントラクトを慣習ではなく型システムで強制。
+
+スクラッチから実装する場合、thread-local の誘惑があるが
+拒否すべき。adapter 側が `Arc` を boundary call 環境に
+clone する必要があり、同じ Arc を `Lean` (leo4-mslean4)
+と `OxiLeanInvoker` (leo4-oxilean) に thread すれば
+thread-affinity の落とし穴なしに正確に 1 つの source of
+truth が得られる。
+
+== マクロ層 (leo4-macros-backend)
+
+新 path は `rust_type_to_idl` と `outbound_callback_encode`
+の中だけにある。各 `Type::BareFn` パラメータごとに
+マクロが emit:
+
+1. `let (__cb_id_<n>, __cb_guard_<n>) = Arc::clone(...).register(...);`
+2. `let _ = &__cb_guard_<n>;` — wrapper の終わりまで
+   ライフタイム延長。
+3. `args.extend_from_slice(&__cb_id_<n>.to_le_bytes());`
+
+ユーザの `fn` ポインタ (または `fn(...)` に自動強制される
+`impl Fn(...)`) が byte 形状の adapter で包まれる。
+
+== Adapter ルーティング (leo4-oxilean)
+
+`OxiLeanInvoker` の 3 メソッド:
+- `attach_outbound_registry(...)`
+- `outbound_registry() -> Option<...>`
+- `invoke_outbound(id, args) -> Result<...>`
+
+加えて bridge ヘルパー
+`register_outbound_dispatch_callback(mangled)` — 1 つの
+`@[extern]` mangled シンボルを per-call canonical-ABI 形状
+に変換: 8 バイト LE callback_id プレフィックス + 残りは
+callback 自身の args。
+
+== Driver IO walker (fork 側 `oxilean_runtime::driver`)
+
+walker の仕事は elaborated `def main : IO α := body` を
+取り、installed `ExternResolver` 下で `body` を IO 効果へ
+walk すること。v0 shape:
+
+- `IO.pure` / `Pure.pure` const (nullary) — 終端。
+- `App(IO.pure, x)` — 終端。
+- `App(App(App(App(IO.bind, α), β), m), k)` (arity-4) —
+  m walk 後 k walk。
+- `App(App(Bind.bind, m), k)` (arity-2) — 同様。
+- `@[extern]` `Const` reduction —
+  `dispatch_extern_const(...)` が `Resolved(bytes)` を返し
+  effect fires。
+
+それ以外は `DriverError::NotYetImplemented` + offending
+expr の debug repr。意図的に狭い認識 set がギャップを
+可視化する。
+
+自分の walker を実装する際、「すべてを interpret する」
+誘惑も拒否すべき。最も意外性の少ない path は特定の名前
+付き shape のみ認識し、認識できないものは明示的に bail
+すること。
+
+== Distro audit
+
+`just linux-distro-audit <distro>` recipe が per-distro
+コンテナビルドを driving。data-vs-code 分離が load-
+bearing: `distros.toml` がすべての distro 固有のもの
+(image, setup, audit targets) を持つ; Python ランナーに
+hardcode された distro 名はない。新 distro 追加は純粋に
+TOML 作業。

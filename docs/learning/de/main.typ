@@ -424,3 +424,101 @@ gelesen hat: keine Architekturentscheidung hat sich
 geändert — das Update protokolliert nur, welche RC-
 Blocker gelandet sind und welche user-visible Surface
 sich erweitert hat.
+
+= Update — 2026-05-29
+
+Nach dem 2026-05-24-RC-Fortschrittsbatch sind bis zur
+v1.0-RC-Markierung drei weitere Work Streams gelandet.
+Keiner ändert die Architektur; sie ändern, auf welche
+Oberflächen sich Nutzer heute verlassen können.
+
+== Function-Arrow Callback ABI (Phase 10-B1.x)
+
+Phase 10-B1 hat den Function-Arrow-Typ in der IDL +
+Wire-Schicht am 2026-05-21 gemangelt. Die Runtime-Seite
+landete zwischen 2026-05-28..29 in zwei Hälften:
+
+*Outbound-Richtung* (Rust übergibt einen Rust-Closure an
+Lean über `leo4::import!`):
+
+- `leo4-abi` liefert jetzt `RustCallbackRegistry` — eine
+  main-seitige Per-`Lean`-Registry, die `u64`
+  `callback_id`s prägt und den Closure unter dieser ID
+  speichert. RAII `RegistrationGuard` erzwingt den
+  Per-Call-Lifetime-Vertrag (SPEC §13a).
+- `Lean::callback_registry()` macht die per-instance
+  `Arc<RustCallbackRegistry>` zugänglich, sodass die
+  Makroschicht ohne Thread-Local-Zustand zugreifen kann.
+- Das `leo4::import!`-Makro erkennt
+  `fn(T₁,…,Tₙ) -> R`-Parametertypen automatisch: der
+  emittierte Wrapper registriert den Closure beim
+  Eintritt, codiert die `callback_id` (u64 LE) in den
+  kanonischen Args-Puffer, ruft den Shim auf und dropt
+  dann den Guard. Generic `impl Fn(...) -> R`
+  absichtlich nicht unterstützt.
+- `OxiLeanInvoker::{attach_outbound_registry,
+  invoke_outbound, register_outbound_dispatch_callback}`
+  verdrahten den Rückweg: wenn der OxiLean-Evaluator
+  eine Lean-Closure-Dereferenz erreicht, entpackt der
+  Bridge-Callback `(callback_id, rest) = (u64 LE
+  prefix, &args[8..])` und leitet an den registrierten
+  Closure weiter.
+
+*Inbound-Richtung* (Rust empfängt einen Lean-Closure in
+einen `#[leo4::export]`-Body) wurde in `83cbbcc` über
+`LeanCallback<R, Args>` + den `CallbackInvoker`-Trait
+verdrahtet. Beide Hälften verwenden die gleiche
+`callback_id: u64`-Wire-Form.
+
+== `oxilean_runtime::driver` IO Walker (#76 P0c)
+
+Der Fork-Branch `0.1.3-leo4-ox7` hat ein neues
+`oxilean_runtime::driver`-Modul, das ein elaboriertes
+`def main : IO α := …` unter einem installierten
+`ExternResolver` zu seinen IO-Effekten treibt. Der Walker
+erkennt zum 2026-05-29:
+
+- `IO.pure` / `Pure.pure` — nullary Terminal.
+- `IO.bind α β m k` (Arität 4) und `Bind.bind m k`
+  (Arität 2 nach impliziter Erasure) — walke `m`, dann
+  `k`.
+- `@[extern]`-attributierte `Const`-Reduktionen —
+  `dispatch_extern_const` gegen die übergebene
+  `ExternRegistry`.
+
+Alles andere gibt `DriverError::NotYetImplemented` mit
+der Debug-Repräsentation des Ausdrucks zurück.
+Die Upstream-API wird unter `cool-japan/oxilean#2`
+diskutiert; eine Body-PR-Einreichung ist verschoben, bis
+es explizites Maintainer-Feedback gibt.
+
+== Distro-Audit-Infrastruktur + Windows-Support-Floor
+
+Ein neues `just linux-distro-audit <distro>`-Rezept
+landet unter `ci/linux-distro-audit/`. Distros sind
+datengetrieben via `distros.toml`; der Runner nimmt neue
+Einträge automatisch auf, ohne hartcodierte Distro-Namen
+im Python-Treiber. Initialsatz (aktuell stabil zum
+2026-05-29): archlinux, debian-13, ubuntu-26.04,
+fedora-44, alpine-3.22.
+
+Der Windows-Support-Floor ist jetzt auf den offiziell
+unterstützten UCRT-Bereich verankert: Windows Vista SP2 +
+KB2999226 (NT 6.0) oder Windows 7 SP1 + KB3118401
+(NT 6.1), bis Windows 11 / Server 2025+. Die KB-
+Installation ist die *Deployment-Sorge des
+Downstream-Anwendungsentwicklers* — leo4 redistribuiert
+oder dokumentiert keinen Endnutzer-UCRT-Installationsfluss.
+
+== Leaf-Crate-Dedup
+
+Zwei Sibling-Leaf-Crates landen, um vorher zweifach
+vendored Code zu deduplizieren:
+
+- `sibling/leo4-oxilean-bootstrap/` — OX5-oxi
+  Env-Bootstrap + leo4 Boundary-Primitive-Axiome.
+- `sibling/leo4-oxilean-translate/` — OX6-Step-13
+  PEG → Legacy-Decl-Translator.
+
+Beide Consumer-Vendor-Dateien kollabieren zu
+einzeiligen `pub use <leaf>::*;`-Re-Export-Shims.

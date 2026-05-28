@@ -7,6 +7,77 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — IO walker grows IO.bind + @[extern] dispatch shapes, outbound dispatch bridge (2026-05-29)
+
+Closes two of the five gaps the v0 walker (`ab30ca1`) left
+open + lands the leo4-side bridge that the walker fires
+against when a Lean closure dereferences a Rust `fn` arg.
+
+  - **Fork side — IO.bind + @[extern]** (fork commit
+    `d357a01`). `oxilean_runtime::driver::run_main_with_args`
+    recognises `IO.bind α β m k` (arity-4 with implicits)
+    + `Bind.bind m k` (arity-2 after implicit erasure)
+    via the "trailing-two args" heuristic, walking m then
+    k. `@[extern]` Const reductions go through
+    `dispatch_extern_const(env, registry, resolver,
+    name, &[])` — `Resolved(_bytes)` advances the
+    action, `NoResolverInstalled` surfaces a clean
+    diagnostic, `Failed(e)` becomes
+    `DriverError::ExternFailed(e)`.
+
+    Signature change: both `run_main` and
+    `run_main_with_args` now take `extern_registry:
+    &ExternRegistry` as the second parameter (the
+    canonical "is this @[extern]?" lookup). leo4-side
+    callers updated; the cool-japan driver API
+    coordination draft (`docs/cool-japan-driver-api-
+    coordination-draft.md`) revised in sync. The draft
+    is the docs companion to
+    [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+    where the discussion is now posted (no maintainer
+    feedback yet as of 2026-05-29).
+
+  - **leo4-oxilean runner caller adapt** (commit
+    `c0f81c7`). `leo4-oxilean-runner::run_main` grabs
+    `invoker.registry_handle()` + `lock()` and passes
+    the guard ref to `driver::run_main`. Mutex
+    poisoning at the call site surfaces as
+    `LeanError(0x0002_0005)` with the standard runner
+    error envelope.
+
+  - **Outbound dispatch bridge in leo4-oxilean** (commit
+    `44bb382`). New
+    `OxiLeanInvoker::register_outbound_dispatch_callback(mangled)`:
+    converts a single `@[extern]`-mangled symbol into
+    the per-call canonical-ABI shape — first 8 bytes
+    are the `callback_id` (little-endian u64), rest is
+    the inner callback's arg buffer. Forwards to
+    `invoke_outbound(id, &args[8..])`. Errors surface
+    through `ExternCallError::CallbackFailed` with
+    concrete messages: short args, no outbound
+    registry attached, registry lookup failure.
+
+    Wrapper Lean source emitted by `leo4-oxilean-build
+    --mode reverse` should designate one symbol as the
+    bridge target (leo4 convention:
+    `leo4__callback_dispatch__h<schema_hash>_a`); the
+    host calls `register_outbound_dispatch_callback`
+    with that mangled name once at adapter init.
+
+Test impact: fork `oxilean-runtime` 1177 lib (was
+1174; +3 walker tests). leo4-oxilean 19 (was 16; +3
+bridge tests). leo4-oxilean-runner 3 (unchanged).
+Workspace 238 (unchanged from `586c7d2`).
+
+Still NotYetImplemented (in the walker's specific gap
+list, not "everything"):
+  - `EStateM Error IO.RealWorld α` lowerings (Lean
+    stdlib funnels IO through this monad).
+  - Beta-application of `k` in `IO.bind m k` with a
+    concrete result feed from `m`.
+  - Walker-side canonical-ABI encoding of args into
+    the resolver's args buffer.
+
 ### Added — Function-arrow callback ABI: 3-step leo4-side runtime + IO walker v0 (2026-05-28)
 
 Phase 10-B1.x runtime for the oxilean transport. Three

@@ -1141,3 +1141,82 @@ consume. OS-PORTABILITY 정책: 새 per-OS branch 는
 counterpart. dispatcher 가 OS 에 pipe 이름을 register
 하기 전에 worker 가 spawn 되는 좁은 race 에 대비해
 10x linear backoff retry.
+
+= 업데이트 — 2026-05-29: callback runtime + IO walker
+
+구현자 관점에서 boundary crate가 `fn(...) -> R` 인자를
+지원하도록 가르치려면 function-arrow callback ABI
+런타임을 통과해야 한다. 최종적으로 land된 구현의 모양:
+
+== 기반 (leo4-abi)
+
+`RustCallbackRegistry` 구조체 — `AtomicU64`로 minting
+하는 id counter + `Mutex<HashMap<u64, Arc<dyn Fn(&[u8])
+-> Result<Vec<u8>, LeanError> + Send + Sync>>>`. register
+는 RAII `RegistrationGuard` 반환; Drop으로 deregister.
+SPEC §13a의 per-call-scope lifetime 계약을 convention이
+아닌 타입 시스템으로 강제.
+
+처음부터 구현한다면 thread-local 유혹이 있을 것. 거부할
+것. adapter 측이 `Arc`를 boundary call 환경에 clone해야
+하고, 같은 Arc를 `Lean` (leo4-mslean4)과 `OxiLeanInvoker`
+(leo4-oxilean)에 thread하면 thread-affinity 문제 없이
+정확히 하나의 source of truth.
+
+== 매크로 레이어 (leo4-macros-backend)
+
+새 path는 `rust_type_to_idl`과 `outbound_callback_encode`
+에 전부 들어있음. 각 `Type::BareFn` 인자에 대해 매크로가
+emit:
+
+1. `let (__cb_id_<n>, __cb_guard_<n>) =
+   Arc::clone(lean.callback_registry()).register(move |bytes|
+   { decode; call user fn; encode; });`
+2. `let _ = &__cb_guard_<n>;` — wrapper 끝까지 lifetime
+   확장.
+3. `args.extend_from_slice(&__cb_id_<n>.to_le_bytes());`
+
+사용자 `fn` 포인터 (또는 `fn(...)`로 자동 강제되는 `impl
+Fn(...)`)가 byte-shaped adapter로 감싸짐.
+
+== Adapter 라우팅 (leo4-oxilean)
+
+`OxiLeanInvoker`에 세 메서드:
+- `attach_outbound_registry(...)`
+- `outbound_registry() -> Option<...>`
+- `invoke_outbound(id, args) -> Result<...>`
+
+추가로 bridge helper `register_outbound_dispatch_callback
+(mangled)` — `@[extern]` mangled symbol 하나를 per-call
+canonical-ABI shape으로 변환: 8-byte LE callback_id prefix
++ 나머지는 callback의 자체 args.
+
+== Driver IO walker (fork-side `oxilean_runtime::driver`)
+
+walker의 작업은 elaborated `def main : IO α := body`을
+받아 installed `ExternResolver` 하에서 `body`를 IO 효과로
+walk. v0 shapes:
+
+- `IO.pure` / `Pure.pure` const (nullary) — terminal.
+- `App(IO.pure, x)` — terminal.
+- `App(App(App(App(IO.bind, α), β), m), k)` (arity-4) —
+  m walk 후 k walk.
+- `App(App(Bind.bind, m), k)` (arity-2) — 동일.
+- `@[extern]` `Const` reduction —
+  `dispatch_extern_const(env, registry, resolver, name,
+  &[])`가 `Resolved(bytes)` 반환; effect fires.
+
+그 외는 `DriverError::NotYetImplemented` + offending
+expr debug repr. 의도적으로 좁은 인식 set이 갭을 가시화.
+
+자체 walker 구현 시 "전부 interpret" 유혹도 있을 것. 그
+역시 거부. 가장 놀라움 적은 path는 특정 명명된 shape만
+인식하고 인식 못한 것은 명시적으로 bail.
+
+== Distro audit
+
+`just linux-distro-audit <distro>` recipe가 per-distro
+container 빌드를 driving. data-vs-code 분리가 핵심:
+`distros.toml`이 모든 distro-specific 것 (image, setup,
+audit targets)을 보유; Python runner에 hardcode 없음.
+새 distro 추가는 순수 TOML 작업.
