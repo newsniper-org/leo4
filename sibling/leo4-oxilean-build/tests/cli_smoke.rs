@@ -434,6 +434,113 @@ fn cli_native_binop_smoke_all_arith_and_comparison_ops() {
 }
 
 #[test]
+fn cli_native_hpow_smoke() {
+    // OX7 A3 — HPow `^` end-to-end smoke (2026-05-28).
+    //
+    // `^` on a sized integer in Lean desugars (through
+    // the `HPow` typeclass projection) to
+    // `HPow.hPow lhs rhs`. Unlike the other arithmetic
+    // operators, Rust has no native `**` BinOp, so the
+    // OxiLean codegen's `try_builtin_app` folds this
+    // 2-arg App into a method call —
+    // `lhs.pow(rhs)` — using each primitive's inherent
+    // `.pow` method (`u64::pow`, etc.). The leo4-side
+    // translate (`arith_op_to_tc_projection`) emits the
+    // `HPow.hPow` head and the OX5-oxi env bootstrap
+    // (`ARITHMETIC_TC_PROJECTIONS`) ships the matching
+    // axiom so elab doesn't bail with `NameNotFound`.
+    //
+    // This fixture pins down that all three pieces line
+    // up end-to-end on the canonical
+    //   def cube (n : UInt64) : UInt64 := n ^ 3
+    // shape.
+    //
+    // NOTE — the exponent emits as a bare `3` (Rust
+    // integer literal, type-inferred to `u32` by the
+    // `u64::pow` method signature), NOT as an explicit
+    // `3u32` cast. The codegen comment in
+    // `rust_target_backend/types.rs` (~line 1095) calls
+    // this out as a known limitation: signed-integer and
+    // float pow methods need exponent typing the current
+    // spike doesn't emit yet. The monomorphic UInt64
+    // path works because Rust's integer literal
+    // inference accepts the bare literal. Asserting
+    // the bare `_x0.pow(3)` shape locks the current
+    // working behaviour; a follow-up that adds explicit
+    // `u32` casting can update this assertion.
+    let dir = tmp_dir("native_hpow");
+    let out_dir = dir.join("crate");
+    let lean = dir.join("Pow.lean");
+    let manifest = dir.join("manifest.txt");
+
+    write_file(
+        &lean,
+        "def cube (n : UInt64) : UInt64 := n ^ 3\n",
+    );
+    write_file(
+        &manifest,
+        &format!(
+            "crate_name=native_hpow_pkg\n\
+             out_dir={}\n\
+             source={}\n",
+            out_dir.display(),
+            lean.display()
+        ),
+    );
+
+    let output = Command::new(cli_path())
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .expect("invoke");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "CLI must succeed; exit={:?} stderr={stderr}",
+        output.status.code()
+    );
+
+    let lib_path = out_dir.join("src").join("lib.rs");
+    assert!(lib_path.exists(), "src/lib.rs must exist");
+    let lib_text = std::fs::read_to_string(&lib_path).expect("read lib.rs");
+
+    // `cube` lands as a `pub fn`.
+    assert!(
+        lib_text.contains("fn cube"),
+        "lib.rs missing `fn cube`:\n{lib_text}"
+    );
+
+    // The `^` operator folded into a `.pow(...)` method
+    // call on the lhs param slot (`_x0`).
+    assert!(
+        lib_text.contains("_x0.pow("),
+        "fn cube body must call `_x0.pow(...)`:\n{lib_text}"
+    );
+
+    // The exact emitted body is `_x0.pow(3)` — bare
+    // literal, no `u32` suffix (see fixture-header
+    // comment). If a future change adds explicit
+    // exponent casting (e.g. `_x0.pow(3u32)`) this
+    // assertion is the tripwire that flags the
+    // behaviour change for review.
+    assert!(
+        lib_text.contains("_x0.pow(3)"),
+        "fn cube body must contain `_x0.pow(3)` exactly:\n{lib_text}"
+    );
+
+    // Negative invariant — the typeclass-projection
+    // mangled name must NOT leak into the emit; the
+    // backend's `try_builtin_app` folded it into a
+    // native method call.
+    assert!(
+        !lib_text.contains("HPow_hPow"),
+        "`HPow_hPow` mangled head leaked into emit:\n{lib_text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cli_translate_coverage_if_let_list_at() {
     // OX7 translate coverage expansion (2026-05-27) —
     // the `If`, `Let`, `List`, `At` arms in
