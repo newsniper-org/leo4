@@ -16,6 +16,61 @@ byte-identical mangling across **70 mangled instantiations**
 (29 logical entries) with schema_hash `qi5gb74dbjyxo` between
 the Lean plugin and the Rust `schema-idl` crate.
 
+**v1.0 RC progress (2026-05-28 update)** — most v1.0
+RC blockers cleared. The remaining gauge is the
+`oxilean_runtime::driver` IO walker body (v0 walker
+landed; `IO.bind` / `@[extern]` / `EStateM` shape
+coverage pending). Recent batch:
+
+- **Phase 10-B1.x callback ABI runtime** (2026-05-28).
+  Three leo4-side steps + fork-side v0 IO walker:
+  - leo4-abi `RustCallbackRegistry` substrate
+    (`a2c21d9`) — RAII-enforced per-call-scope contract
+    (SPEC §13a).
+  - `leo4::import!` macro emits register-encode-call-
+    decode-deregister sequence for `fn(T₁,…,Tₙ) -> R`
+    args + `Lean::callback_registry()` accessor
+    (`32f26a7`).
+  - `OxiLeanInvoker::{attach_outbound_registry,
+    outbound_registry, invoke_outbound}` (`521979e`) —
+    adapter-side dispatch surface.
+  - Fork `8b2af9f` lands the v0 IO walker recognising
+    `IO.pure` shape only; remaining shapes return
+    `DriverError::NotYetImplemented` with the offending
+    expression's debug repr.
+  - `docs/cool-japan-driver-api-coordination-draft.md`
+    (discussion-only) proposes the
+    `oxilean_runtime::driver` API for cool-japan
+    review; **submission deferred to post-v1.0 RC**
+    alongside the OX7/OX8 upstream PR.
+- **OX8 rust-transpile reverse direction** — all 5
+  phases closed (audit → wrapper emit → evaluator →
+  runner → scaffold). `sibling/leo4-oxilean-runner/`
+  helper folds dlopen + EXPORTS walk + invoker
+  registration + parse + elab into one `run_main(...)`
+  call; final IO-effect drive blocked on the same
+  IO walker body above.
+- **OX7 codegen + parser donation** — fork branch
+  `0.1.3-leo4-ox7` accumulates the codegen fixes
+  (Const name / native scalars / typeclass projection
+  fold / ite / Bool / HPow / String-literal coercion)
+  + the OX6 PEG parser donation + the `extern_resolver`
+  + `CallbackRegistry` extensions. cool-japan upstream
+  PR draft complete; **submission deferred to
+  post-v1.0 RC**.
+- **Leaf crates dedup** — `sibling/leo4-oxilean-
+  bootstrap/` + `sibling/leo4-oxilean-translate/`
+  share-of-truth crates so the build and runner
+  consumers stop vendoring duplicates.
+- **`just linux-distro-audit <distro>`** — NO-hard-
+  coding distro audit infra (`ci/linux-distro-audit/
+  distros.toml` data + Python runner + payload shell
+  script). 5 current-stable distros covered.
+- **Windows support floor** — pinned to UCRT's own
+  supported range (Vista SP2 + KB2999226 / Win 7 SP1
+  + KB3118401 / newer NT). KB install is downstream's
+  deployment concern, not leo4's.
+
 **v1.0 RC progress (2026-05-24)** — the v1.0 RC OX
 blockers cleared in a single push:
 

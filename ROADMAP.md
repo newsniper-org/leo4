@@ -648,6 +648,29 @@ all wait for the v1.0 RC window or later.
   + re-entrant dispatcher path. Unblocks the **adsmt**
   flagship integration's `push/pop` + sub-formula inquiry
   pattern. Schema hash will rotate.
+  - IDL + mangling + wire shape — **DONE 2026-05-21**.
+  - **B1.x runtime — Phase 10-B1.x** (2026-05-28):
+    - **#75 P0b 3 steps for oxilean transport — DONE**.
+      `RustCallbackRegistry` substrate in leo4-abi
+      (`a2c21d9`), `leo4::import!` macro substitution +
+      `Lean::callback_registry()` accessor (`32f26a7`),
+      `OxiLeanInvoker::attach_outbound_registry` +
+      `invoke_outbound` (`521979e`).
+    - **#76 P0c IO walker v0 for `oxilean_runtime::driver` —
+      PARTIAL**. Fork `8b2af9f` lands the v0 walker
+      (recognises `IO.pure` shape only); the full IO walker
+      body (`IO.bind` / `@[extern]` dispatch / `EStateM`
+      lowering / outbound callback dispatch hook) returns
+      `DriverError::NotYetImplemented` with the offending
+      expression's debug repr — the gap is concretely
+      identified per-shape.
+    - **Cool-japan API coordination draft** —
+      `docs/cool-japan-driver-api-coordination-draft.md`
+      (discussion-only). Posted post-RC alongside the
+      OX7/OX8 upstream PR.
+    - **mslean4 LECQ/LECR forward+callback runtime** —
+      separate sub-phase (post-RC). SPEC §10a text
+      generalisation + IPC frame routing.
 - **P10-D2** — Lake-side `leo4-rust-emit` auto-call:
   reverse-direction build collapses from 2 commands to 1.
   `cargo build && lake build` is enough; lake invokes

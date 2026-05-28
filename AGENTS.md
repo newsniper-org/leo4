@@ -706,6 +706,66 @@ would be expensive to relitigate:
     on Windows) with 10× retry backoff for the spawn
     race. Cross-compile clean on
     `x86_64-pc-windows-gnullvm`.
+  - **2026-05-28 — P0b/P0c callback ABI runtime
+    landings**:
+    - **OX8 — rust-transpile reverse direction** —
+      ✅ ALL 5 PHASES CLOSED (audit / wrapper emit /
+      evaluator / runner / scaffold). Mid-session
+      `[patch.crates-io]` workspace-root scoping bug in
+      `sibling/leo4-oxilean` caught + fixed (`2d4f769`)
+      via direct path-deps. Runner crate
+      `sibling/leo4-oxilean-runner/` lands the
+      production main collapse (cdylib walk + EXPORTS +
+      `OxiLeanInvoker` callback registration + parse +
+      elab); IO walker body is the only remaining gap.
+    - **OX7 — OxiLean codegen + PEG donation** —
+      coverage matured through batch translate-arm
+      adds (If / Match / Let / Do / Forall / Exists /
+      AnonStruct / InterpStr / MatchBind / IfLet / etc.)
+      and the multi-decl env threading fix
+      (`ff87ae6`). cool-japan upstream PR draft
+      (`docs/cool-japan-upstream-pr-draft.md`) complete;
+      **submission deferred to post-v1.0 RC** per user
+      instruction.
+    - **#75 P0b 3 steps for oxilean callback runtime —
+      DONE 2026-05-28**. leo4-abi `RustCallbackRegistry`
+      substrate (`a2c21d9`), `leo4::import!` macro
+      emits register-encode-call-decode-deregister
+      sequence for `fn(...) -> R` args + `Lean::
+      callback_registry()` (`32f26a7`), `OxiLeanInvoker
+      ::{attach_outbound_registry, outbound_registry,
+      invoke_outbound}` (`521979e`). Generic
+      `impl Fn(...)` intentionally not supported in v0
+      — users pass `fn` pointers + explicit state.
+    - **#76 P0c IO walker — v0 + API coord draft**
+      (2026-05-28). Fork `8b2af9f` lands the v0 walker
+      recognising `IO.pure` shape only; everything
+      else returns `DriverError::NotYetImplemented`
+      with a precise expr debug repr. API coordination
+      draft at `docs/cool-japan-driver-api-
+      coordination-draft.md` is **discussion-only** —
+      7 explicit questions for cool-japan maintainers
+      *before* committing to body PR signature. Both
+      upstream coordinations deferred to post-RC.
+    - **leo4-oxilean-bootstrap + leo4-oxilean-translate
+      leaf crates** — extracted from the two consumers
+      that previously vendored ~1880 LOC between them
+      (`41542da` + `fba7b8a`). Single source of truth;
+      both consumers' previous vendor files collapse
+      to `pub use <leaf>::*;` shims.
+    - **Linux distro audit infra** — `just linux-distro-
+      audit <distro>` recipe (`fba7b8a`). NO hard-
+      coding: `ci/linux-distro-audit/distros.toml`
+      carries per-distro recipe; runner picks up new
+      entries automatically. Initial set (current
+      stable 2026-05-28): archlinux / debian-13 /
+      ubuntu-26.04 / fedora-44 / alpine-3.22.
+    - **Windows support floor pinned to UCRT's range**
+      (commits `0254e05` → `8eba548`) — Vista SP2 +
+      KB2999226 / Win 7 SP1 + KB3118401 / newer NT.
+      KB install is downstream's deployment concern,
+      not leo4's. CI matrix focus stays on NT ≥ 10.0
+      (cheap-image policy, not support floor).
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

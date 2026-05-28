@@ -7,6 +7,136 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — Function-arrow callback ABI: 3-step leo4-side runtime + IO walker v0 (2026-05-28)
+
+Phase 10-B1.x runtime for the oxilean transport. Three
+leo4-side commits land the substrate, macro layer, and
+adapter routing, plus a fork-side v0 IO walker so a
+trivial `def main : IO Unit := IO.pure ()` walks to
+completion.
+
+  - **Step 1 — `RustCallbackRegistry` substrate** (commit
+    `a2c21d9`). New types in `crates/leo4-abi/src/callback.rs`:
+    `RustCallbackRegistry` (main-side id minter +
+    callback store, `Send + Sync`), `RegistrationGuard`
+    (RAII handle enforcing SPEC §13a's per-call lifetime
+    contract via Drop), `ErasedRustCallback` type alias.
+    `Arc<Self>::register<F>(callback) -> (u64, RegistrationGuard)`
+    + `invoke(id, args)` + `len` / `is_empty` /
+    `deregister`. Id `0` reserved as the wire null
+    sentinel.
+  - **Step 2 — `leo4::import!` macro recognises bare-fn
+    args** (commit `32f26a7`). `crates/leo4-mslean4`'s
+    `Lean` struct gains a `callback_registry: Arc<RustCallbackRegistry>`
+    field + `Lean::callback_registry()` accessor.
+    `crates/leo4-macros-backend/src/lib.rs:rust_type_to_idl`
+    learns `Type::BareFn` (`fn(T₁,…,Tₙ) -> R`) and lowers
+    to the same `IDLType::Fn` slot `LeanCallback<R, Args>`
+    used inbound. The wrapper-emit path's
+    `outbound_callback_encode` helper synthesises a
+    register-encode-call-decode-deregister sequence for
+    each fn-arrow arg; the RAII guard stays in scope
+    until wrapper return so per-call lifetime is
+    enforced by the type system. Generic `impl Fn(...)`
+    intentionally not supported in v0; users pass `fn`
+    pointers + explicit state.
+  - **Step 3 — `OxiLeanInvoker` outbound surface**
+    (commit `521979e`). `sibling/leo4-oxilean/src/lib.rs`
+    grows three methods: `attach_outbound_registry(Arc<RustCallbackRegistry>)`,
+    `outbound_registry() -> Option<Arc<…>>`, and
+    `invoke_outbound(callback_id, args) -> Result<Vec<u8>, LeanError>`.
+    The latter is the dispatch path the evaluator-side
+    IO walker will fire when it encounters a `callback_id`
+    minted by step 2. Empty by default — explicit
+    `attach` at adapter init, not implicit
+    `Default::default()`.
+  - **IO walker v0** (fork commit `8b2af9f`, bumped via
+    `ab30ca1`). Closes the prior `NotYetImplemented`
+    stub of `oxilean_runtime::driver::run_main_with_args`
+    for two reduction shapes: bare `IO.pure` const, and
+    `App(IO.pure, x)` / `App(Pure.pure, x)` with arbitrary
+    head-app chain depth. Result of `main : IO α` is
+    discarded; α = Unit is the v0 target.
+    `MAX_WALK_DEPTH = 1024` guards against degenerate
+    chains. All other shapes return
+    `DriverError::NotYetImplemented` with the offending
+    expr's debug repr in the reason field.
+
+Aggregate test impact: leo4-abi 38 lib (was 33; +5
+registry tests). leo4-macros-backend 16 (was 15; +1 bare-fn
+recognition test). leo4-oxilean 16 (was 11; +5 outbound
+registry tests). Workspace 238 (was 232). Fork
+`oxilean-runtime` 1174 (was 1172; +2 walker tests + 0
+net from one rename).
+
+What's not yet wired: the evaluator-side hook that calls
+`OxiLeanInvoker::invoke_outbound` at the right reduction
+point in the IO walker, plus the IO walker shape graph
+itself (`IO.bind`, `@[extern]` dispatch, `EStateM`
+lowering, builtin-table dispatch). Each remaining shape
+returns `NotYetImplemented` with a concrete debug repr so
+downstream knows exactly what's missing.
+
+Cool-japan upstream coordination: a discussion-only
+draft for the `oxilean_runtime::driver` API shape lands
+at `docs/cool-japan-driver-api-coordination-draft.md`
+alongside the existing `cool-japan-upstream-pr-draft.md`
+(OX7/OX8 codegen + parser donation). **Both upstream
+submissions are deferred to post-v1.0 RC** per user
+instruction — RC code-freeze happens against the fork
+first, upstream coordination happens after the fork's
+shape stabilises.
+
+### Added — leo4-oxilean-bootstrap + leo4-oxilean-translate leaf crates (2026-05-28)
+
+Two new standalone library crates that dedupe code
+previously vendored twice (once each in `sibling/leo4-
+oxilean-build/` and `sibling/leo4-oxilean-runner/`).
+
+  - **`sibling/leo4-oxilean-bootstrap/`** (commit
+    `41542da`) — the OX5-oxi env bootstrap +
+    `LEO4_PRIMITIVE_TYPES` + `ARITHMETIC_TC_PROJECTIONS` +
+    `STRING_INTERP_AXIOMS` lists. 6 lib tests carry
+    over from the original site.
+  - **`sibling/leo4-oxilean-translate/`** (commit
+    `fba7b8a`) — the OX6 step 13 PEG → legacy-Decl
+    translator. 36 inline tests preserved.
+
+Both consumers' previous `~150 LOC` (bootstrap) and
+`~1730 LOC` (translate) vendor files collapse to
+single-line `pub use <leaf>::*;` shims. Direct `path =`
+deps for the leaf crates (per the `[patch.crates-io]`
+workspace-root policy from `f90ee50`).
+
+### Added — Linux distro audit infra + Windows NT policy refinement (2026-05-28)
+
+  - **`ci/linux-distro-audit/`** (commit `fba7b8a`) —
+    NO-hard-coding distro audit driver. `distros.toml`
+    carries per-distro recipe (image + setup snippets +
+    audit targets + free-text note); `audit-runner.py`
+    reads the TOML at run time, podman/docker
+    auto-detect, container with leo4 source bind-mounted
+    + per-distro cache volume. `just linux-distro-audit
+    <id>` recipe in `justfile`; `--list` enumerates
+    known ids. Initial set (current stable as of
+    2026-05-28): `archlinux`, `debian-13`, `ubuntu-26.04`,
+    `fedora-44`, `alpine-3.22`.
+  - **Windows support floor pinned to UCRT's range**
+    (commits `0254e05` → `8eba548`) — leo4's official
+    Windows support range now matches Microsoft's UCRT
+    contract: Vista SP2 + KB2999226 (NT 6.0) or Win 7
+    SP1 + KB3118401 (NT 6.1), through Windows 11 /
+    Server 2025+. The KB install is **downstream's
+    deployment concern**, not leo4's — leo4 doesn't
+    package, redistribute, or document an end-user-
+    facing UCRT install flow. Caveats below NT 10.0
+    (`CreateProcessW`/pipe semantics, rustc Tier 2
+    baseline) noted as best-effort, not support
+    exclusions. CI matrix focus stays on NT ≥ 10.0
+    (cheapest images); older half exercised through
+    user reports + targeted manual verification at
+    release time.
+
 ### Added — GitHub Actions CI matrix: linux-gnu / linux-musl / windows-gnullvm (2026-05-28)
 
 First leo4 CI workflow lands at `.github/workflows/ci.yml`,
