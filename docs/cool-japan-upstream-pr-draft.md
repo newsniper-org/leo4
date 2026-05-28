@@ -14,7 +14,18 @@
 This draft proposes upstreaming the OX7 / OX8 work that the
 [leo4](https://github.com/<owner>/leo4) Lean ↔ Rust interop project
 accumulated on top of OxiLean v0.1.3. The changes fall into four
-self-contained, **non-breaking** groups:
+self-contained, **non-breaking** groups.
+
+**Scope alignment with COOLJAPAN policy.** Every change in this PR
+stays strictly inside the OxiLean (Pure Rust ITP) boundary. No
+`lean.h`, no C++ Lean 4 runtime shim, no FFI back to upstream Lean is
+introduced. leo4's glue against the C++ Lean 4 toolchain lives in a
+separate path (`--impl mslean4`) outside this PR; the work proposed
+here is what makes OxiLean self-sufficient as a Pure Rust target for
+Lean source — a direction consistent with the COOLJAPAN
+ecosystem's stance ([cool-japan/oxiz#7
+reply](https://github.com/cool-japan/oxiz/issues/7#issuecomment-4541571837),
+2026-05-26).
 
 | Group | Crate(s) | Lines | Nature |
 |---|---|---|---|
@@ -83,6 +94,7 @@ unaffected:
 | `4e82655` (OX7 `ite`) | `@ite α c inst t e` → native `if cond { t } else { e }`. |
 | `bd1a77f` (OX7 Bool lit) | `Bool.true` / `Bool.false` → native `true` / `false`. |
 | `da49bec` (OX7 `HPow`) | `HPow.hPow lhs rhs` → `lhs.pow(rhs)` method call (Rust has no `**`). |
+| *(planned)* | String-literal coercion in `let _: String = "…"` sites — emit `.to_string()` when the bind type is `String` (caught by 2026-05-28 T7 re-run on Linux). One-line patch in `compile_arg` String arm; folded into this PR series before submission. |
 
 Test counts: 4708 → 4714 lib (+6, one spike per fold). Workspace
 clippy clean.
@@ -173,6 +185,29 @@ leo4-side end-to-end: rust-transpile golden fixtures (`def add (a b
 1 else 0`, `def pow8 (n : UInt64) : UInt64 := n ^ 8`, …) now
 transpile to **compilable** native Rust; pre-OX7 all failed at link
 time.
+
+**T7 re-run, Linux (2026-05-28).** End-to-end smoke against the
+`leo4 create forward` scaffold's default sample:
+
+```text
+$ sed -i 's/kind = "mslean4"/kind = "rust-transpile"/' leo4.toml
+$ leo4 run --impl rust-transpile --leo4-root /…/leo4
+$ cat transpiled/src/lib.rs
+pub fn add(_x0: u64, _x1: u64) -> u64 {
+    (_x0 + _x1)
+}
+pub fn hello() -> String {
+    let _x0: String = "hello from Lean";   ← bug: &str not coerced
+    _x0
+}
+```
+
+`add` compiles and runs end-to-end (`add(1, 2) == 3`,
+`add(40, 2) == 42`). `hello` exposes an OX7 leftover — string
+literals at `let`-binding sites aren't coerced to `String` (`expected
+`String`, found `&str``). One-line codegen fix; tracked as the OX7
+String-literal coercion follow-up and slated for the same upstream
+PR series.
 
 **Backport target: v0.1.4.** All changes are MSRV-clean
 (`rust-version = "1.70"`). Only G1 adds a third-party dep (`peg`,
