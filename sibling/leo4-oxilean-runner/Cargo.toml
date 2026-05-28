@@ -1,0 +1,63 @@
+# Standalone sibling crate (NOT a member of the main leo4
+# workspace). The empty `[workspace]` table tells Cargo to
+# stop walking up the directory tree looking for a workspace
+# root — matches the `sibling/leo4-oxilean/` + `sibling/
+# leo4-oxilean-build/` siblings this crate slots between.
+[workspace]
+
+[package]
+name        = "leo4-oxilean-runner"
+version     = "0.0.0"
+edition     = "2024"
+rust-version = "1.95"
+license     = "MIT OR Apache-2.0"
+authors     = ["윤병익 <yeun0908@gmail.com>"]
+repository  = "https://github.com/Honey-Be/leo4"
+description = "leo4 ↔ OxiLean runner helper. Loads a cdylib emitted by `leo4-oxilean-build --mode reverse`, walks its `EXPORTS` slice, wires each `#[leo4::export]` into a `leo4_oxilean::OxiLeanInvoker` (metadata + dlsym callback), and best-effort-parses + elaborates the user's `lean/Main.lean` against the resulting evaluator. Powers OX8.5's `leo4 run --impl rust-transpile` (reverse direction)."
+
+[dependencies]
+# leo4 trait surface — `LeanError`, `ExportEntry` layout
+# (so we can cast the cdylib's `*const ExportEntry` walk
+# back into typed access).
+leo4-abi = { path = "../../crates/leo4-abi", features = ["rust-exports"] }
+
+# The OxiLean adapter — `OxiLeanInvoker` + `ExternResolver`
+# impl. We path-dep into the sibling project, NOT a
+# version-published crate, because leo4-oxilean is itself
+# unpublished (uses fork-only `CallbackRegistry`).
+leo4-oxilean = { path = "../leo4-oxilean" }
+
+# OxiLean's kernel + parser + elaborator. Same fork-only
+# `path = …` pattern leo4-oxilean uses. patch.crates-io
+# blocks won't propagate into user scaffolds (they're the
+# workspace root); direct path deps are the only reliable
+# way to pin the fork.
+#
+# `leo4-oxilean-build` is deliberately NOT a dep here even
+# though it owns the canonical `leo4_env_bootstrap` impl —
+# its `version + [patch.crates-io]` setup only applies at
+# its own workspace root, and pulling it in transitively
+# resolves the oxilean-* crates against crates.io v0.1.2
+# instead of the fork. We vendor the (~30 lines of) bootstrap
+# logic directly here to sidestep that. Keep the inline
+# definitions in `src/env_bootstrap.rs` in sync with
+# `sibling/leo4-oxilean-build/src/leo4_env_bootstrap.rs`
+# until both can share a leaf crate.
+oxilean-kernel  = { path = "../oxilean/crates/oxilean-kernel" }
+oxilean-parse   = { path = "../oxilean/crates/oxilean-parse" }
+oxilean-elab    = { path = "../oxilean/crates/oxilean-elab" }
+oxilean-runtime = { path = "../oxilean/crates/oxilean-runtime" }
+
+# Dynamic loader for the cdylib path. Same crate the
+# forward `leo4-rust-emit` consumer uses to walk EXPORTS.
+libloading = "0.8"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# The dlopen+dlsym path is inherently unsafe and the public
+# `run_main` already documents the safety contract.
+missing_errors_doc = "allow"
+missing_safety_doc = "allow"

@@ -40,6 +40,17 @@ Current siblings:
   `--no-default-features` falls back to oxilean-parse-direct.
   EXPERIMENTAL in v1.0 RC pending OX7 (see warning emitted
   by `leo4 run --impl rust-transpile`).
+- **`leo4-oxilean-runner/`** — OX8.5 B1/B2 runner helper
+  (2026-05-28). Folds the cdylib `dlopen` + `EXPORTS`-slice
+  walk + `OxiLeanInvoker` callback registration +
+  `lean/Main.lean` parse + elab into a single `run_main`
+  entry point. The `leo4 create reverse --impl rust-transpile`
+  scaffold's `src/main.rs` collapses to one call. The final
+  "drive `main : IO Unit` to its IO effects" step is
+  pending an upstream OxiLean PR (no public runtime driver
+  in v0.1.3-leo4-ox7); the runner surfaces a clean error
+  pointing at that gap once the rest of the pipeline
+  succeeds.
 - **`mathlib-bridge-test/`** — Lake package pulling Mathlib +
   `Leo4`. Type-checks every `Leo4.MathlibBridge.*` module
   end-to-end. Mathlib's cold build is 1-2 hours, so this isn't on

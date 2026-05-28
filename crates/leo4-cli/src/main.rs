@@ -1756,6 +1756,16 @@ leo4 = {{ path = "{leo4_root}/crates/leo4", features = ["rust-exports"] }}
 # `leo4-oxilean-build --mode reverse`. Standalone sibling
 # project (not in the main leo4 workspace).
 leo4-oxilean = {{ path = "{leo4_root}/sibling/leo4-oxilean" }}
+
+# OX8.5 + B1/B2 (2026-05-28) runner helper — folds the cdylib
+# walk + EXPORTS enumeration + `OxiLeanInvoker` callback wiring
+# + `Main.lean` parse + elab into a single `run_main(cdylib,
+# main_lean)` entry point. The user's `src/main.rs` collapses
+# from a 4-step TODO to one function call. See
+# `sibling/leo4-oxilean-runner/src/lib.rs` crate docs for the
+# (upstream-blocked) "actually drive `main : IO Unit`"
+# follow-up.
+leo4-oxilean-runner = {{ path = "{leo4_root}/sibling/leo4-oxilean-runner" }}
 "#
     )
 }
@@ -1798,61 +1808,70 @@ fn _unused_to_avoid_warning() {{
 
 fn main_rs_reverse_rust_transpile(name: &str, iface: &str) -> String {
     let _ = name;
-    format!(
-        r#"//! Runner binary — `leo4 run --impl rust-transpile`
-//! invokes this after emitting `lean/{iface}/Rust.lean`.
+    let _ = iface;
+    r#"//! Runner binary — `leo4 run --impl rust-transpile`
+//! invokes this after emitting `lean/<Iface>/Rust.lean`.
 //!
-//! Wires together:
-//!  - the cdylib's `#[leo4::export]` functions (loaded via
-//!    libloading at the path the `LEO4_OXILEAN_CDYLIB` env
-//!    var points at),
-//!  - `leo4_oxilean::OxiLeanInvoker` registering each
-//!    export's callback,
-//!  - the OxiLean evaluator driving `lean/Main.lean` (path
-//!    in `LEO4_OXILEAN_MAIN`).
+//! All four dispatch-loop steps that the prior scaffold
+//! placeholder TODO'd live inside
+//! `leo4_oxilean_runner::run_main`:
+//!  1. dlopen the cdylib at `LEO4_OXILEAN_CDYLIB`,
+//!  2. walk its `EXPORTS` slice via `leo4_rust_describe_exports`,
+//!  3. pair-register every entry with `OxiLeanInvoker`
+//!     (`register_export` + `register_export_callback`
+//!     wrapping a `dlsym`-driven Rust closure),
+//!  4. parse + elaborate `lean/Main.lean` against the
+//!     OxiLean prelude + leo4 boundary primitives.
 //!
-//! `leo4 run --impl rust-transpile` sets those env vars
-//! before invoking this runner. For a hand-driven run set
-//! them yourself (see README).
+//! The final "actually execute `main : IO Unit`" step is
+//! pending upstream OxiLean (no public `run_main` driver
+//! today); `run_main` reports a clean `LeanError(0x0002_0005)`
+//! once everything *up to* that step succeeds. See the
+//! `leo4-oxilean-runner` crate docs.
 
-use leo4_oxilean::OxiLeanInvoker;
-use std::sync::Arc;
-
-fn main() {{
-    let cdylib = std::env::var("LEO4_OXILEAN_CDYLIB").unwrap_or_else(|_| {{
+fn main() {
+    let cdylib = std::env::var("LEO4_OXILEAN_CDYLIB").unwrap_or_else(|_| {
         eprintln!("error: LEO4_OXILEAN_CDYLIB env var not set");
         std::process::exit(2);
-    }});
+    });
     let main_lean = std::env::var("LEO4_OXILEAN_MAIN")
         .unwrap_or_else(|_| "lean/Main.lean".to_string());
 
-    eprintln!("runner: cdylib  = {{cdylib}}");
-    eprintln!("runner: Main.lean = {{main_lean}}");
+    eprintln!("runner: cdylib    = {cdylib}");
+    eprintln!("runner: Main.lean = {main_lean}");
 
-    // Initialise the invoker. Each cdylib export needs both
-    // `register_export(mangled)` (metadata) and
-    // `register_export_callback(mangled, closure)` (the
-    // actual `libloading`-driven Rust dispatch). A future
-    // helper will close over the cdylib handle to register
-    // every entry in the `EXPORTS` slice automatically;
-    // until then this template requires manual wiring.
-    let invoker = Arc::new(OxiLeanInvoker::new());
-
-    eprintln!(
-        "runner: scaffold-mode placeholder — extend this main.rs to:\n\
-         \x20 1. dlopen({{cdylib}})\n\
-         \x20 2. walk the EXPORTS slice via leo4_rust_describe_exports\n\
-         \x20 3. for each entry: register_export(mangled) +\n\
-         \x20    register_export_callback(mangled, |bytes| dlsym-and-call)\n\
-         \x20 4. instantiate the OxiLean evaluator with\n\
-         \x20    invoker.as_shared_resolver() and evaluate Main.lean."
-    );
-    // Suppress unused-variable warning until the user fills
-    // in the dispatch loop.
-    let _ = invoker;
-}}
+    match leo4_oxilean_runner::run_main(
+        std::path::Path::new(&cdylib),
+        std::path::Path::new(&main_lean),
+    ) {
+        Ok(()) => {
+            // Once upstream OxiLean exposes a `main : IO Unit`
+            // driver this branch fires on completion.
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("runner: leo4_oxilean_runner::run_main failed: {e}");
+            // 0x0002_0005 is the "upstream driver missing"
+            // sentinel — surface it distinctly so wrapping
+            // scripts can detect "everything wired, only
+            // last step blocked" vs. real failures.
+            let upstream_blocked = e.code == 0x0002_0005
+                && e.message.contains("doesn't yet expose");
+            if upstream_blocked {
+                eprintln!(
+                    "runner: note — cdylib + EXPORTS + invoker + parse + \
+                     elab all completed successfully. The remaining \
+                     `main : IO Unit` execution step is gated on an \
+                     upstream OxiLean PR."
+                );
+                std::process::exit(75); // EX_TEMPFAIL
+            }
+            std::process::exit(1);
+        }
+    }
+}
 "#
-    )
+    .to_string()
 }
 
 fn main_lean_reverse_rust_transpile(iface: &str) -> String {
