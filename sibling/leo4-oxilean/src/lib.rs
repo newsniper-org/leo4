@@ -151,6 +151,16 @@ pub struct OxiLeanInvoker {
     /// after the metadata-side `ExternRegistry` lookup
     /// confirms the symbol is registered.
     callbacks: Arc<Mutex<CallbackRegistry>>,
+    /// P0b #75 step 3 (2026-05-28): outbound callback
+    /// dispatch — when the OxiLean evaluator encounters a
+    /// `callback_id` minted by a `leo4::import!`-emitted
+    /// wrapper, [`Self::resolve`]'s extension path looks
+    /// the id up here and invokes the registered Rust
+    /// closure. Empty by default; the host attaches the
+    /// `Lean::callback_registry()` Arc via
+    /// [`Self::attach_outbound_registry`] before driving
+    /// the evaluator.
+    outbound: Arc<Mutex<Option<Arc<leo4_abi::RustCallbackRegistry>>>>,
 }
 
 impl std::fmt::Debug for OxiLeanInvoker {
@@ -178,6 +188,7 @@ impl OxiLeanInvoker {
         Self {
             registry: Arc::new(Mutex::new(ExternRegistry::new())),
             callbacks: Arc::new(Mutex::new(CallbackRegistry::new())),
+            outbound: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -189,7 +200,83 @@ impl OxiLeanInvoker {
         Self {
             registry,
             callbacks: Arc::new(Mutex::new(CallbackRegistry::new())),
+            outbound: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// P0b #75 step 3 (2026-05-28) — attach the `Lean`
+    /// instance's outbound `RustCallbackRegistry`. The
+    /// macro-emitted `leo4::import!` wrapper mints
+    /// `callback_id`s into that registry on each boundary
+    /// call (step 2); this method tells the invoker where
+    /// to find the registry when the OxiLean evaluator
+    /// fires the receiving end.
+    ///
+    /// Idempotent — re-attaching replaces the previous
+    /// reference. Embedders typically call this once at
+    /// adapter init time with `lean.callback_registry().clone()`.
+    pub fn attach_outbound_registry(
+        &self,
+        registry: Arc<leo4_abi::RustCallbackRegistry>,
+    ) {
+        let mut slot = self.outbound.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(registry);
+    }
+
+    /// P0b #75 step 3 — get the attached outbound registry
+    /// (if any). Used by the evaluator-side callback
+    /// dispatch path when it observes a `callback_id`
+    /// reduction during `IO.bind` walking. Returns `None`
+    /// when no host attached one; in that case the
+    /// evaluator falls back to the existing inbound
+    /// `CallbackRegistry` (OX8.3a) which has no entry for
+    /// the id and the boundary call surfaces an explicit
+    /// "callback dispatch not wired" error.
+    #[must_use]
+    pub fn outbound_registry(
+        &self,
+    ) -> Option<Arc<leo4_abi::RustCallbackRegistry>> {
+        self.outbound
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// P0b #75 step 3 — dispatch a `callback_id` minted
+    /// outbound by the macro layer (step 2). Looks up the
+    /// id in the attached outbound registry; if no
+    /// registry is attached, or no callback is registered
+    /// for the id, returns an explicit `LeanError` instead
+    /// of falling through silently.
+    ///
+    /// Intended caller: the evaluator-side IO walker
+    /// (`#76`), via the `dispatch_extern_const` extension
+    /// pathway, when the elaborated `main : IO Unit` body
+    /// reaches a Lean closure dereference whose
+    /// `callback_id` was minted by a forward-direction
+    /// import wrapper.
+    ///
+    /// # Errors
+    /// - `0x0002_0005` if no outbound registry is attached.
+    /// - `INVALID_HANDLE` if the registry has no entry for
+    ///   the id.
+    /// - Propagates whatever `LeanError` the registered
+    ///   callback itself returns.
+    pub fn invoke_outbound(
+        &self,
+        callback_id: u64,
+        args: &[u8],
+    ) -> Result<Vec<u8>, LeanError> {
+        let registry_ref = self.outbound_registry().ok_or_else(|| {
+            LeanError::new(
+                0x0002_0005,
+                "leo4-oxilean: no outbound RustCallbackRegistry attached. \
+                 Call `OxiLeanInvoker::attach_outbound_registry(...)` at \
+                 adapter init time with `lean.callback_registry().clone()`."
+                    .to_string(),
+            )
+        })?;
+        registry_ref.invoke(callback_id, args)
     }
 
     /// OX8.3c (2026-05-28) — register a Rust closure as
@@ -613,5 +700,57 @@ mod tests {
         inv.register_export("leo4__shared__test__one__u32__hsharedone000a")
             .unwrap();
         assert_eq!(inv2.registered_count(), 1);
+    }
+
+    // ─── #75 step 3: outbound callback dispatch ──────────
+
+    #[test]
+    fn outbound_registry_default_none() {
+        let inv = OxiLeanInvoker::new();
+        assert!(inv.outbound_registry().is_none());
+    }
+
+    #[test]
+    fn outbound_registry_attach_and_get_round_trips() {
+        let inv = OxiLeanInvoker::new();
+        let reg: Arc<leo4_abi::RustCallbackRegistry> =
+            Arc::new(leo4_abi::RustCallbackRegistry::new());
+        inv.attach_outbound_registry(reg.clone());
+        let got = inv.outbound_registry().expect("attached");
+        // Same Arc — pointer equality.
+        assert!(Arc::ptr_eq(&got, &reg));
+    }
+
+    #[test]
+    fn outbound_invoke_without_attached_registry_errors() {
+        let inv = OxiLeanInvoker::new();
+        let err = inv.invoke_outbound(42, &[]).unwrap_err();
+        assert_eq!(err.code, 0x0002_0005);
+    }
+
+    #[test]
+    fn outbound_invoke_round_trips_through_registry() {
+        let inv = OxiLeanInvoker::new();
+        let reg: Arc<leo4_abi::RustCallbackRegistry> =
+            Arc::new(leo4_abi::RustCallbackRegistry::new());
+        let (id, _g) = reg.register(|args: &[u8]| {
+            // Echo args + a sentinel byte.
+            let mut out = args.to_vec();
+            out.push(0xAA);
+            Ok(out)
+        });
+        inv.attach_outbound_registry(reg);
+        let out = inv.invoke_outbound(id, &[1, 2, 3]).unwrap();
+        assert_eq!(out, vec![1, 2, 3, 0xAA]);
+    }
+
+    #[test]
+    fn outbound_invoke_unknown_id_yields_invalid_handle() {
+        let inv = OxiLeanInvoker::new();
+        let reg: Arc<leo4_abi::RustCallbackRegistry> =
+            Arc::new(leo4_abi::RustCallbackRegistry::new());
+        inv.attach_outbound_registry(reg);
+        let err = inv.invoke_outbound(0xDEAD_BEEF, &[]).unwrap_err();
+        assert_eq!(err.code, leo4_abi::error::error_codes::INVALID_HANDLE);
     }
 }
