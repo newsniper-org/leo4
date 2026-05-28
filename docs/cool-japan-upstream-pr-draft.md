@@ -1,19 +1,36 @@
 # Upstream PR draft — leo4 fork (`0.1.3-leo4-ox7`) → cool-japan/oxilean
 
-> Status: **DRAFT**, ready for human review before posting.
+> Status: **DRAFT**, kept in sync as the fork branch evolves.
+> Submission deferred to **post-v1.0 RC** per the leo4 project's
+> release sequencing (avoid mid-cycle upstream churn while
+> leo4 RC hardens). The companion `oxilean_runtime::driver`
+> API coordination is **already posted** at
+> [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+> as a separate discussion (driver API ≠ codegen + parser
+> donation; they're distinct contribution streams).
 >
-> Last refresh: 2026-05-28 (post-P1/P2/P3 work session).
+> Last refresh: 2026-05-29 (post-#76 IO walker IO.bind +
+> `@[extern]` dispatch landing).
 >
 > Branch under contribution: `0.1.3-leo4-ox7`, rebased onto
 > `cool-japan/oxilean` `46ad852` (the v0.1.3 base used by leo4).
-> Total diff vs `origin/0.1.3`: **53 commits, +7962 / -3 lines** in 12
+> Total diff vs `origin/0.1.3`: **56 commits, +8674 / -3 lines** in 13
 > files. Roughly 5740 lines are a new sibling crate (`oxilean-parse-peg`);
 > the rest is additive to `oxilean-codegen`, `oxilean-kernel`, and
-> `oxilean-runtime`. **leo4-side CI** (`.github/workflows/ci.yml`,
-> 2026-05-28) covers `linux-gnu` (full), `linux-musl` (C5 Tier 1+
-> subset), and `windows-gnullvm` (C1 Tier 2 compile-only) — every
-> contribution below builds clean across all three matrix entries
-> with the fork submodule pinned to HEAD.
+> `oxilean-runtime` (including the new `driver` module). **leo4-side
+> CI** (`.github/workflows/ci.yml`, 2026-05-28) covers `linux-gnu`
+> (full), `linux-musl` (C5 Tier 1+ subset), and `windows-gnullvm`
+> (C1 Tier 2 compile-only) — every contribution below builds clean
+> across all three matrix entries with the fork submodule pinned to
+> HEAD.
+>
+> **Note on the `driver` module**: the new
+> `oxilean_runtime::driver` module that landed in
+> `f9bfd45`/`8b2af9f`/`d357a01` is **out of scope** for this PR —
+> it's tracked separately at cool-japan/oxilean#2 because the API
+> shape needs explicit maintainer feedback before any body commit
+> ships upstream. The codegen + parser + extern-resolver hooks
+> below are functionally complete and PR-ready as-is.
 
 ## 1. Executive summary
 
