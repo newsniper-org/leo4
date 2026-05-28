@@ -118,72 +118,62 @@ Windows API, available regardless of which Windows target is
 chosen — the gnullvm choice is about ABI alignment and C
 ergonomics, not about access to system calls.
 
-**Windows NT kernel version floor — 10.0 or newer (locked
-2026-05-28).** leo4 has **no plan** to officially support
-Windows NT kernel versions below 10.0 (i.e. Windows 7,
-Windows 8, Windows 8.1, Windows Server 2008 R2, 2012, and
-2012 R2). leo4 doesn't go out of its way to *break* on
-older kernels — the gnullvm target's compile output should
-still load on those systems — but every Tier 2 manual test,
-every CI matrix row, and every future runtime regression
-fix is calibrated against NT ≥ 10.0 (i.e. Windows 10,
-Windows 11, Server 2016, 2019, 2022, 2025+). Reports
-against pre-10.0 kernels are out of scope; users running
-those environments are on their own to patch around any
-breakage they encounter.
+**Windows NT kernel version floor — pinned to UCRT's own
+official supported range (locked 2026-05-28).** leo4's
+official Windows support floor follows the Universal C
+Runtime's official supported floor, which the gnullvm
+target links against:
 
-The chosen floor matches three concurrent ecosystem
-constraints:
+  - **Windows Vista SP2 with KB2999226** (NT 6.0), or
+  - **Windows 7 SP1 with KB3118401** (NT 6.1),
 
-  - **UCRT availability**: the gnullvm target links the
-    Universal C Runtime, which Microsoft began **bundling
-    by default** on Windows 10. UCRT itself is *officially
-    supported* down to **Windows 7 SP1 with KB3118401**
-    and **Windows Vista SP2 with KB2999226**, so an
-    appropriately-patched legacy system can technically
-    load gnullvm output; leo4 simply does not document,
-    test, or ship that out-of-band UCRT installation
-    path.
-  - **`CreateProcessW` + `CreateNamedPipeW` semantics**:
-    the Phase 9-4c reverse-direction worker spawn / IPC
-    code uses the wide-string forms exclusively. The wide
-    forms have always been on NT, but the message-mode
-    pipe + overlapped I/O behaviour that the dispatcher
-    relies on has only been *stable* (no kernel-side
-    regressions in observable behaviour) since 10.0.
+or any newer NT version (Windows 8 / 8.1 / 10 / 11,
+Server 2008 R2 / 2012 / 2012 R2 / 2016 / 2019 / 2022 / 2025+).
+Microsoft itself supports UCRT on these older NT releases
+*conditional on the KB update being installed*; leo4 keeps
+its own support window aligned with that contract instead
+of inventing a narrower one. The KB update is the user's
+responsibility — they install it the same way they apply
+any other Microsoft update (Windows Update or the
+KB-specific download from Microsoft). leo4 does **not**
+package or redistribute the Microsoft-supplied KB; release
+docs simply note the prerequisite + link to Microsoft's
+own KB pages.
+
+Newer kernels (NT ≥ 10.0) ship UCRT bundled by default and
+need no KB hunting; older kernels require the appropriate
+KB. Either way, leo4's official support stance is the same
+once UCRT is present.
+
+**Caveats below NT 10.0 (best-effort, not blockers).** Two
+behaviours behave subtly differently below 10.0 — leo4
+does not consider these grounds to lower the floor, but
+users targeting those kernels should be aware:
+
+  - **`CreateProcessW` + `CreateNamedPipeW` semantics
+    (Phase 9-4c reverse-direction worker spawn / IPC)**: 
+    the wide-string forms work on every NT release, but
+    the message-mode pipe + overlapped I/O behaviour the
+    dispatcher relies on saw kernel-side fixes between
+    Vista, 7, 8.x, and 10. Subtle timing edge cases that
+    no longer trigger on 10+ may still surface on older
+    kernels under unusual load. Reproducible reports
+    against the supported NT floor are in scope; leo4
+    will work around them where the workaround doesn't
+    pessimise the 10+ path.
   - **rustc Tier 2 baseline**: the upstream
-    `x86_64-pc-windows-gnullvm` target's Tier 2
-    documentation calibrates its own test matrix against
-    Windows 10. Following the same baseline keeps leo4's
-    target-support story consistent with rustc's.
+    `x86_64-pc-windows-gnullvm` target's own Tier 2 test
+    matrix is calibrated against Windows 10. leo4
+    inherits rustc's coverage there — anything rustc
+    drops on the older kernels we likewise drop. As
+    long as rustc compiles + links for older NT, leo4
+    runs there too.
 
-**Reconsideration clause — UCRT drop-in replacement.** If a
-**drop-in replacement for the Universal C Runtime** that
-supports legacy Windows kernels (NT 6.1 / 6.2 / 6.3, i.e.
-Windows 7 / 8 / 8.1 / Server 2008 R2 / 2012 / 2012 R2)
-becomes available with a license and maintenance posture
-acceptable for leo4 to redistribute (or document the user
-installing) — and the UCRT pin above is the *only*
-remaining barrier — leo4 is open to **reconsidering**
-official support for those older kernels conditional on
-that UCRT replacement. This is not a commitment to ship
-that support; it is a commitment to **revisit the
-decision** if and when such a replacement crystallises. The
-other two constraints (`CreateProcessW` / pipe semantics,
-rustc Tier 2 baseline) are independent and would need
-their own reassessment paths.
-
-Note that the Microsoft-official KB3118401 (Win 7 SP1) /
-KB2999226 (Vista SP2) UCRT update packages already cover
-the runtime side down to NT 6.0 / 6.1 in principle. If the
-user community would rather lift the floor by **packaging
-those KB updates as a leo4 prerequisite** (instead of a
-true drop-in replacement) and accept Vista as the absolute
-minimum, that's a parallel reconsideration path — same
-"revisit, not commit" stance applies. The current §1 floor
-of NT ≥ 10.0 reflects the **default installation contract**
-(no KB hunting required), not a hard technical limit of
-the gnullvm output.
+CI matrix coverage and routine regression-test cycles
+still focus on NT ≥ 10.0 (the cheapest images to run);
+the older-kernel half of the supported range is exercised
+through user reports + targeted manual verification when
+a release approaches.
 
 A new commit that adds a `#[cfg(target_os = …)]`, `cfg(unix)`,
 `cfg(windows)`, `cfg(target_family = …)`, or a `System.os` /
