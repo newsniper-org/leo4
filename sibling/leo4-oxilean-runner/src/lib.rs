@@ -99,6 +99,23 @@ use leo4_oxilean::OxiLeanInvoker;
 mod env_bootstrap;
 pub use env_bootstrap::bootstrap_env;
 
+// OX8 follow-up #79 (2026-05-28). Vendored copy of
+// `sibling/leo4-oxilean-build/src/leo4_translate.rs` so the
+// runner's parse step can take the PEG path (oxilean-parse-peg
+// → translate → oxilean-parse Decl) the same way the build
+// crate does. Lifts the legacy parser's limit on `s!"…"`
+// string interpolation that the OX8.5 scaffold's stock
+// Main.lean template uses.
+//
+// Duplicated from leo4-oxilean-build because that crate is
+// binary-only with `[patch.crates-io]` (see commit `f90ee50`
+// patch-policy lock) — we can't safely import it as a library
+// here. Task #78 tracks extracting both this vendor + the
+// `env_bootstrap.rs` vendor into a shared
+// `leo4-oxilean-bootstrap` leaf crate.
+#[allow(clippy::all, clippy::pedantic, dead_code)]
+mod leo4_translate;
+
 use oxilean_elab::{
     elaborate_decl as elab_decl_impl, ElabContext, PendingDecl,
 };
@@ -195,20 +212,39 @@ pub fn run_main(
     cdylib_path: &Path,
     main_lean_path: &Path,
 ) -> Result<(), LeanError> {
-    let (_invoker, _env, _diag) = run_main_inner(cdylib_path, main_lean_path)?;
-    Err(LeanError::new(
-        RUST_DLSYM_FAILED,
-        format!(
-            "leo4-oxilean-runner: cdylib + EXPORTS + invoker + parse + elab \
-             all wired, but OxiLean v0.1.3-leo4-ox7 doesn't yet expose a \
-             `main : IO Unit` driver in its public runtime API. The \
-             dispatch path (ExternResolver / dispatch_extern_const) IS \
-             ready — only the top-level IO driver is missing. See \
-             `docs/ox8-3-callback-hook-design.md` §\"Follow-up: run_main\". \
-             Main.lean = `{}`",
-            main_lean_path.display(),
-        ),
-    ))
+    let (invoker, env, _diag) = run_main_inner(cdylib_path, main_lean_path)?;
+    // OX8 follow-up #76 (2026-05-28): fork-side `driver::
+    // run_main` stub now wires the public surface. The
+    // body still returns `DriverError::NotYetImplemented`
+    // until the IO walker lands — leo4 surfaces that as
+    // the same `LeanError(0x0002_0005)` users saw before,
+    // with the message updated to mention the new
+    // upstream landing path.
+    let main_name = oxilean_kernel::Name::str("main");
+    let resolver = invoker.as_shared_resolver();
+    match oxilean_runtime::driver::run_main(&env, resolver, &main_name) {
+        Ok(()) => Ok(()),
+        Err(oxilean_runtime::driver::DriverError::NotYetImplemented { reason }) => {
+            Err(LeanError::new(
+                RUST_DLSYM_FAILED,
+                format!(
+                    "leo4-oxilean-runner: cdylib + EXPORTS + invoker + parse \
+                     + elab all wired, and `oxilean_runtime::driver::run_main` \
+                     was reached — IO walker is the only remaining step \
+                     ({reason}). Main.lean = `{}`",
+                    main_lean_path.display(),
+                ),
+            ))
+        }
+        Err(e) => Err(LeanError::new(
+            RUST_DLSYM_FAILED,
+            format!(
+                "leo4-oxilean-runner: driver::run_main returned {e}. \
+                 Main.lean = `{}`",
+                main_lean_path.display(),
+            ),
+        )),
+    }
 }
 
 /// Like [`run_main`] but returns a [`RunDiagnostics`]
@@ -482,6 +518,46 @@ fn elaborate_main_lean(
     if trimmed.is_empty() {
         return Ok(());
     }
+
+    // OX8 follow-up #79 (2026-05-28): try the PEG parser
+    // first. `oxilean_parse_peg::parse_decls` handles
+    // surfaces oxilean-parse v0.1.2's lexer/parser rejects
+    // — most importantly `s!"…{x}…"` string interpolation
+    // (used by the OX8.5 scaffold's stock Main.lean
+    // template). On any failure (parse error OR any decl's
+    // translate returning Unsupported) we fall back to the
+    // legacy oxilean-parse walker so the runner doesn't
+    // regress on inputs that worked pre-#79.
+    if let Some(translated) = try_parse_via_peg(main_src) {
+        for located in &translated {
+            diag.decls_parsed += 1;
+            let pending = elab_decl_impl(env, &located.value).map_err(|e| {
+                LeanError::new(
+                    error_codes::DECODE_ERROR,
+                    format!(
+                        "leo4-oxilean-runner: elaborate_decl in Main.lean \
+                         failed: {e:?}"
+                    ),
+                )
+            })?;
+            let kernel_decl = pending_to_kernel_decl(pending);
+            check_declaration(env, kernel_decl).map_err(|e| {
+                LeanError::new(
+                    error_codes::DECODE_ERROR,
+                    format!(
+                        "leo4-oxilean-runner: check_declaration in \
+                         Main.lean failed: {e}"
+                    ),
+                )
+            })?;
+            diag.decls_elaborated += 1;
+        }
+        let _ = ElabContext::new(env);
+        return Ok(());
+    }
+
+    // Legacy path — preserves pre-#79 behaviour for inputs
+    // the PEG parser can't yet translate.
     let mut lexer = Lexer::new(main_src);
     let tokens = lexer.tokenize();
     let mut parser = Parser::new(tokens);
@@ -534,6 +610,24 @@ fn elaborate_main_lean(
     }
     let _ = ElabContext::new(env); // keep symbol used; reserved for future
     Ok(())
+}
+
+/// OX8 follow-up #79 — best-effort PEG parse + translate.
+/// Returns `Some(decls)` only when every parsed PEG decl
+/// translates cleanly; on any failure (parse error or any
+/// `TranslateError`) returns `None` so the caller falls back
+/// to the legacy walker. The legacy diagnostic remains
+/// authoritative for users — PEG is an opportunistic upgrade.
+fn try_parse_via_peg(main_src: &str) -> Option<Vec<oxilean_parse::Located<oxilean_parse::Decl>>> {
+    let peg_decls = oxilean_parse_peg::parse_decls(main_src).ok()?;
+    let mut out = Vec::with_capacity(peg_decls.len());
+    for pd in &peg_decls {
+        match leo4_translate::translate_decl(pd) {
+            Ok(d) => out.push(d),
+            Err(_) => return None,
+        }
+    }
+    Some(out)
 }
 
 /// Convert an elaborated `PendingDecl` to the kernel-side

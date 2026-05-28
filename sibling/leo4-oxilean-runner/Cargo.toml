@@ -43,10 +43,11 @@ leo4-oxilean = { path = "../leo4-oxilean" }
 # definitions in `src/env_bootstrap.rs` in sync with
 # `sibling/leo4-oxilean-build/src/leo4_env_bootstrap.rs`
 # until both can share a leaf crate.
-oxilean-kernel  = { path = "../oxilean/crates/oxilean-kernel" }
-oxilean-parse   = { path = "../oxilean/crates/oxilean-parse" }
-oxilean-elab    = { path = "../oxilean/crates/oxilean-elab" }
-oxilean-runtime = { path = "../oxilean/crates/oxilean-runtime" }
+oxilean-kernel    = { path = "../oxilean/crates/oxilean-kernel" }
+oxilean-parse     = { path = "../oxilean/crates/oxilean-parse" }
+oxilean-parse-peg = { path = "../oxilean/oxilean-parse-peg" }
+oxilean-elab      = { path = "../oxilean/crates/oxilean-elab" }
+oxilean-runtime   = { path = "../oxilean/crates/oxilean-runtime" }
 
 # Dynamic loader for the cdylib path. Same crate the
 # forward `leo4-rust-emit` consumer uses to walk EXPORTS.

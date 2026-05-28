@@ -266,50 +266,93 @@ fn transpile_source_to_pure_fns_inner(
     let normalised = crate::lean4_normalize(src);
     let parsed_all = parse_decls_for_transpile(&normalised)?;
     let mut out = Vec::new();
-    for decl in &parsed_all {
+    process_decls(local_env, &parsed_all, &mut out)?;
+    Ok(out)
+}
+
+/// OX7 follow-up (2026-05-28) — walk a decl list, recursing
+/// into `OxDecl::Namespace` so inner `Definition`s reach
+/// codegen. Without this, the `namespace MyBox def unwrap …
+/// end MyBox` surface was silently dropped. The PEG parser's
+/// `definition` rule was also relaxed to accept dotted names
+/// (`def MyBox.unwrap`) in the same fix series — both
+/// surfaces are now supported.
+fn process_decls(
+    local_env: &mut Environment,
+    decls: &[oxilean_parse::Located<OxDecl>],
+    out: &mut Vec<PureFn>,
+) -> Result<(), LeanError> {
+    for decl in decls {
         let inner = crate::inner_decl(decl);
-        if let OxDecl::Definition { name, .. } = &inner.value {
-            let pending = elaborate_decl(local_env, &inner.value).map_err(|e| {
-                LeanError::new(
-                    leo4_abi::error::error_codes::DECODE_ERROR,
-                    format!("pure_emit: elaborate_decl({name}): {e:?}"),
-                )
-            })?;
-            let (pname, ty, val) = match pending {
-                PendingDecl::Definition { name, ty, val, .. } => (name, ty, val),
-                other => {
-                    let _ = other;
-                    continue;
-                }
-            };
-            {
-                use oxilean_kernel::{
-                    env::Declaration,
-                    reduce::ReducibilityHint,
-                };
-                let decl_for_env = Declaration::Definition {
-                    name: pname.clone(),
-                    univ_params: Vec::new(),
-                    ty: ty.clone(),
-                    val: val.clone(),
-                    hint: ReducibilityHint::Regular(1),
-                };
-                let _ = local_env.add(decl_for_env);
+        match &inner.value {
+            OxDecl::Definition { name, .. } => {
+                process_definition(local_env, &inner.value, name, out)?;
             }
-            let (params, body, ret_type) = unfold_decl(&ty, &val);
-            let source = crate::transpile_kernel_decl_with_ret_type(
-                &pname,
-                &params,
-                Some(&ret_type),
-                &body,
-            )?;
-            out.push(PureFn {
-                name: pname.to_string(),
-                source,
-            });
+            OxDecl::Namespace { decls: inner_decls, .. } => {
+                // Recurse. Inner decls' `name` fields already
+                // carry the un-prefixed local form; the leo4
+                // pipeline downstream produces the dotted
+                // qualified name through the elab step, so we
+                // don't manually prepend the namespace here.
+                process_decls(local_env, inner_decls, out)?;
+            }
+            _ => {
+                // Other decl kinds (Theorem / Axiom / Inductive
+                // / Structure / Class / Instance / Open /
+                // Import / Variable / SectionDecl / Derive /
+                // NotationDecl …) are out of scope for the
+                // pure-mode emit — option A is fn-only in v0.
+            }
         }
     }
-    Ok(out)
+    Ok(())
+}
+
+fn process_definition(
+    local_env: &mut Environment,
+    decl: &OxDecl,
+    name_for_err: &str,
+    out: &mut Vec<PureFn>,
+) -> Result<(), LeanError> {
+    let pending = elaborate_decl(local_env, decl).map_err(|e| {
+        LeanError::new(
+            leo4_abi::error::error_codes::DECODE_ERROR,
+            format!("pure_emit: elaborate_decl({name_for_err}): {e:?}"),
+        )
+    })?;
+    let (pname, ty, val) = match pending {
+        PendingDecl::Definition { name, ty, val, .. } => (name, ty, val),
+        other => {
+            let _ = other;
+            return Ok(());
+        }
+    };
+    {
+        use oxilean_kernel::{
+            env::Declaration,
+            reduce::ReducibilityHint,
+        };
+        let decl_for_env = Declaration::Definition {
+            name: pname.clone(),
+            univ_params: Vec::new(),
+            ty: ty.clone(),
+            val: val.clone(),
+            hint: ReducibilityHint::Regular(1),
+        };
+        let _ = local_env.add(decl_for_env);
+    }
+    let (params, body, ret_type) = unfold_decl(&ty, &val);
+    let source = crate::transpile_kernel_decl_with_ret_type(
+        &pname,
+        &params,
+        Some(&ret_type),
+        &body,
+    )?;
+    out.push(PureFn {
+        name: pname.to_string(),
+        source,
+    });
+    Ok(())
 }
 
 #[cfg(test)]

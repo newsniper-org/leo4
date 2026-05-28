@@ -933,13 +933,6 @@ fn cli_multi_decl_cross_fn_call() {
 // `NameNotFound("double")` assertion no longer holds.
 
 #[test]
-#[ignore = "OX7 A4 — user-defined namespaced `def NAME.method` head is \
-            not yet accepted by oxilean-parse-peg's `definition` rule \
-            (uses `ident()` which rejects `.`); follow-up will either \
-            relax that to `ident_raw()` or route user-namespace methods \
-            through `namespace … end` + pure_emit Namespace flattening. \
-            Pin: cli_user_namespace_method_smoke_currently_fails_at_parse. \
-            Re-enable once both surfaces land."]
 fn cli_user_namespace_method_smoke() {
     // OX7 user-namespace method smoke (2026-05-28) — A4
     // remaining from OX7 γ-1'. OxiLean fork commit
@@ -1076,73 +1069,13 @@ fn cli_user_namespace_method_smoke() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn cli_user_namespace_method_smoke_currently_fails_at_parse() {
-    // OX7 A4 pin (2026-05-28) — captures the current
-    // failure surface of user-defined `def MyBox.unwrap …`
-    // so that closing either of the two underlying gaps
-    // (PEG `definition` accepting `ident_raw`, or
-    // `pure_emit` flattening `OxDecl::Namespace`) becomes
-    // visible: this pin breaks the moment the parse error
-    // goes away, which is the signal to delete the pin
-    // and unmute `cli_user_namespace_method_smoke`.
-    //
-    // Mirrors the historical `_currently_fails_at_elab`
-    // pin pattern that accompanied the multi-decl cross-fn
-    // smoke before that gap closed.
-    let dir = tmp_dir("user_namespace_method_pin");
-    let out_dir = dir.join("crate");
-    let lean = dir.join("Box.lean");
-    let manifest = dir.join("manifest.txt");
-
-    write_file(
-        &lean,
-        "def MyBox.unwrap (n : UInt64) : UInt64 := n\n\
-         def caller (n : UInt64) : UInt64 := MyBox.unwrap n\n",
-    );
-    write_file(
-        &manifest,
-        &format!(
-            "crate_name=user_namespace_method_pin_pkg\n\
-             out_dir={}\n\
-             source={}\n",
-            out_dir.display(),
-            lean.display()
-        ),
-    );
-
-    let output = Command::new(cli_path())
-        .arg("--manifest")
-        .arg(&manifest)
-        .output()
-        .expect("invoke");
-
-    // Exit 1 = transpile failure (parse error surfaced
-    // through `LeanError(DECODE_ERROR)`), NOT 2 (usage).
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "user-namespaced def must currently fail at parse with exit 1. stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    // The PEG rule binds `name:ident()` on `definition`,
-    // so the dot in `MyBox.unwrap` is read as the start of
-    // a `Dot` token where `:=` was expected. Surface that
-    // substring so the pin breaks visibly the moment the
-    // PEG accepts dotted def heads.
-    assert!(
-        stderr.contains("Dot") || stderr.contains("parse_decl"),
-        "stderr must surface the current parse failure: {stderr}"
-    );
-    // No crate emitted on parse failure.
-    assert!(
-        !out_dir.join("Cargo.toml").exists(),
-        "Cargo.toml must NOT exist on parse failure"
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
+// `cli_user_namespace_method_smoke_currently_fails_at_parse`
+// deleted 2026-05-28 — the PEG `definition` rule now binds
+// `name:ident_raw()` (which accepts dotted heads) AND
+// `pure_emit::process_decls` walks `OxDecl::Namespace`
+// children. The green test above
+// (`cli_user_namespace_method_smoke`) covers the production
+// path; the pin's parse-error assertion no longer holds.
 
 #[test]
 fn cli_translate_coverage_exists_anonstruct_match() {
