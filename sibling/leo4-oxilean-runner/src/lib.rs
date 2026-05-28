@@ -221,8 +221,24 @@ pub fn run_main(
     // with the message updated to mention the new
     // upstream landing path.
     let main_name = oxilean_kernel::Name::str("main");
-    let resolver = invoker.as_shared_resolver();
-    match oxilean_runtime::driver::run_main(&env, resolver, &main_name) {
+    // Fork commit `d357a01` (2026-05-29) added the
+    // `extern_registry: &ExternRegistry` param so the
+    // walker can run `dispatch_extern_const` against the
+    // canonical "is this @[extern]-backed?" lookup. Grab
+    // the invoker's metadata registry handle (kept in
+    // lock-step with `register_export(...)` calls).
+    let registry_handle = invoker.registry_handle();
+    let extern_registry_guard = registry_handle
+        .lock()
+        .map_err(|e| LeanError::new(
+            RUST_DLSYM_FAILED,
+            format!(
+                "leo4-oxilean-runner: ExternRegistry mutex poisoned at \
+                 driver::run_main call site: {e}"
+            ),
+        ))?;
+    let resolver = Arc::clone(&invoker).as_shared_resolver();
+    match oxilean_runtime::driver::run_main(&env, &extern_registry_guard, resolver, &main_name) {
         Ok(()) => Ok(()),
         Err(oxilean_runtime::driver::DriverError::NotYetImplemented { reason }) => {
             Err(LeanError::new(
