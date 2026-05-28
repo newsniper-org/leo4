@@ -156,11 +156,17 @@ pub fn transpile_source_to_pure_fns(
     let normalised = crate::lean4_normalize(src);
     let parsed_all = parse_decls_for_transpile(&normalised)?;
 
+    // OX7 multi-decl env threading (2026-05-28). Mirrors the
+    // change in `transpile_source_to_units` — clone the
+    // caller's env so each elaborated decl re-enters a
+    // *local* environment, making cross-fn references within
+    // the same source visible to later decls' elaboration.
+    let mut local_env = env.clone();
     let mut out = Vec::new();
     for decl in &parsed_all {
         let inner = crate::inner_decl(decl);
         if let OxDecl::Definition { name, .. } = &inner.value {
-            let pending = elaborate_decl(env, &inner.value).map_err(|e| {
+            let pending = elaborate_decl(&local_env, &inner.value).map_err(|e| {
                 LeanError::new(
                     leo4_abi::error::error_codes::DECODE_ERROR,
                     format!("pure_emit: elaborate_decl({name}): {e:?}"),
@@ -176,6 +182,25 @@ pub fn transpile_source_to_pure_fns(
                     continue;
                 }
             };
+            // Register the just-elaborated def into the local
+            // env BEFORE codegen so any later decl in this
+            // source can resolve a cross-fn call to it.
+            // DuplicateDeclaration is treated as no-op (some
+            // bootstrap envs ship the same name as a stub).
+            {
+                use oxilean_kernel::{
+                    env::Declaration,
+                    reduce::ReducibilityHint,
+                };
+                let decl_for_env = Declaration::Definition {
+                    name: pname.clone(),
+                    univ_params: Vec::new(),
+                    ty: ty.clone(),
+                    val: val.clone(),
+                    hint: ReducibilityHint::Regular(1),
+                };
+                let _ = local_env.add(decl_for_env);
+            }
             // OX7 (#1, 2026-05-26): forward the declared
             // return type from `unfold_decl` so the
             // emitted Rust fn signature honours the
@@ -211,15 +236,80 @@ pub fn transpile_sources_to_pure_crate(
     crate_name: &str,
     sources: &[&str],
 ) -> Result<PureCrate, LeanError> {
+    // OX7 multi-decl env threading (2026-05-28) extended
+    // across files: clone once, thread the env through every
+    // source's transpile so a `def` in file N can reference a
+    // `def` from file 0..N-1. `transpile_source_to_pure_fns`
+    // would otherwise clone the (immutable) `env` per call
+    // and lose cross-file decls.
+    let mut local_env = env.clone();
     let mut fns = Vec::new();
     for src in sources {
-        let mut per = transpile_source_to_pure_fns(env, src)?;
+        let mut per = transpile_source_to_pure_fns_inner(&mut local_env, src)?;
         fns.append(&mut per);
     }
     Ok(PureCrate {
         crate_name: crate_name.to_string(),
         fns,
     })
+}
+
+/// Inner of `transpile_source_to_pure_fns` parameterised on
+/// `&mut Environment` so the caller can thread env-decls
+/// across calls (multi-file path). The pub fn above keeps
+/// the historical `&Environment` shape for single-file
+/// embedders.
+fn transpile_source_to_pure_fns_inner(
+    local_env: &mut Environment,
+    src: &str,
+) -> Result<Vec<PureFn>, LeanError> {
+    let normalised = crate::lean4_normalize(src);
+    let parsed_all = parse_decls_for_transpile(&normalised)?;
+    let mut out = Vec::new();
+    for decl in &parsed_all {
+        let inner = crate::inner_decl(decl);
+        if let OxDecl::Definition { name, .. } = &inner.value {
+            let pending = elaborate_decl(local_env, &inner.value).map_err(|e| {
+                LeanError::new(
+                    leo4_abi::error::error_codes::DECODE_ERROR,
+                    format!("pure_emit: elaborate_decl({name}): {e:?}"),
+                )
+            })?;
+            let (pname, ty, val) = match pending {
+                PendingDecl::Definition { name, ty, val, .. } => (name, ty, val),
+                other => {
+                    let _ = other;
+                    continue;
+                }
+            };
+            {
+                use oxilean_kernel::{
+                    env::Declaration,
+                    reduce::ReducibilityHint,
+                };
+                let decl_for_env = Declaration::Definition {
+                    name: pname.clone(),
+                    univ_params: Vec::new(),
+                    ty: ty.clone(),
+                    val: val.clone(),
+                    hint: ReducibilityHint::Regular(1),
+                };
+                let _ = local_env.add(decl_for_env);
+            }
+            let (params, body, ret_type) = unfold_decl(&ty, &val);
+            let source = crate::transpile_kernel_decl_with_ret_type(
+                &pname,
+                &params,
+                Some(&ret_type),
+                &body,
+            )?;
+            out.push(PureFn {
+                name: pname.to_string(),
+                source,
+            });
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

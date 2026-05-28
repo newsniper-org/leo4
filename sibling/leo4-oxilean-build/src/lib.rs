@@ -196,7 +196,11 @@ use oxilean_elab::attribute::{
 };
 use oxilean_elab::elab_decl::{elaborate_decl, PendingDecl};
 use oxilean_elab::lean4_compat::{Lean4SyntaxAdapter, Lean4TermRewriter};
-use oxilean_kernel::{env::Environment, Expr, Name};
+use oxilean_kernel::{
+    env::{Declaration, Environment},
+    reduce::ReducibilityHint,
+    Expr, Name,
+};
 use oxilean_parse::{AttributeKind, Decl, Lexer, Located, Parser, SurfaceExpr};
 use std::collections::{HashMap, HashSet};
 
@@ -2140,7 +2144,8 @@ pub fn transpile_source_to_unit(
 ) -> Result<Option<TranspileUnit>, LeanError> {
     let normalised = lean4_normalize(src);
     let parsed = parse_first_decl_for_transpile(&normalised)?;
-    process_parsed_decl(env, registry, &parsed, mangled)
+    let mut local_env = env.clone();
+    process_parsed_decl(&mut local_env, registry, &parsed, mangled)
 }
 
 /// Multi-decl variant of `transpile_source_to_unit`. Parses
@@ -2172,6 +2177,13 @@ pub fn transpile_source_to_units(
     // the legacy oxilean-parse walker.
     let parsed_all = parse_decls_for_transpile(&normalised)?;
 
+    // OX7 multi-decl env threading (2026-05-28). Clone the
+    // caller's env so each elaborated decl can be re-added to
+    // a *local* environment, making it visible to subsequent
+    // decls in the same source (cross-fn calls inside one
+    // file). Caller's env is untouched; if the same env is
+    // reused across calls, prior calls' decls don't leak.
+    let mut local_env = env.clone();
     let mut units: Vec<TranspileUnit> = Vec::new();
     for parsed in &parsed_all {
         if !decl_has_leo4_export(parsed) {
@@ -2200,7 +2212,7 @@ pub fn transpile_source_to_units(
             }
             _ => "", // Structure / Inductive — mangled stays empty
         };
-        if let Some(u) = process_parsed_decl(env, registry, parsed, mangled)? {
+        if let Some(u) = process_parsed_decl(&mut local_env, registry, parsed, mangled)? {
             units.push(u);
         }
     }
@@ -2216,7 +2228,7 @@ pub fn transpile_source_to_units(
 /// Same as `transpile_source_to_unit` / `transpile_source_to_units`.
 #[allow(clippy::too_many_lines)] // documented branches: structure / inductive / definition
 fn process_parsed_decl(
-    env: &Environment,
+    env: &mut Environment,
     registry: &mut Leo4ExportRegistry,
     parsed: &Located<Decl>,
     mangled: &str,
@@ -2346,6 +2358,25 @@ fn process_parsed_decl(
             ));
         }
     };
+
+    // OX7 multi-decl env threading (2026-05-28) — register the
+    // just-elaborated definition into the (local) env so later
+    // decls in the same source can resolve cross-fn references.
+    // `add` returns `DuplicateDeclaration` if a prior caller
+    // already registered the same name; we treat that as a no-op
+    // because the elab attempt either matched or was rejected
+    // upstream. Errors other than DuplicateDeclaration surface
+    // as encode errors.
+    {
+        let decl_for_env = Declaration::Definition {
+            name: name.clone(),
+            univ_params: Vec::new(),
+            ty: ty.clone(),
+            val: val.clone(),
+            hint: ReducibilityHint::Regular(1),
+        };
+        let _ = env.add(decl_for_env);
+    }
 
     let (params, body, ret_type) = unfold_decl(&ty, &val);
 
