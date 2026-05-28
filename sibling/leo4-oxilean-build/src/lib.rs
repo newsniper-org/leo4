@@ -5424,3 +5424,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod env_bootstrap_integration_tests {
+    //! Build-crate-specific integration tests for the
+    //! bootstrap env, moved here when the bootstrap impl
+    //! itself was extracted to `leo4-oxilean-bootstrap`
+    //! (task #78, 2026-05-28). These cover the
+    //! end-to-end `bootstrap_env → transpile_source_to_unit`
+    //! interaction that requires `Leo4ExportRegistry` /
+    //! `transpile_source_to_unit` (both build-crate-
+    //! internal). Leaf-crate-portable tests live alongside
+    //! the impl in `leo4-oxilean-bootstrap/src/lib.rs`.
+
+    use crate::leo4_env_bootstrap::{bootstrap_env, LEO4_PRIMITIVE_TYPES};
+    use oxilean_kernel::Name;
+
+    #[test]
+    fn bootstrap_env_resolves_uint64_in_def_signature() {
+        let env = bootstrap_env().expect("env bootstrap");
+        let mut registry = crate::Leo4ExportRegistry::new();
+        let src = "@[leo4_export]\ndef ident_u64 (x : UInt64) : UInt64 := x";
+        let result = crate::transpile_source_to_unit(
+            &env,
+            &mut registry,
+            src,
+            "_test_ident_u64_mangled",
+        );
+        if let Err(e) = &result {
+            assert!(
+                !e.message.contains("NameNotFound") || !e.message.contains("UInt64"),
+                "OX5-oxi regression: UInt64 must resolve under the bootstrapped env. \
+                 Diagnostic was: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_env_resolves_nat_in_def_signature() {
+        let env = bootstrap_env().expect("env bootstrap");
+        let mut registry = crate::Leo4ExportRegistry::new();
+        let src = "@[leo4_export]\ndef ident_nat (x : Nat) : Nat := x";
+        let result = crate::transpile_source_to_unit(
+            &env,
+            &mut registry,
+            src,
+            "_test_ident_nat_mangled",
+        );
+        if let Err(e) = &result {
+            assert!(
+                !e.message.contains("NameNotFound") || !e.message.contains("Nat"),
+                "Nat must resolve under OxiLean's own init_builtin_env. \
+                 Diagnostic was: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_env_would_have_failed_on_uint64() {
+        let env = oxilean_kernel::env::Environment::new();
+        let mut registry = crate::Leo4ExportRegistry::new();
+        let src = "@[leo4_export]\ndef regress_u64 (x : UInt64) : UInt64 := x";
+        let result = crate::transpile_source_to_unit(
+            &env,
+            &mut registry,
+            src,
+            "_test_regress_u64",
+        );
+        assert!(
+            result.is_err(),
+            "regression: empty env should NOT successfully transpile a \
+             UInt64-typed def. If OxiLean now ships UInt64, trim \
+             LEO4_PRIMITIVE_TYPES + this test."
+        );
+        // Touch LEO4_PRIMITIVE_TYPES to keep the import used
+        // (downstream-trimmable guard).
+        let _ = LEO4_PRIMITIVE_TYPES.len();
+        let _ = Name::str("UInt64");
+    }
+}

@@ -1,0 +1,37 @@
+# Standalone leaf crate (NOT a member of the main leo4
+# workspace, NOT a member of any sibling/* workspace). The
+# empty `[workspace]` table tells Cargo to stop walking up.
+[workspace]
+
+[package]
+name        = "leo4-oxilean-bootstrap"
+version     = "0.0.0"
+edition     = "2024"
+rust-version = "1.95"
+license     = "MIT OR Apache-2.0"
+authors     = ["윤병익 <yeun0908@gmail.com>"]
+repository  = "https://github.com/Honey-Be/leo4"
+description = "OX5-oxi env bootstrap + leo4 boundary primitive axioms — extracted as a leaf crate so leo4-oxilean-build (the CLI binary) and leo4-oxilean-runner (the scaffold-facing helper) share one source of truth instead of vendoring the same `env_bootstrap.rs` file twice (task #78, 2026-05-28)."
+
+# Library-only — no [[bin]], no CLI, no entry binary. The
+# whole point is to be safely consumable as a `path =` dep
+# from any consumer's Cargo.toml without the `[patch.crates-
+# io]` workspace-root scoping trap that bit leo4-oxilean in
+# commit `2d4f769`. We take direct `path =` deps on the
+# fork submodule's oxilean-kernel crate below for the same
+# reason.
+
+[dependencies]
+# Direct path-dep on the fork's oxilean-kernel — same
+# rationale as `sibling/leo4-oxilean`'s Cargo.toml: the
+# `version + [patch.crates-io]` pattern would be silently
+# ignored when this crate is consumed as a library dep
+# (workspace-root scoping rule), so we go direct.
+oxilean-kernel = { path = "../oxilean/crates/oxilean-kernel" }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"

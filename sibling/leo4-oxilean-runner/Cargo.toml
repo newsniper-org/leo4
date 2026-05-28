@@ -43,6 +43,14 @@ leo4-oxilean = { path = "../leo4-oxilean" }
 # definitions in `src/env_bootstrap.rs` in sync with
 # `sibling/leo4-oxilean-build/src/leo4_env_bootstrap.rs`
 # until both can share a leaf crate.
+# Bootstrap leaf crate (task #78, 2026-05-28) — single source
+# of truth for `bootstrap_env` + `LEO4_PRIMITIVE_TYPES` +
+# `ARITHMETIC_TC_PROJECTIONS` + `STRING_INTERP_AXIOMS`.
+# Replaces the vendored copy that previously lived at
+# `src/env_bootstrap.rs`; that file is now a one-line
+# `pub use leo4_oxilean_bootstrap::*` shim.
+leo4-oxilean-bootstrap = { path = "../leo4-oxilean-bootstrap" }
+
 oxilean-kernel    = { path = "../oxilean/crates/oxilean-kernel" }
 oxilean-parse     = { path = "../oxilean/crates/oxilean-parse" }
 oxilean-parse-peg = { path = "../oxilean/oxilean-parse-peg" }

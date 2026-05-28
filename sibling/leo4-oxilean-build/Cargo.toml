@@ -40,6 +40,14 @@ leo4-parser = []
 # `leo4_rust_describe_exports` C entry point.
 leo4-abi = { path = "../../crates/leo4-abi", features = ["rust-exports"] }
 
+# Bootstrap leaf crate (task #78, 2026-05-28) — env_bootstrap
+# previously lived in `src/leo4_env_bootstrap.rs`; extracted
+# to share with `sibling/leo4-oxilean-runner/`. The module
+# at `src/leo4_env_bootstrap.rs` is now a one-line
+# `pub use leo4_oxilean_bootstrap::*` shim so internal call
+# sites resolve unchanged.
+leo4-oxilean-bootstrap = { path = "../leo4-oxilean-bootstrap" }
+
 # OX8.2b — `--mode reverse` cdylib loader. The CLI opens the
 # user cdylib via `Library::new`, resolves the C entry
 # `leo4_rust_describe_exports`, and walks the returned

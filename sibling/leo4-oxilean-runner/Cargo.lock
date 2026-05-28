@@ -391,11 +391,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "leo4-oxilean-bootstrap"
+version = "0.0.0"
+dependencies = [
+ "oxilean-kernel",
+]
+
+[[package]]
 name = "leo4-oxilean-runner"
 version = "0.0.0"
 dependencies = [
  "leo4-abi",
  "leo4-oxilean",
+ "leo4-oxilean-bootstrap",
  "libloading",
  "oxilean-elab",
  "oxilean-kernel",
