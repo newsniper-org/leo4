@@ -2,10 +2,11 @@
 
 > Status: **DISCUSSION POSTED** at
 > [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
-> on 2026-05-28; awaiting maintainer feedback (no comments
-> as of the 2026-05-29 revision). This document is the
-> leo4-side companion to the upstream issue — kept in
-> sync as the API shape gets refined.
+> on 2026-05-28; **no maintainer comments yet as of
+> 2026-05-31** (3 days). This document is the leo4-side
+> companion to the upstream issue — kept in sync as the
+> API shape gets refined. Once feedback arrives, this
+> doc + the fork's API signatures evolve together.
 >
 > NOT a PR request — discussion only. Companion to the
 > OX7 / OX8 contribution series at

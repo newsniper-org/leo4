@@ -677,12 +677,14 @@ all wait for the v1.0 RC window or later.
     - **Cool-japan API coordination** — discussion
       posted at
       [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
-      2026-05-28; `docs/cool-japan-driver-api-
+      on 2026-05-28; `docs/cool-japan-driver-api-
       coordination-draft.md` revised in sync as the
       signature evolved (`d357a01`'s `extern_registry`
-      parameter added 2026-05-29). Body PR submission
-      deferred until explicit maintainer feedback
-      arrives.
+      parameter added 2026-05-29). **No maintainer
+      comments yet as of 2026-05-31** (3 days). Body PR
+      submission stays deferred until feedback arrives;
+      the in-fork shape continues to grow in the
+      meantime.
     - **mslean4 LECQ/LECR forward+callback runtime** —
       separate sub-phase (post-RC). SPEC §10a text
       generalisation + IPC frame routing.

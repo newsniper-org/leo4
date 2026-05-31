@@ -758,8 +758,10 @@ would be expensive to relitigate:
       [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2);
       `docs/cool-japan-driver-api-coordination-draft.md`
       tracks the signature evolution. No maintainer
-      feedback yet (as of 2026-05-29). Body PR submission
-      stays deferred until feedback arrives.
+      feedback yet (still nothing as of 2026-05-31, 3 days
+      after posting). Body PR submission stays deferred
+      until feedback arrives — the in-fork shape continues
+      to evolve in the meantime.
     - **leo4-oxilean-bootstrap + leo4-oxilean-translate
       leaf crates** — extracted from the two consumers
       that previously vendored ~1880 LOC between them

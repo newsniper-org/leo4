@@ -35,9 +35,10 @@ remain. Recent batch:
   `(callback_id, rest)` and forwards to
   `OxiLeanInvoker::invoke_outbound`. The cool-japan
   driver API coordination is posted at
-  [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2);
-  body PR submission deferred until explicit
-  maintainer feedback.
+  [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+  — no maintainer comments yet as of 2026-05-31 (3
+  days since posting). Body PR submission stays
+  deferred; the in-fork shape continues to grow.
 
 Recent batch (2026-05-28):
 

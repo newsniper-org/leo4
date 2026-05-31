@@ -35,7 +35,8 @@ against when a Lean closure dereferences a Rust `fn` arg.
     is the docs companion to
     [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
     where the discussion is now posted (no maintainer
-    feedback yet as of 2026-05-29).
+    feedback yet — still nothing as of 2026-05-31, 3
+    days after posting).
 
   - **leo4-oxilean runner caller adapt** (commit
     `c0f81c7`). `leo4-oxilean-runner::run_main` grabs

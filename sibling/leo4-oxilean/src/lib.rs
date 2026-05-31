@@ -4,89 +4,85 @@
 //! Lean 4 implementation's FFI surface
 //! (`oxilean_kernel::ffi::{ExternRegistry, ExternDecl, …}`).
 //!
-//! ## Status (2026-05-21)
+//! ## Status (2026-05-31)
 //!
-//! **Partial wiring** against OxiLean v0.1.2. What works:
+//! **Production-wired** against the leo4 fork branch
+//! `0.1.3-leo4-ox7` of `cool-japan/oxilean` (consumed as a
+//! git submodule at `sibling/oxilean/`). What works:
 //!
-//! - `ExternRegistry` integration — `OxiLeanInvoker` wraps an
-//!   `Arc<Mutex<ExternRegistry>>` and exposes
+//! - `ExternRegistry` integration — `OxiLeanInvoker` wraps
+//!   an `Arc<Mutex<ExternRegistry>>` and exposes
 //!   `register_export(mangled, sig)` that pushes an
 //!   `ExternDecl` per `#[leo4::export]` into OxiLean's
 //!   registry under `lib_name = "leo4-rust-bridge"`.
-//! - Adapter-side `LeanProc` + `LeanProcInvoker` trait
-//!   implementations are real; both compile + are object-
-//!   safe per `SPEC/rust-native-lean.md` §2 + §3.
+//! - **Inbound dispatch (Lean → Rust callback)** — paired
+//!   with `register_export(mangled)`, the new
+//!   `register_export_callback(mangled, closure)` (OX8.3c,
+//!   fork commit `91430ae`) installs the runtime Rust
+//!   closure that the OxiLean evaluator's
+//!   `dispatch_extern_const` (OX8.3b) reaches when it
+//!   reduces an `@[extern]`-attributed `Const`.
+//!   `LeanProcInvoker::invoke` routes through the same
+//!   path. `ExternResolver` is implemented for
+//!   `OxiLeanInvoker` so embedders can install a single
+//!   instance.
+//! - **Outbound dispatch (Lean closure dereference → Rust
+//!   closure)** — `attach_outbound_registry(...)` /
+//!   `outbound_registry()` / `invoke_outbound(id, args)`
+//!   wire `Lean::callback_registry()`'s
+//!   `RustCallbackRegistry` (P0b #75 step 3, commit
+//!   `521979e`). `register_outbound_dispatch_callback(mangled)`
+//!   (P0c #76, commit `44bb382`) converts a single
+//!   `@[extern]`-mangled symbol into the per-call
+//!   canonical-ABI shape: 8-byte LE `callback_id` prefix +
+//!   inner args. Unpacks + forwards into
+//!   `invoke_outbound`.
 //!
-//! What's still stub'd, with the architectural reason
-//! documented inline:
+//! ## Phase 10-B1.x callback ABI — closed end-to-end
 //!
-//! - **`OxiLeanInvoker::invoke(mangled, args)`** returns
-//!   `UNKNOWN_FUNCTION` for every input. OxiLean's
-//!   `ExternRegistry` (deliberately by design) carries
-//!   *metadata* only — the `lib_name` / `symbol_name` fields
-//!   describe where the actual symbol lives; resolution is
-//!   the responsibility of OxiLean's codegen / evaluator
-//!   (typically a `dlsym(libname, symbol)` call). For
-//!   `leo4-rust-native`'s in-process direct-Rust-call model
-//!   to work, OxiLean would need to expose a *callback-
-//!   registration* hook in its evaluator — passing a
-//!   `Box<dyn Fn(&[u8]) -> Result<Vec<u8>, LeanError>>` per
-//!   mangled name. **Such a hook does not exist in v0.1.2.**
-//!   See §"OxiLean upstream prerequisite" in `README.md`.
-//! - **`OxiLeanProc::call(mangled, args)`** likewise returns
-//!   the not-yet-wired error. Wiring it requires OxiLean's
-//!   evaluator to expose an "invoke `@[leo4_export]` body by
-//!   name with byte payload" entry point, which is also
-//!   absent.
+//! The earlier "LECQ/LECR IPC re-entry protocol is hard
+//! to design" reason for deferring B1.x to mslean4's
+//! follow-up dissolves on this transport: every callback
+//! crossing is just an in-process Rust function call
+//! routed through the registry pair (inbound +
+//! outbound). The matching IO walker on the fork side
+//! (`oxilean_runtime::driver::run_main`, fork commit
+//! `d357a01`) recognises `IO.pure`, `IO.bind` (arity-4 +
+//! arity-2), and `@[extern]` `Const` reductions today;
+//! shape coverage grows incrementally as new use cases
+//! surface.
 //!
-//! ## What lands in this commit
+//! ## OxiLean upstream landing
 //!
-//! 1. Real `ExternRegistry` wrapping (`OxiLeanInvoker`'s
-//!    inner state is an actual OxiLean registry, not a stub
-//!    `()`).
-//! 2. `register_export(mangled, sig)` — does real
-//!    `oxilean_kernel::ffi::ExternRegistry::register(decl)`
-//!    calls and surfaces the resulting `FfiError` as a
-//!    leo4 `LeanError`.
-//! 3. Type mapping: leo4 canonical-ABI primitives →
-//!    `FfiType` (helper `leo4_args_to_ffi_sig`).
-//! 4. Tests that exercise the registration path against the
-//!    actual OxiLean v0.1.2 API.
+//! Three of the hooks the adapter needs live on the
+//! `0.1.3-leo4-ox7` fork branch awaiting cool-japan
+//! upstream review:
 //!
-//! ## OxiLean upstream — direct inspection of v0.1.2
+//! 1. `oxilean-kernel::ffi::CallbackRegistry` +
+//!    `ExternCallback` + `ExternCallError` (OX8.3a, fork
+//!    commit `72add72`).
+//! 2. `oxilean-runtime::extern_resolver::{ExternResolver,
+//!    SharedExternResolver, dispatch_extern_const}` +
+//!    `ExternDispatch` (OX8.3b, fork commit `bf17523`).
+//! 3. `oxilean-runtime::driver::{run_main,
+//!    run_main_with_args, DriverError}` (P0c #76, fork
+//!    commits `f9bfd45` → `8b2af9f` → `d357a01`).
 //!
-//! Three hooks needed for full integration; direct grep
-//! into OxiLean v0.1.2 sources verified which exist:
+//! cool-japan upstream PR drafts:
 //!
-//! 1. Per-mangled-name **callback registration** in the
-//!    OxiLean evaluator (the hook this adapter would tie
-//!    `LeanProcInvoker::invoke` into). **NOT PRESENT** in
-//!    v0.1.2 — `ExternRegistry` + `FunctionTable` both
-//!    store metadata only; closure storage path doesn't
-//!    exist.
-//! 2. **By-name dispatch** of `@[leo4_export]` Lean
-//!    definitions (the hook `LeanProc::call` would tie
-//!    into). **NOT PRESENT** at high-level API surface —
-//!    `Environment` is query-only; runtime side is
-//!    `BytecodeChunk`-level (`execute_chunk`), not
-//!    name-level.
-//! 3. Source-side **`@[leo4_export]` attribute
-//!    recognition** + `deriving LeanMarshal` handler
-//!    registration (the equivalent of reference Lean's
-//!    `registerBuiltinAttribute` /
-//!    `registerDerivingHandler`).
-//!    **PRESENT** in v0.1.2 —
-//!    `oxilean_elab::attribute::AttributeManager::
-//!    register_custom_handler` and
-//!    `DeriveHandlerRegistry::register`.
+//! - `docs/cool-japan-upstream-pr-draft.md` — OX7
+//!   codegen folds + the `oxilean-parse-peg` donation +
+//!   Hooks 1 / 2.
+//! - `docs/cool-japan-driver-api-coordination-draft.md` —
+//!   the `driver` API surface, **posted** at
+//!   <https://github.com/cool-japan/oxilean/issues/2>
+//!   on 2026-05-28; no maintainer feedback yet (as of
+//!   2026-05-31).
 //!
-//! → Hooks 1 + 2 (dispatch layer) block this adapter's
-//! `call` / `invoke` bodies until upstream PRs land.
-//! Hook 3 (recognition layer) is unblocked — a separate
-//! `leo4-oxilean-build` companion crate (out of scope for
-//! this minimal adapter) can ship today by importing
-//! `oxilean-elab` and binding both registries. See
-//! `README.md` §"OxiLean upstream prerequisite".
+//! Both upstream submissions are sequenced **post-v1.0 RC**
+//! per the leo4 project's release window — RC code-freeze
+//! happens against the fork first, upstream coordination
+//! continues after the fork's shape stabilises.
 
 #![allow(clippy::missing_errors_doc)]
 

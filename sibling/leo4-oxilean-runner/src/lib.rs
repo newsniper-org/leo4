@@ -28,35 +28,45 @@
 //!    (OxiLean prelude + leo4 boundary primitives) plus the
 //!    `@[extern]` axioms the OX8.2 wrapper emit produced.
 //!
-//! ## Known limitation — `main : IO Unit` execution
+//! ## `main : IO α` execution — walker coverage
 //!
 //! OxiLean v0.1.3-leo4-ox7 (the fork branch this crate
-//! tracks) does **not** ship a public "evaluate a parsed
-//! `main : IO Unit`" entry point. Its `oxilean-cli`'s
-//! `check_source` runs parse + elab + type-check; its
-//! `oxilean-runtime::bytecode_interp` operates at the
-//! `BytecodeChunk` level — no higher-level "drive an
-//! elaborated `Declaration`'s `main` to its IO effects"
-//! function is exposed. The runtime *does* now have
-//! `ExternResolver` + `dispatch_extern_const` (OX8.3b), so
-//! the embedding *boundary* is ready — but the IO-effect
-//! driver still needs to land upstream.
+//! tracks) now ships `oxilean_runtime::driver::run_main`
+//! — an IO walker that drives an elaborated `main : IO α`
+//! to its IO effects under an installed `ExternResolver`
+//! + `ExternRegistry`. The walker recognises:
 //!
-//! Until then, [`run_main`] does everything *except* the
-//! final "execute main" step and reports a clean
-//! [`LeanError`] with code `0x0002_0005` (`RUST_DLSYM_FAILED`)
-//! whose message points at the upstream gap. The
-//! intermediate steps — cdylib load, EXPORTS walk, invoker
-//! registration, parse, elab, `ExternResolver`
-//! installation — all run end-to-end and are individually
+//! - `IO.pure` / `Pure.pure` (nullary terminal),
+//! - `IO.bind α β m k` (arity-4 with implicits) and
+//!   `Bind.bind m k` (arity-2 after implicit erasure),
+//! - `@[extern]`-attributed `Const` reductions via
+//!   `dispatch_extern_const` against the supplied registry.
+//!
+//! Shapes the walker doesn't yet cover (e.g. `EStateM
+//! Error IO.RealWorld α` lowerings the Lean stdlib funnels
+//! IO through, beta-application of `k` in `IO.bind m k`
+//! with a concrete result feed from `m`) surface a clean
+//! [`LeanError`] with code `0x0002_0005`
+//! (`RUST_DLSYM_FAILED`) whose message carries the
+//! offending sub-expression's debug repr — the gap is
+//! per-shape, not "everything".
+//!
+//! The intermediate pipeline steps — cdylib load, EXPORTS
+//! walk, invoker registration, parse, elab,
+//! `ExternResolver` installation — are individually
 //! observable via [`run_main_diagnostics`] for testing.
+//! Outbound callback dispatch (Lean closure dereferences
+//! firing registered Rust closures) goes through
+//! [`OxiLeanInvoker::register_outbound_dispatch_callback`]
+//! + the matching wrapper-Lean `@[extern]` symbol; pair
+//! that call with `attach_outbound_registry(...)` at
+//! adapter init time.
 //!
-//! Once upstream OxiLean exposes the driver (tracked at
-//! `docs/ox8-3-callback-hook-design.md` §"Follow-up:
-//! `run_main`"), `run_main` will lift the
-//! `Err(LeanError(0x0002_0005, "main execution not yet
-//! exposed"))` branch into a real evaluator drive without
-//! touching its public signature.
+//! The driver's API shape is under discussion upstream
+//! at <https://github.com/cool-japan/oxilean/issues/2>;
+//! body PRs (continuing to grow the recognised-shape set
+//! in the fork's `oxilean_runtime/driver/mod.rs`) land
+//! once that discussion settles.
 
 #![allow(clippy::missing_errors_doc)]
 // FFI / type-name-in-docs noise — backticking every
@@ -198,11 +208,18 @@ pub struct RunDiagnostics {
 /// 6. Install the invoker as the env's
 ///    `SharedExternResolver` (via
 ///    `Arc::clone(&invoker).as_shared_resolver()`).
-/// 7. **TODO (upstream-blocked)**: actually drive
-///    `main : IO Unit`. Today returns a deliberate
-///    `LeanError` with code `0x0002_0005` whose message
-///    points at `docs/ox8-3-callback-hook-design.md`'s
-///    follow-up.
+/// 7. Drive `main : IO α` via
+///    [`oxilean_runtime::driver::run_main`] under the
+///    invoker's `ExternResolver` + `ExternRegistry` handle.
+///    The walker currently recognises `IO.pure`, `IO.bind`
+///    (arity-4 + arity-2), and `@[extern]` Const dispatch;
+///    unrecognised shapes surface as
+///    `LeanError(0x0002_0005)` carrying the offending
+///    sub-expression's debug repr. Outbound callback
+///    dispatch (Lean closure dereference firing a
+///    registered Rust closure) goes through
+///    [`OxiLeanInvoker::register_outbound_dispatch_callback`]
+///    + the matching wrapper-Lean `@[extern]` symbol.
 ///
 /// The cdylib + invoker remain alive for the duration of
 /// the call; the `Arc<Library>` inside each registered
@@ -213,13 +230,16 @@ pub fn run_main(
     main_lean_path: &Path,
 ) -> Result<(), LeanError> {
     let (invoker, env, _diag) = run_main_inner(cdylib_path, main_lean_path)?;
-    // OX8 follow-up #76 (2026-05-28): fork-side `driver::
-    // run_main` stub now wires the public surface. The
-    // body still returns `DriverError::NotYetImplemented`
-    // until the IO walker lands — leo4 surfaces that as
-    // the same `LeanError(0x0002_0005)` users saw before,
-    // with the message updated to mention the new
-    // upstream landing path.
+    // OX8 follow-up #76 (2026-05-28..29): fork-side
+    // `driver::run_main` recognises `IO.pure`, `IO.bind`
+    // (arity-4 + arity-2), and `@[extern]` Const
+    // dispatch via `dispatch_extern_const`. Unrecognised
+    // shapes (e.g. `EStateM Error IO.RealWorld α`
+    // lowerings, beta-application of `k` in `IO.bind m k`
+    // with a concrete result feed) still surface as
+    // `LeanError(0x0002_0005)` carrying the offending
+    // sub-expression's debug repr, so the gap is
+    // visible per-shape.
     let main_name = oxilean_kernel::Name::str("main");
     // Fork commit `d357a01` (2026-05-29) added the
     // `extern_registry: &ExternRegistry` param so the
@@ -246,7 +266,7 @@ pub fn run_main(
                 format!(
                     "leo4-oxilean-runner: cdylib + EXPORTS + invoker + parse \
                      + elab all wired, and `oxilean_runtime::driver::run_main` \
-                     was reached — IO walker is the only remaining step \
+                     reached — walker hit an unrecognised shape \
                      ({reason}). Main.lean = `{}`",
                     main_lean_path.display(),
                 ),

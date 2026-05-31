@@ -9,8 +9,10 @@
 > as a separate discussion (driver API ≠ codegen + parser
 > donation; they're distinct contribution streams).
 >
-> Last refresh: 2026-05-29 (post-#76 IO walker IO.bind +
-> `@[extern]` dispatch landing).
+> Last refresh: 2026-05-31 (doc-sweep pass — no fork
+> code change since 2026-05-29's `d357a01`).
+> Companion issue #2 (driver API coord) **no maintainer
+> comments yet as of 2026-05-31** (3 days since posting).
 >
 > Branch under contribution: `0.1.3-leo4-ox7`, rebased onto
 > `cool-japan/oxilean` `46ad852` (the v0.1.3 base used by leo4).

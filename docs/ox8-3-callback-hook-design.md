@@ -1,8 +1,33 @@
 # OX8.3 — OxiLean evaluator callback-registration hook design
 
-Opened: 2026-05-27. Status: **DESIGN COMPLETE**, awaiting fork-side
-implementation. Based on the read-only audit conducted in parallel
-with OX8.2a.
+Opened: 2026-05-27. **Status (2026-05-31): IMPLEMENTED on the leo4
+fork branch `0.1.3-leo4-ox7`.** The design below was the original
+proposal; the actual landed shape closely follows it. Fork commits:
+
+- `72add72` (2026-05-28) — `CallbackRegistry` + `ExternCallback` +
+  `ExternCallError` in `oxilean-kernel/src/ffi/callbackregistry_traits.rs`
+  (OX8.3a).
+- `bf17523` (2026-05-28) — `ExternResolver` trait + `SharedExternResolver`
+  + `dispatch_extern_const(env, registry, resolver, name, args)` +
+  `dispatch_extern_decl` in `oxilean-runtime/src/extern_resolver.rs`
+  (OX8.3b).
+- `91430ae` (2026-05-28) — leo4-oxilean adapter wires
+  `register_export_callback(mangled, closure)` against the fork hooks
+  (OX8.3c).
+- `f9bfd45` / `8b2af9f` / `d357a01` (2026-05-28..29) — `driver` module
+  drives `main : IO α` through the resolver chain (#76 P0c).
+- `521979e` / `44bb382` (2026-05-28..29) — outbound dispatch +
+  `register_outbound_dispatch_callback` (P0b #75 step 3 + P0c #76).
+
+cool-japan upstream PR drafts (post-RC submission):
+`docs/cool-japan-upstream-pr-draft.md` covers the OX7 + OX8.3a/b
+contribution stream; `docs/cool-japan-driver-api-coordination-draft.md`
+covers the driver API (posted at
+[cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+2026-05-28; no maintainer feedback yet as of 2026-05-31).
+
+This doc is preserved for the design rationale + the API-comparison
+table (4-option study) below.
 
 ## Why this hook?
 

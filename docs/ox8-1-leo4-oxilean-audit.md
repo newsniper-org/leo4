@@ -1,16 +1,24 @@
 # OX8.1 — leo4-oxilean adapter audit
 
-Opened: 2026-05-27. Status: **AUDIT COMPLETE** — OX8.2 unblocked,
-OX8.3 awaits upstream OxiLean hook.
+Opened: 2026-05-27. **Status (2026-05-31): historical
+audit doc — all OX8 phases closed.** The "blocked on
+upstream OxiLean callback-registration hook" framing
+below was accurate on 2026-05-27; the fork branch
+`0.1.3-leo4-ox7` has since shipped that hook + the
+ExternResolver + the driver module, and leo4 is using
+all three via the leo4-oxilean adapter. This doc is
+preserved to record the original analysis; current
+status of each layer lives in
+`sibling/leo4-oxilean/README.md`.
 
-## Findings
+## Findings (2026-05-27 audit, preserved verbatim)
 
 ### leo4-oxilean adapter classification
 
-| Layer | Status |
-|---|---|
-| Registration (`OxiLeanInvoker::register_export`) | **DONE** — `Arc<Mutex<ExternRegistry>>` push of `ExternDecl { mangled, params: ByteArray, ret: ByteArray, lib: "leo4-rust-bridge" }`. 8/8 unit tests pass. |
-| Dispatch (`OxiLeanInvoker::invoke` / `OxiLeanProc::call`) | **SCAFFOLD** — returns `RUST_DLSYM_FAILED` (0x0002_0005) stub. Blocked on upstream OxiLean callback-registration hook. |
+| Layer | Status (as of 2026-05-27) | Status (2026-05-31 update) |
+|---|---|---|
+| Registration (`OxiLeanInvoker::register_export`) | **DONE** — `Arc<Mutex<ExternRegistry>>` push of `ExternDecl { mangled, params: ByteArray, ret: ByteArray, lib: "leo4-rust-bridge" }`. 8/8 unit tests pass. | Still DONE; 19/19 tests now (callback runtime layered on top). |
+| Dispatch (`OxiLeanInvoker::invoke` / `OxiLeanProc::call`) | **SCAFFOLD** — returns `RUST_DLSYM_FAILED` (0x0002_0005) stub. Blocked on upstream OxiLean callback-registration hook. | **WIRED** via OX8.3a/b/c (fork commits `72add72` / `bf17523` / `91430ae`) + P0b/c (`a2c21d9` / `32f26a7` / `521979e` / `44bb382`). |
 
 Crate at `/home/ybi/leo4/sibling/leo4-oxilean/`. Standalone
 `[workspace]`, pinned to OxiLean v0.1.2 (will bump to fork's

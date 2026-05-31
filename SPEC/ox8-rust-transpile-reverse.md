@@ -72,11 +72,14 @@ Runtime model:
    declarations. This step replaces `lake run
    Leo4Rust/regenerate`.
 3. **Lean-side elab + dispatch**: `sibling/leo4-oxilean` (the OxiLean
-   adapter; currently scaffold-only) loads the generated `.lean`
-   file via OxiLean's `oxilean-elab`, sees the `@[extern]`
-   declarations, and at evaluation time dispatches to the cdylib
-   via `libloading` — the same trick leo4-rust-bridge uses on the
-   forward path.
+   adapter; production-wired since OX8.3a/b/c + P0b/c) loads the
+   generated `.lean` file via OxiLean's `oxilean-elab`, sees the
+   `@[extern]` declarations, and at evaluation time dispatches to
+   the cdylib via the `OxiLeanInvoker::register_export_callback`
+   chain (inbound) + the
+   `register_outbound_dispatch_callback`-driven
+   `invoke_outbound` chain (outbound). Same canonical-ABI byte
+   buffers the forward path uses.
 4. **`leo4 run --impl rust-transpile`** (reverse direction) drives
    the full pipeline: cargo build → wrapper emit → leo4-oxilean
    evaluator on the user's `lean/Main.lean`.
@@ -99,6 +102,11 @@ oxilean-runtime, used by leo4-oxilean).
 Each phase is one commit (give or take), with explicit acceptance
 criteria. Numbering deliberately avoids overlap with OX7 codegen
 fixes — those proceed in parallel.
+
+**Status (2026-05-31): all five phases CLOSED.** Sibling commits +
+follow-ups (P0b 3 steps + P0c IO walker grows) keep the wiring
+current; phase descriptions below are preserved as the original
+acceptance criteria.
 
 ### Phase OX8.1 — leo4-oxilean adapter audit
 
