@@ -1220,3 +1220,107 @@ container 빌드를 driving. data-vs-code 분리가 핵심:
 `distros.toml`이 모든 distro-specific 것 (image, setup,
 audit targets)을 보유; Python runner에 hardcode 없음.
 새 distro 추가는 순수 TOML 작업.
+
+= 업데이트 — 2026-05-31: walker grow finisher + OX7 translate tail
+
+이번 업데이트는 2026-05-29 항목이 명시적으로 열어둔
+walker coverage 갭을 닫고, OX7 translate coverage tail
+까지 마무리한다. 자체 버전을 구현할 때, 이번 batch에서
+나온 두 가지 설계 교훈은 가져갈 가치가 있다.
+
+== Walker grow: arg encoding을 위한 env-lookup
+
+2026-05-29 walker는 Nat / String 리터럴 + Bool / Unit
+ctor + 명명된 record / variant ctor (`Prod.mk` /
+`Subtype.mk` / `Option.some` / `Sum.inl` 등)을 정적으로
+lower했다. 사용자 정의 record와 inductive는 "embedder
+영역" — encoder가 field 순서나 discriminant 폭을 알 IDL
+을 가지고 있지 않았다.
+
+수정은 kernel `Environment`를 encoder chain에 thread하
+는 것. `ConstantInfo::Constructor`는
+`(induct, cidx, num_params, num_fields)`를 carry하고,
+부모 `Inductive`에는 `ctors: Vec<Name>`이 있어 encoder
+가 discriminant prefix를 emit할지 (`iv.ctors.len() > 1`)
+와 앞 type-param arg를 몇 개 skip할지 (`cv.num_params`)
+를 안다.
+
+Lesson: encoder가 정적으로 알려진 정보가 떨어졌을 때,
+kernel이 이미 답을 알고 있다면 *embedder에 defer하지
+말 것*. walker는 env를 손에 들고 있다 — 그걸 써라.
+
+== Walker grow: stdlib IO builtin dispatch
+
+`IO.println` / `IO.eprintln` / `IO.print` / `IO.eprint`
++ 표준 `IO.FS.*` 9개 op (read / write / append / remove
+/ create / rename)이 `@[extern]` resolver dispatch arm
+앞에서 walker 내부 `print!` / `eprint!` / `std::fs::*`
+에 대해 직접 fire.
+
+왜 embedder가 resolver로 layering 하지 않는가? 모든
+embedder가 동일하게 필요로 하기 때문. stdout / stderr
+write path와 기본 file-system op은 universal하다 — 매
+downstream이 각자 재구현하게 만드는 건 busywork.
+walker의 일은 특정 명명된 shape을 인식하고 인식 못한 것
+은 명확히 bail하는 것; stdlib effect는 *바로 그* 명명된
+shape의 패러다임 케이스다.
+
+Lesson: 인식되는 shape set이 사용자가 첫날 부딪치는
+ergonomic floor라면, walker 측에서 인식하라. 비-universal
+한 tail (`IO.FS.Handle.*` 등)은 embedder에 defer.
+
+== 설계상-out-of-scope 재분류
+
+이전 `DriverError::NotYetImplemented` arm은 walker가
+결국 인식하게 될 "still open" shape들을 나열했다.
+2026-05-31 batch는 남은 tail을 *아키텍처상 out-of-
+scope*로 재분류 — TODO 리스트가 아니다:
+
+- Non-IO monad-class run projection (`StateT.run` /
+  `ReaderT.run` / `ExceptT.run`)은 walker *아래*의 LCNF
+  / bytecode interpreter 레이어 소속. walker 레이어에
+  배선하면 아래 레이어가 이미 하는 reduction을 이중
+  구현하게 된다.
+- `IO.FS.Handle.*`은 walker가 들고 있지 않은 host-side
+  `File` lifetime 모델링이 필요; embedder가 resolver로
+  가로챈다.
+- `dbg_trace` / `panic!` / `unreachable!`은 compile-
+  time elaboration hook; OxiLean elaborator가 walker가
+  body를 보기 전에 처리한다.
+- Float literal lowering은 reducer에서 constant-fold.
+
+Lesson: "TODO" 리스트는 noise로 썩는다. arm이 아키텍처
+상 다른 곳에 속해 fire되어선 안 된다는 걸 깨달았을 때,
+명시적으로 문서화하고 — error message framing도 거기
+에 맞춰 업데이트하라.
+
+== OX7 translate tail (rust-transpile path)
+
+2026-05-27 OX7 typeclass-step은 산술 + 기본 비교 BinOp
+을 cover했다. 2026-05-31 tail이 남은 surface를 닫는다:
+
+- BinOp coverage 확장: `>` / `≥`는 operand swap (Lean
+  stdlib이 flipped `<` / `≤`로 표현); `≠` / `∉`는
+  `Not.not`으로 wrap; `&&` / `||` / `↔` / `∈` / `⊆`는
+  직접 projection. mapping table return type이
+  `&'static str`에서 `Option<BinOpMapping>`으로 변경 —
+  variant가 composition shape (`Direct` / `Swapped` /
+  `Negated`)을 typeclass identifier와 함께 carry.
+- 명시적 `By` / `DotFn` / `Raw` Expr arm — 이전에는 각
+  각 catch-all `Unsupported(variant_name)`에 hit, 실행
+  가능한 hint 없음. 이제 각각 *왜* shape이 translate
+  불가능한지와 사용자가 *무엇으로* 다시 써야 하는지를
+  설명하는 diagnostic을 surface. Expr match는 `L4Expr`
+  에 대해 exhaustive — 향후 parser variant는 빌드를 깨
+  뜨리며 강제, 의도된 안전.
+- Decl coverage: `DefinitionByArms` (등식형 `def NAME :
+  T | pat₀ => body₀ | …`)는 `Definition` + `fun
+  <binders> => match <last_binder> with <arms>` body로
+  desugar. `Mutual`은 안쪽 translate된 decl들을
+  `OxDecl::Mutual`로 wrap.
+
+Lesson: return type을 더 풍부한 정보를 carry하도록
+refactor할 때 (여기선 `&str → Option<BinOpMapping>`),
+*호출 측*이 composition shape을 자연스럽게 문서화하는
+pattern-match가 된다. diff는 크지만 production reasoning
+이 명확해진다. 트레이드 가치 있음.

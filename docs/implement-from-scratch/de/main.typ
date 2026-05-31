@@ -1400,3 +1400,122 @@ ist tragend: `distros.toml` trägt alles Distro-
 Spezifische (Image, Setup, Audit-Targets); der Python-
 Runner hat keinen hartcodierten Distro-Namen. Ein neues
 Distro hinzuzufügen ist rein TOML.
+
+= Update — 2026-05-31: Walker-Grow-Finisher + OX7-Translate-Tail
+
+Dieses Update schließt die Walker-Coverage-Lücken, die
+der Eintrag vom 2026-05-29 explizit offengelassen hat,
+und beendet den OX7-Translate-Coverage-Tail. Wer seine
+eigene Version implementiert, sollte zwei Design-Lehren
+aus dieser Charge mitnehmen.
+
+== Walker-Grow: Env-Lookup für Arg-Encoding
+
+Der Walker vom 2026-05-29 lowerte Nat- / String-
+Literale + Bool- / Unit-Ctors + benannte Record- /
+Variant-Ctors (`Prod.mk` / `Subtype.mk` /
+`Option.some` / `Sum.inl` usw.) statisch. Benutzer-
+definierte Records und Inductives waren "Embedder-
+Territorium" — der Encoder hatte das IDL nicht zur
+Hand, um Feldreihenfolge oder Diskriminanten-Breiten zu
+kennen.
+
+Die Korrektur ist, das Kernel-`Environment` durch die
+Encoder-Kette zu fädeln. `ConstantInfo::Constructor`
+trägt `(induct, cidx, num_params, num_fields)`; das
+Eltern-`Inductive` hat `ctors: Vec<Name>`, sodass der
+Encoder weiß, ob ein Diskriminanten-Präfix zu emittieren
+ist (`iv.ctors.len() > 1`) und wie viele führende Type-
+Param-Args zu überspringen sind (`cv.num_params`).
+
+Lesson: Wenn dem Encoder die statisch bekannten
+Informationen ausgehen, *delegieren Sie nicht* an den
+Embedder, falls der Kernel die Antwort bereits kennt.
+Der Walker hat die Env zur Hand — nutzen Sie sie.
+
+== Walker-Grow: Stdlib-IO-Builtin-Dispatch
+
+`IO.println` / `IO.eprintln` / `IO.print` / `IO.eprint`
++ die neun Standard-`IO.FS.*`-Ops (read / write /
+append / remove / create / rename) feuern direkt im
+Walker gegen `print!` / `eprint!` / `std::fs::*`, vor
+dem `@[extern]`-Resolver-Dispatch-Arm.
+
+Warum nicht den Embedder das über den Resolver schichten
+lassen? Weil jeder Embedder es bräuchte. Der Stdout- /
+Stderr-Write-Pfad und die grundlegenden Dateisystem-Ops
+sind universell — jeden Downstream das neu
+implementieren zu lassen ist Beschäftigungsarbeit. Die
+Aufgabe des Walkers ist, spezifische benannte Shapes zu
+erkennen und bei nicht erkannten klar abzubrechen;
+Stdlib-Effekte sind *der* Paradigma-Fall spezifisch
+benannter Shapes.
+
+Lesson: Wenn die erkannte Shape-Menge der ergonomische
+Boden ist, den Nutzer am ersten Tag treffen, erkennen
+Sie sie walker-seitig. Den nicht-universellen Tail
+(`IO.FS.Handle.*` etc.) an den Embedder delegieren.
+
+== Reklassifizierung als per-Design-out-of-Scope
+
+Der `DriverError::NotYetImplemented`-Arm listete zuvor
+"noch offene" Shapes, die der Walker irgendwann erkennen
+würde. Die Charge vom 2026-05-31 reklassifiziert den
+verbleibenden Tail als *architektonisch out-of-scope* —
+keine TODO-Liste:
+
+- Nicht-IO-Monadenklassen-Run-Projektionen
+  (`StateT.run` / `ReaderT.run` / `ExceptT.run`) gehören
+  in die LCNF- / Bytecode-Interpreter-Schicht *unter*
+  dem Walker. Sie auf der Walker-Schicht zu verdrahten
+  würde Reduktion doppelt implementieren, die die
+  unteren Schichten bereits leisten.
+- `IO.FS.Handle.*` braucht hostseitige `File`-
+  Lifetime-Modellierung, die der Walker nicht trägt;
+  Embedder fangen das über den Resolver ab.
+- `dbg_trace` / `panic!` / `unreachable!` sind
+  Compile-Time-Elaboration-Hooks; OxiLeans Elaborator
+  behandelt sie, bevor der Walker den Body sieht.
+- Float-Literal-Lowering wird im Reduzierer als
+  Konstanten gefaltet.
+
+Lesson: Eine "TODO"-Liste vergammelt zu Rauschen.
+Sobald Sie merken, dass ein Arm niemals feuern sollte,
+weil die Architektur sagt, dass er anderswohin gehört,
+dokumentieren Sie das explizit — und passen Sie das
+Framing der Fehlermeldung entsprechend an.
+
+== OX7-Translate-Tail (Rust-Transpile-Pfad)
+
+Der OX7-Typeclass-Step vom 2026-05-27 deckte Arithmetik
++ grundlegende Vergleichs-BinOps ab. Der Tail vom
+2026-05-31 schließt die verbleibende Oberfläche:
+
+- BinOp-Coverage-Erweiterung: `>` / `≥` vertauschen
+  Operanden (Lean-Stdlib drückt diese als geflippte `<`
+  / `≤` aus); `≠` / `∉` wickeln in `Not.not`; `&&` /
+  `||` / `↔` / `∈` / `⊆` sind direkte Projektionen.
+  Der Rückgabetyp der Mapping-Tabelle ändert sich von
+  `&'static str` zu `Option<BinOpMapping>` — die
+  Variante trägt die Komposition-Shape (`Direct` /
+  `Swapped` / `Negated`) neben dem Typeclass-Identifier.
+- Explizite `By`- / `DotFn`- / `Raw`-Expr-Arme — jeder
+  traf zuvor ein Catch-all `Unsupported(variant_name)`
+  ohne handlungsfähigen Hinweis. Jetzt oberflächt jeder
+  eine Diagnose, die erklärt, *warum* die Shape nicht
+  übersetzbar ist und *worauf* der Nutzer umschreiben
+  sollte. Das Expr-Match wird über `L4Expr` erschöpfend
+  — zukünftige Parser-Varianten erzwingen einen Build-
+  Bruch, absichtliche Sicherheit.
+- Decl-Coverage: `DefinitionByArms` (gleichungsförmig
+  `def NAME : T | pat₀ => body₀ | …`) entzuckert zu
+  `Definition` mit `fun <binders> => match
+  <last_binder> with <arms>`-Body. `Mutual` wickelt die
+  innen übersetzten Decls in `OxDecl::Mutual`.
+
+Lesson: Wenn Sie einen Rückgabetyp refaktorieren, um
+reichere Information zu tragen (hier `&str →
+Option<BinOpMapping>`), wird die *Aufrufstelle* zu einem
+Pattern-Match, das die Komposition-Shapes natürlich
+dokumentiert. Der Diff ist größer, aber das Production-
+Reasoning wird klarer. Den Trade wert.

@@ -1459,3 +1459,121 @@ load-bearing: `distros.toml` carries every distro-
 specific thing (image, setup, audit targets); the
 Python runner has no hardcoded distro name. Adding a
 new distro is purely TOML.
+
+= Update --- 2026-05-31: walker grow finisher + OX7 translate tail
+
+This update closes the walker-coverage gaps the
+2026-05-29 entry left explicitly open and finishes
+the OX7 translate-coverage tail. When you implement
+your own version, two design lessons from this batch
+are worth carrying forward.
+
+== Walker grow: env-lookup for arg encoding
+
+The 2026-05-29 walker statically lowered Nat / String
+literals + Bool / Unit ctors + named record / variant
+ctors (`Prod.mk` / `Subtype.mk` / `Option.some` /
+`Sum.inl` etc.). User-defined records and inductives
+were "embedder territory" --- the encoder didn't
+have the IDL on hand to know field order or
+discriminant widths.
+
+The fix is to thread the kernel `Environment` through
+the encoder chain. `ConstantInfo::Constructor` carries
+`(induct, cidx, num_params, num_fields)`; the parent
+`Inductive` has `ctors: Vec<Name>` so the encoder
+knows whether to emit a discriminant prefix
+(`iv.ctors.len() > 1`) and how many leading type-param
+args to skip (`cv.num_params`).
+
+Lesson: when the encoder runs out of statically-known
+information, *don't* defer to the embedder if the
+kernel already knows the answer. The walker has the
+env at hand --- use it.
+
+== Walker grow: stdlib IO builtin dispatch
+
+`IO.println` / `IO.eprintln` / `IO.print` / `IO.eprint`
++ the nine standard `IO.FS.*` ops (read / write /
+append / remove / create / rename) fire directly in
+the walker against `print!` / `eprint!` / `std::fs::*`,
+ahead of the `@[extern]` resolver dispatch arm.
+
+Why not let the embedder layer this via the resolver?
+Because every embedder would need to. The stdout /
+stderr write path and the basic file-system ops are
+universal --- making each downstream re-implement
+them is busywork. The walker's job is to recognise
+specific named shapes and bail clearly on unrecognised
+ones; stdlib effects are *the* paradigm case of
+specific named shapes.
+
+Lesson: when the recognised-shape set is the
+ergonomic floor users will hit on day one, recognise
+it walker-side. Defer to the embedder for the
+non-universal tail (`IO.FS.Handle.*`, etc.).
+
+== Out-of-scope-by-design reclassification
+
+The `DriverError::NotYetImplemented` arm previously
+listed "still open" shapes the walker would
+eventually recognise. The 2026-05-31 batch
+reclassifies the remaining tail as *architecturally
+out-of-scope*, not a TODO list:
+
+- Non-IO monad-class run projections (`StateT.run` /
+  `ReaderT.run` / `ExceptT.run`) belong at the LCNF /
+  bytecode interpreter layer, *below* the walker.
+  Wiring them at the walker layer would
+  double-implement reduction the lower layers
+  already do.
+- `IO.FS.Handle.*` needs host-side `File` lifetime
+  modelling the walker doesn't carry; embedders
+  intercept via the resolver.
+- `dbg_trace` / `panic!` / `unreachable!` are
+  compile-time elaboration hooks; OxiLean's
+  elaborator handles them before the walker sees
+  the body.
+- Float-literal lowering constant-folds in the
+  reducer.
+
+Lesson: a "TODO" list rots into noise. When you
+realise an arm shouldn't ever fire because the
+architecture says it belongs elsewhere, document
+that explicitly --- and update the error-message
+framing to match.
+
+== OX7 translate tail (rust-transpile path)
+
+The 2026-05-27 OX7 typeclass-step covered arithmetic
++ basic comparison BinOps. The 2026-05-31 tail closes
+the remaining surface:
+
+- BinOp coverage expand: `>` / `≥` swap operands
+  (Lean stdlib expresses these as flipped `<` / `≤`);
+  `≠` / `∉` wrap in `Not.not`; `&&` / `||` / `↔` /
+  `∈` / `⊆` direct projections. The mapping table
+  return type changes from `&'static str` to
+  `Option<BinOpMapping>` --- the variant carries the
+  composition shape (`Direct` / `Swapped` /
+  `Negated`) alongside the typeclass identifier.
+- Explicit `By` / `DotFn` / `Raw` Expr arms ---
+  each previously hit a catch-all `Unsupported(variant_name)`
+  with no actionable hint. Now each surfaces a
+  diagnostic explaining *why* the shape isn't
+  translatable and *what* the user should rewrite
+  to. The Expr match becomes exhaustive over
+  `L4Expr` --- future parser variants force a build
+  break, intentional safety.
+- Decl coverage: `DefinitionByArms` (equational
+  `def NAME : T | pat₀ => body₀ | …`) desugars to
+  `Definition` with `fun <binders> => match
+  <last_binder> with <arms>` body. `Mutual` wraps
+  the inner-translated decls into `OxDecl::Mutual`.
+
+Lesson: when refactoring a return type to carry
+richer information (here `&str → Option<BinOpMapping>`),
+the *call site* becomes a pattern-match that
+naturally documents the composition shapes. The
+diff is bigger, but production reasoning gets
+clearer. Worth the trade.

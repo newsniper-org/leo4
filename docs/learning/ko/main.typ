@@ -452,3 +452,103 @@ end-user-facing install flow를 문서화하지 않음.
 
 두 consumer의 vendor file은 1-line `pub use <leaf>::*;`
 re-export shim으로 압축.
+
+= 업데이트 — 2026-05-31
+
+== OxiLean driver walker — coverage 마감
+
+2026-05-29 walker 항목에서 "v0는 `IO.pure`, `IO.bind`,
+`@[extern]` Const dispatch만 커버; 나머지는
+`NotYetImplemented` 반환"이라고 했던 그 gap list가 이제
+닫힘. 2026-05-31 walker가 인식하는 shape:
+
+- *`IO.pure` family* — monad transformer chain 전체에
+  걸쳐 `IO.pure` / `Pure.pure` / `EIO.pure` /
+  `EStateM.pure` / `ExceptT.pure` / `StateT.pure` /
+  `ReaderT.pure` (elaborator의 unfold가 고를 수 있는
+  underscore-mangled spelling 포함).
+- *`IO.bind` family* — 같은 transformer-chain coverage.
+  continuation `k`를 `m`의 concrete result에 대해
+  beta-application 하는 케이스 (정적으로 알려진 경우)도
+  이번 batch에 포함 — `IO.bind (IO.pure x) k`가 `k`를
+  opaque로 walk하는 대신 `k x`로 reduce됨.
+- *`@[extern]` Const dispatch와 canonical-ABI 인자 인코딩*.
+  walker가 정적으로 lower하는 대상: `Nat` / `String`
+  리터럴, `Bool.true` / `Bool.false`, `Unit.unit`,
+  sized-integer typeclass projection (UInt8..128 /
+  USize / Int8..128 / ISize에 대한 `OfNat.ofNat <type>
+  n`), signed-integer 부정 (`Neg.neg`), `Char.ofNat`
+  Unicode 코드포인트, named record / variant 생성자
+  (`Prod.mk` / `Subtype.mk` / `Option.some` / `Sum.inl`
+  등), *그리고* env-lookup을 통한 사용자 정의 record /
+  inductive 생성자 (`ConstantInfo::Constructor` →
+  multi-ctor일 때 `Inductive.ctors.len()` 판별자
+  prefix, 재귀적으로 인코딩된 필드).
+- *Stdlib `IO.println` family* — `IO.println` /
+  `IO.eprintln` / `IO.print` / `IO.eprint`가 resolver
+  보다 먼저 `print!` / `println!` / `eprint!` /
+  `eprintln!`에 직접 fire. embedder가 common stdout /
+  stderr write path에 resolver를 layer할 필요 없음.
+- *Stdlib `IO.FS.*` family* — `readFile` / `writeFile`
+  / `appendFile` / `removeFile` / `createDir` /
+  `createDirAll` / `removeDir` / `removeDirAll` /
+  `rename`이 `std::fs`에 직접 fire. `readFile`은
+  내용을 `Ok(Some(Lit(Str)))`로 surface하므로 둘러싼
+  `IO.bind m k`가 `k`를 바이트열에 beta-apply. `std::
+  io::Error`는 `ExternCallError::CallbackFailed`를
+  거쳐 `DriverError::ExternFailed`로 wrap됨.
+
+남은 `NotYetImplemented` arm은 *design상 out-of-scope*인
+shape에만 fire: non-IO monad-class run projection
+(`StateT.run` / `ReaderT.run` / `ExceptT.run` —
+walker가 아니라 *아래쪽인* LCNF / bytecode interpreter
+계층에 속함), `IO.FS.Handle.*` (walker가 들고 다니지
+않는 host-side `File` lifetime modelling), compile-time
+hook (`dbg_trace` / `panic!` / `unreachable!` —
+elaborator가 처리), 그리고 float-literal lowering
+(reducer가 constant-fold). 필요 시 embedder가 resolver
+로 가로챔.
+
+cool-japan/oxilean#2 (driver-API 조율 이슈)는 여전히
+upstream 기여 경로; body PR 제출은 maintainer의 명시적
+피드백이 나올 때까지 보류. 2026-05-31 기준 해당 토론은
+3일+ 침묵 상태.
+
+== Rust-transpile translate coverage tail (#72 OX7)
+
+2026-05-27 OX7 typeclass-step이 산술 `+` / `-` / `*` /
+`/` / `%` / `^`와 비교 `<` / `<=` / `==` / `=`를
+커버했음. 2026-05-31 translate coverage tail이 나머지를
+마감:
+
+- *BinOp coverage 확장* — `>` / `≥` / `≠` / `&&` /
+  `||` / `↔` / `∈` / `∉` / `⊆` / `→` (Unicode arrow)
+  까지. `arith_op_to_tc_projection`이 이제 3-arm
+  `BinOpMapping` enum 반환: 일반 projection용
+  `Direct(tc)`, `>` / `≥`용 `Swapped(tc)` (Lean
+  stdlib이 이들을 flip된 `<` / `≤`로 표현), `≠` /
+  `∉`용 `Negated(tc)` (`¬ (Eq.eq a b)` /
+  `¬ Membership.mem a b`). Unicode 화살표 `→`는
+  special-case Pi-lowering head에서 ASCII `->`와 합류.
+- *명시적 `By` / `DotFn` / `Raw` Expr arm* — 각
+  variant가 이제 actionable한 진단 메시지를 carry
+  (`By`는 term-mode/axiom rewrite 힌트, `DotFn`은
+  `fun x => …` rewrite 힌트, `Raw`는 parser-shape-
+  coverage 힌트). Expr match가 이제 `L4Expr`에 대해
+  exhaustive — 미래의 parser variant는 build break를
+  강제, 의도적 안전장치.
+- *Decl coverage* — `DefinitionByArms` (등식
+  `def NAME : T | pat₀ => body₀ | …`)는 body가
+  `fun <binders> => match <last_binder> with <arms>`
+  인 `Definition`으로 desugar. `Mutual { decls }`는
+  내부 translation을 `OxDecl::Mutual { decls:
+  [<translated>] }`로 wrap. inner attribute wrapper는
+  보존됨.
+
+translate 테스트 수: 세 sub-commit에 걸쳐 36 → 56.
+남은 `TranslateError::Unsupported` arm (Class binder
+/ Instance Term body / Open multi-item / Dsl /
+HashCommand / Omit / Include)은 설명 메시지를 carry
+하지만 여전히 defer — 깔끔히 닫으려면 1→N translate-API
+변경이나 oxilean 쪽 variant 지원이 필요.
+

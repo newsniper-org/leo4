@@ -618,3 +618,112 @@ If you read the learning material end-to-end before
 2026-05-29, the architectural picture is unchanged —
 this update is about *which* runtime surfaces are now
 callable and which were dedup'd into leaf crates.
+
+= Update --- 2026-05-31
+
+== OxiLean driver walker --- coverage closure
+
+The 2026-05-29 walker entry described "v0 covers
+`IO.pure`, `IO.bind`, and `@[extern]` Const dispatch;
+everything else returns `NotYetImplemented`". That
+gap list is now closed. The 2026-05-31 walker
+recognises:
+
+- *`IO.pure` family* across the full monad
+  transformer chain --- `IO.pure` / `Pure.pure` /
+  `EIO.pure` / `EStateM.pure` / `ExceptT.pure` /
+  `StateT.pure` / `ReaderT.pure` (plus the underscore-
+  mangled spellings the elaborator's unfold may pick).
+- *`IO.bind` family* with same transformer-chain
+  coverage. Beta-application of the continuation `k`
+  against `m`'s concrete result (when statically
+  known) lands in this batch too --- `IO.bind
+  (IO.pure x) k` now reduces to `k x` instead of
+  walking `k` as opaque.
+- *`@[extern]` Const dispatch with canonical-ABI arg
+  encoding*. The walker statically lowers `Nat` /
+  `String` literals, `Bool.true` / `Bool.false`,
+  `Unit.unit`, sized-integer typeclass projections
+  (`OfNat.ofNat <type> n` over UInt8..128 / USize /
+  Int8..128 / ISize), signed-integer negation
+  (`Neg.neg`), `Char.ofNat` Unicode code points,
+  named record / variant ctors (`Prod.mk` /
+  `Subtype.mk` / `Option.some` / `Sum.inl` etc.),
+  *and* user-defined record / inductive ctors via
+  env-lookup (`ConstantInfo::Constructor` →
+  `Inductive.ctors.len()` discriminant prefix when
+  multi-ctor, recursively encoded fields).
+- *Stdlib `IO.println` family* --- `IO.println` /
+  `IO.eprintln` / `IO.print` / `IO.eprint` fire
+  directly against `print!`/`println!`/`eprint!`/
+  `eprintln!` ahead of the resolver, so embedders
+  don't have to layer a resolver for the common
+  stdout / stderr write path.
+- *Stdlib `IO.FS.*` family* --- `readFile` /
+  `writeFile` / `appendFile` / `removeFile` /
+  `createDir` / `createDirAll` / `removeDir` /
+  `removeDirAll` / `rename` fire directly against
+  `std::fs`. `readFile` surfaces contents as
+  `Ok(Some(Lit(Str)))` so an enclosing `IO.bind m k`
+  beta-applies `k` against the bytes. `std::io::Error`
+  wraps into `DriverError::ExternFailed` via
+  `ExternCallError::CallbackFailed`.
+
+The remaining `NotYetImplemented` arm fires only for
+shapes that are *out-of-scope by design*: non-IO
+monad-class run projections (`StateT.run` /
+`ReaderT.run` / `ExceptT.run` --- belong at the LCNF
+/ bytecode interpreter layer, *below* the walker),
+`IO.FS.Handle.*` (host-side `File` lifetime modelling
+the walker doesn't carry), compile-time hooks
+(`dbg_trace` / `panic!` / `unreachable!` ---
+elaborator-handled), and float-literal lowering
+(constant-folded by reducer). Embedders intercept via
+the resolver when needed.
+
+cool-japan/oxilean#2 (driver-API coordination issue)
+remains the upstream contribution path; submission of
+a body PR is deferred until the API shape gets
+explicit maintainer feedback. As of 2026-05-31 the
+discussion has been silent for 3+ days.
+
+== Rust-transpile translate coverage tail (#72 OX7)
+
+The 2026-05-27 OX7 typeclass-step covered arithmetic
+`+` / `-` / `*` / `/` / `%` / `^` + comparison `<` /
+`<=` / `==` / `=`. The 2026-05-31 translate coverage
+tail closes the rest:
+
+- *BinOp coverage expand* across `>` / `≥` / `≠` /
+  `&&` / `||` / `↔` / `∈` / `∉` / `⊆` / `→` (Unicode
+  arrow). `arith_op_to_tc_projection` now returns a
+  three-arm `BinOpMapping` enum: `Direct(tc)` for
+  ordinary projections, `Swapped(tc)` for `>` /
+  `≥` (Lean stdlib expresses these as flipped `<` /
+  `≤`), `Negated(tc)` for `≠` / `∉` (`¬ (Eq.eq a
+  b)` / `¬ Membership.mem a b`). Unicode arrow `→`
+  joins ASCII `->` at the special-case Pi-lowering
+  head.
+- *Explicit `By` / `DotFn` / `Raw` Expr arms* ---
+  each variant now carries an actionable diagnostic
+  (term-mode/axiom rewrite hint for `By`,
+  `fun x => …` rewrite hint for `DotFn`, parser-
+  shape-coverage hint for `Raw`). The Expr match is
+  now exhaustive over `L4Expr` --- future parser
+  variants force a build break, intentional safety.
+- *Decl coverage* --- `DefinitionByArms`
+  (equational `def NAME : T | pat₀ => body₀ | …`)
+  desugars into a `Definition` whose body is
+  `fun <binders> => match <last_binder> with
+  <arms>`. `Mutual { decls }` wraps the inner
+  translations into `OxDecl::Mutual { decls:
+  [<translated>] }`. Inner attribute wrappers
+  preserved.
+
+translate test count: 36 → 56 across the three sub-
+commits. The remaining `TranslateError::Unsupported`
+arms (Class binders / Instance Term body / Open
+multi-item / Dsl / HashCommand / Omit / Include)
+carry explanatory messages but stay deferred ---
+they need either a 1→N translate-API change or
+oxilean-side variant support to close cleanly.

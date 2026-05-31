@@ -522,3 +522,120 @@ vendored Code zu deduplizieren:
 
 Beide Consumer-Vendor-Dateien kollabieren zu
 einzeiligen `pub use <leaf>::*;`-Re-Export-Shims.
+
+= Update — 2026-05-31
+
+== OxiLean Driver Walker — Coverage-Abschluss
+
+Der Walker-Eintrag vom 2026-05-29 beschrieb „v0 deckt
+`IO.pure`, `IO.bind` und `@[extern]` Const-Dispatch ab;
+alles andere gibt `NotYetImplemented` zurück". Diese
+Lückenliste ist jetzt geschlossen. Der Walker vom
+2026-05-31 erkennt:
+
+- *`IO.pure`-Familie* über die gesamte Monaden-
+  Transformer-Kette — `IO.pure` / `Pure.pure` /
+  `EIO.pure` / `EStateM.pure` / `ExceptT.pure` /
+  `StateT.pure` / `ReaderT.pure` (plus die
+  Underscore-gemangelten Schreibweisen, die das
+  Unfold des Elaborators wählen kann).
+- *`IO.bind`-Familie* mit derselben Transformer-
+  Ketten-Abdeckung. Beta-Applikation der Continuation
+  `k` gegen das konkrete Ergebnis von `m` (sofern
+  statisch bekannt) gehört ebenfalls zu diesem Batch
+  — `IO.bind (IO.pure x) k` reduziert sich jetzt zu
+  `k x`, statt `k` als opak zu walken.
+- *`@[extern]` Const-Dispatch mit kanonischer ABI-
+  Argument-Codierung*. Der Walker senkt statisch
+  `Nat` / `String`-Literale, `Bool.true` /
+  `Bool.false`, `Unit.unit`, Sized-Integer-Typklassen-
+  Projektionen (`OfNat.ofNat <type> n` über
+  UInt8..128 / USize / Int8..128 / ISize),
+  Signed-Integer-Negation (`Neg.neg`), `Char.ofNat`
+  Unicode-Codepunkte, benannte Record- / Variant-
+  Ctors (`Prod.mk` / `Subtype.mk` / `Option.some` /
+  `Sum.inl` etc.), *und* benutzerdefinierte Record-
+  / Inductive-Ctors via Env-Lookup
+  (`ConstantInfo::Constructor` →
+  `Inductive.ctors.len()`-Diskriminanten-Präfix bei
+  Multi-Ctor, rekursiv codierte Felder).
+- *Stdlib-`IO.println`-Familie* — `IO.println` /
+  `IO.eprintln` / `IO.print` / `IO.eprint` feuern
+  direkt gegen `print!`/`println!`/`eprint!`/
+  `eprintln!` noch vor dem Resolver, sodass
+  Embedder keinen Resolver für den üblichen
+  stdout-/stderr-Schreibpfad einziehen müssen.
+- *Stdlib-`IO.FS.*`-Familie* — `readFile` /
+  `writeFile` / `appendFile` / `removeFile` /
+  `createDir` / `createDirAll` / `removeDir` /
+  `removeDirAll` / `rename` feuern direkt gegen
+  `std::fs`. `readFile` legt die Inhalte als
+  `Ok(Some(Lit(Str)))` offen, sodass ein
+  umschließendes `IO.bind m k` `k` gegen die Bytes
+  beta-applikiert. `std::io::Error` wird via
+  `ExternCallError::CallbackFailed` in
+  `DriverError::ExternFailed` gewickelt.
+
+Der verbleibende `NotYetImplemented`-Arm feuert nur
+noch für Shapes, die *konstruktiv außerhalb des
+Geltungsbereichs* liegen: Nicht-IO-Monad-Class-Run-
+Projektionen (`StateT.run` / `ReaderT.run` /
+`ExceptT.run` — gehören in die LCNF- /
+Bytecode-Interpreter-Schicht, *unterhalb* des
+Walkers), `IO.FS.Handle.*` (host-seitiges
+`File`-Lifetime-Modelling, das der Walker nicht
+trägt), Compile-Time-Hooks (`dbg_trace` / `panic!` /
+`unreachable!` — vom Elaborator behandelt) und
+Float-Literal-Senkung (vom Reducer konstantgefaltet).
+Embedder fangen bei Bedarf über den Resolver ab.
+
+cool-japan/oxilean#2 (Driver-API-Koordinations-Issue)
+bleibt der Upstream-Beitragspfad; die Einreichung
+einer Body-PR ist verschoben, bis die API-Form
+explizites Maintainer-Feedback erhält. Stand
+2026-05-31 ist die Diskussion seit 3+ Tagen still.
+
+== Rust-Transpile-Translate-Coverage-Tail (#72 OX7)
+
+Der OX7-Typklassen-Step vom 2026-05-27 deckte die
+Arithmetik `+` / `-` / `*` / `/` / `%` / `^` +
+Vergleich `<` / `<=` / `==` / `=` ab. Der
+Translate-Coverage-Tail vom 2026-05-31 schließt den
+Rest:
+
+- *BinOp-Coverage-Erweiterung* über `>` / `≥` / `≠` /
+  `&&` / `||` / `↔` / `∈` / `∉` / `⊆` / `→` (Unicode-
+  Pfeil). `arith_op_to_tc_projection` gibt jetzt eine
+  Drei-Arm-`BinOpMapping`-Enum zurück: `Direct(tc)`
+  für gewöhnliche Projektionen, `Swapped(tc)` für `>`
+  / `≥` (Lean-Stdlib drückt diese als geflippte `<` /
+  `≤` aus), `Negated(tc)` für `≠` / `∉` (`¬ (Eq.eq a
+  b)` / `¬ Membership.mem a b`). Der Unicode-Pfeil
+  `→` reiht sich neben ASCII `->` am
+  Spezialfall-Pi-Lowering-Head ein.
+- *Explizite `By` / `DotFn` / `Raw` Expr-Arme* —
+  jede Variante trägt nun eine handlungsfähige
+  Diagnose (Term-Mode-/Axiom-Rewrite-Hinweis für
+  `By`, `fun x => …`-Rewrite-Hinweis für `DotFn`,
+  Parser-Shape-Coverage-Hinweis für `Raw`). Der
+  Expr-Match ist nun erschöpfend über `L4Expr` —
+  künftige Parser-Varianten erzwingen einen
+  Build-Bruch, beabsichtigte Sicherheit.
+- *Decl-Coverage* — `DefinitionByArms`
+  (gleichungsbasiertes `def NAME : T | pat₀ =>
+  body₀ | …`) entzuckert in eine `Definition`,
+  deren Body `fun <binders> => match <last_binder>
+  with <arms>` ist. `Mutual { decls }` wickelt die
+  inneren Übersetzungen in `OxDecl::Mutual { decls:
+  [<translated>] }`. Innere Attribut-Wrapper
+  bleiben erhalten.
+
+Translate-Test-Anzahl: 36 → 56 über die drei
+Sub-Commits. Die verbleibenden
+`TranslateError::Unsupported`-Arme (Class-Binder /
+Instance-Term-Body / Open Multi-Item / Dsl /
+HashCommand / Omit / Include) tragen erklärende
+Meldungen, bleiben aber zurückgestellt — sie
+brauchen entweder einen 1→N-Translate-API-Wechsel
+oder oxilean-seitige Variant-Unterstützung, um
+sauber zu schließen.

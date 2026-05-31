@@ -464,3 +464,102 @@ leo4 は再配布せず、エンドユーザー向けインストール フロ�
 
 両 consumer の vendor file は 1 行 `pub use <leaf>::*;`
 re-export shim に圧縮。
+
+= 更新 — 2026-05-31
+
+== OxiLean driver walker — カバレッジ閉鎖
+
+2026-05-29 の walker エントリは「v0 は `IO.pure` /
+`IO.bind` / `@[extern]` Const dispatch をカバー; それ
+以外は `NotYetImplemented` を返す」と記述した。その
+ギャップリストは今やクローズ。2026-05-31 時点で
+walker が認識する shape:
+
+- *`IO.pure` ファミリー* — monad transformer chain 全体に
+  わたって `IO.pure` / `Pure.pure` / `EIO.pure` /
+  `EStateM.pure` / `ExceptT.pure` / `StateT.pure` /
+  `ReaderT.pure` (および elaborator unfold が選び得る
+  underscore-mangled スペリング)。
+- *`IO.bind` ファミリー* — 同じ transformer-chain カバレッジ。
+  継続 `k` を `m` の具体的結果 (静的に既知の場合) に
+  beta 適用するケースも本バッチ — `IO.bind (IO.pure x)
+  k` は `k` を opaque として walk するのではなく `k x` に
+  reduce。
+- *`@[extern]` Const dispatch + canonical-ABI 引数エンコード*。
+  walker は `Nat` / `String` リテラル、`Bool.true` /
+  `Bool.false`、`Unit.unit`、sized-integer typeclass
+  projection (UInt8..128 / USize / Int8..128 / ISize 上の
+  `OfNat.ofNat <type> n`)、signed-integer 否定
+  (`Neg.neg`)、`Char.ofNat` Unicode コードポイント、
+  名前付き record / variant コンストラクタ (`Prod.mk` /
+  `Subtype.mk` / `Option.some` / `Sum.inl` 等)、
+  *さらに* env 検索 (`ConstantInfo::Constructor` →
+  multi-ctor 時の `Inductive.ctors.len()` discriminant
+  prefix、フィールドは再帰エンコード) 経由のユーザー定義
+  record / inductive コンストラクタも静的に下ろす。
+- *Stdlib `IO.println` ファミリー* — `IO.println` /
+  `IO.eprintln` / `IO.print` / `IO.eprint` を resolver
+  より先に `print!` / `println!` / `eprint!` /
+  `eprintln!` に直接 fire。共通の stdout / stderr 書き込み
+  パスのために embedder が resolver を重ねる必要がない。
+- *Stdlib `IO.FS.*` ファミリー* — `readFile` /
+  `writeFile` / `appendFile` / `removeFile` /
+  `createDir` / `createDirAll` / `removeDir` /
+  `removeDirAll` / `rename` を `std::fs` に直接 fire。
+  `readFile` は内容を `Ok(Some(Lit(Str)))` で surface し、
+  外側の `IO.bind m k` がそのバイトに対して `k` を beta
+  適用できる。`std::io::Error` は
+  `ExternCallError::CallbackFailed` 経由で
+  `DriverError::ExternFailed` に wrap。
+
+残る `NotYetImplemented` arm が fire するのは *設計上
+out-of-scope* な shape のみ: non-IO monad-class run
+projection (`StateT.run` / `ReaderT.run` /
+`ExceptT.run` — walker の *下* の LCNF / bytecode
+interpreter 層に属する)、`IO.FS.Handle.*` (walker が
+持たない host-side `File` ライフタイムモデリング)、
+コンパイル時フック (`dbg_trace` / `panic!` /
+`unreachable!` — elaborator 処理)、float リテラル
+lowering (reducer による定数畳み込み)。必要なら
+embedder が resolver で intercept。
+
+cool-japan/oxilean#2 (driver-API 協議 issue) は引き続き
+upstream 貢献パス; body PR の提出は API shape に対する
+maintainer の明示的フィードバックまで延期。2026-05-31
+時点でディスカッションは 3 日以上沈黙。
+
+== Rust-transpile translate カバレッジ tail (#72 OX7)
+
+2026-05-27 の OX7 typeclass-step は算術 `+` / `-` /
+`*` / `/` / `%` / `^` + 比較 `<` / `<=` / `==` / `=` を
+カバーした。2026-05-31 の translate カバレッジ tail は
+残りをクローズ:
+
+- *BinOp カバレッジ拡張* — `>` / `≥` / `≠` / `&&` /
+  `||` / `↔` / `∈` / `∉` / `⊆` / `→` (Unicode 矢印)
+  全体にわたる。`arith_op_to_tc_projection` は今や
+  三 arm の `BinOpMapping` enum を返す: 通常 projection 用
+  `Direct(tc)`、`>` / `≥` 用 `Swapped(tc)` (Lean stdlib は
+  これらを flip された `<` / `≤` で表現)、`≠` / `∉` 用
+  `Negated(tc)` (`¬ (Eq.eq a b)` / `¬ Membership.mem a b`)。
+  Unicode 矢印 `→` は特殊ケース Pi-lowering head で ASCII
+  `->` に合流。
+- *明示的 `By` / `DotFn` / `Raw` Expr arms* — 各 variant が
+  実行可能な diagnostic を持つ (`By` は term-mode/axiom
+  rewrite ヒント、`DotFn` は `fun x => …` rewrite ヒント、
+  `Raw` は parser-shape-coverage ヒント)。Expr match は
+  今や `L4Expr` 上で網羅的 — 将来の parser variant は
+  build break を強制、意図的安全策。
+- *Decl カバレッジ* — `DefinitionByArms` (等式
+  `def NAME : T | pat₀ => body₀ | …`) は body が
+  `fun <binders> => match <last_binder> with <arms>` の
+  `Definition` に desugar。`Mutual { decls }` は内部
+  translation を `OxDecl::Mutual { decls: [<translated>] }`
+  で wrap。内部 attribute wrapper は保持。
+
+translate テスト数: 36 → 56 (3 つの sub-commit にわたる)。
+残る `TranslateError::Unsupported` arm (Class binder /
+Instance Term body / Open multi-item / Dsl / HashCommand /
+Omit / Include) は説明的メッセージを持つが deferred 継続
+— クリーンに閉じるには 1→N translate-API 変更か
+oxilean 側 variant サポートのいずれかが必要。

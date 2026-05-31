@@ -1253,3 +1253,111 @@ bearing: `distros.toml` がすべての distro 固有のもの
 (image, setup, audit targets) を持つ; Python ランナーに
 hardcode された distro 名はない。新 distro 追加は純粋に
 TOML 作業。
+
+= 更新 — 2026-05-31: walker grow finisher + OX7 translate tail
+
+この更新は 2026-05-29 のエントリが明示的に開けたままに
+した walker カバレッジのギャップを閉じ、OX7 translate
+カバレッジ tail まで仕上げる。自分のバージョンを実装する
+際、このバッチから得られる 2 つの設計教訓は持ち帰る価値
+がある。
+
+== Walker grow: arg encoding のための env-lookup
+
+2026-05-29 walker は Nat / String リテラル + Bool /
+Unit ctor + 名前付き record / variant ctor (`Prod.mk` /
+`Subtype.mk` / `Option.some` / `Sum.inl` など) を静的に
+lower した。ユーザ定義の record と inductive は
+「embedder の領域」 — encoder は field 順序や
+discriminant 幅を知るための IDL を持っていなかった。
+
+修正は kernel `Environment` を encoder チェーンに thread
+すること。`ConstantInfo::Constructor` は
+`(induct, cidx, num_params, num_fields)` を carry し、
+親の `Inductive` には `ctors: Vec<Name>` があるので
+encoder は discriminant prefix を emit するか
+(`iv.ctors.len() > 1`) と先頭の type-param 引数を何個
+skip するか (`cv.num_params`) を知る。
+
+Lesson: encoder が静的に既知の情報を使い果たしたとき、
+kernel が既に答えを持っているなら *embedder に defer
+しない*。walker は env を手にしている — それを使え。
+
+== Walker grow: stdlib IO ビルトインディスパッチ
+
+`IO.println` / `IO.eprintln` / `IO.print` / `IO.eprint`
++ 標準 `IO.FS.*` 9 つの op (read / write / append /
+remove / create / rename) が `@[extern]` resolver
+dispatch arm の前で walker 内部の `print!` / `eprint!`
+/ `std::fs::*` に対して直接 fire する。
+
+なぜ embedder が resolver でレイヤリングしないか? すべ
+ての embedder が同じものを必要とするから。stdout /
+stderr write path と基本的なファイルシステム op は
+universal だ — 各 downstream に再実装させるのは
+busywork。walker の仕事は特定の名前付き shape を認識
+し、認識できないものは明確に bail すること; stdlib
+effect は *まさにその* 名前付き shape のパラダイム
+ケースだ。
+
+Lesson: 認識される shape セットがユーザが初日に当たる
+ergonomic floor なら、walker 側で認識せよ。non-universal
+な tail (`IO.FS.Handle.*` など) は embedder に defer。
+
+== 設計上 out-of-scope の再分類
+
+以前の `DriverError::NotYetImplemented` arm は walker
+が最終的に認識する「still open」shape を列挙していた。
+2026-05-31 バッチは残りの tail を *アーキテクチャ上
+out-of-scope* に再分類 — TODO リストではない:
+
+- Non-IO モナドクラスの run projection (`StateT.run` /
+  `ReaderT.run` / `ExceptT.run`) は walker *より下* の
+  LCNF / bytecode interpreter 層に属する。walker 層で
+  配線すると下層が既に行う reduction を二重実装する
+  ことになる。
+- `IO.FS.Handle.*` は walker が持っていないホスト側
+  `File` ライフタイムモデリングが必要; embedder が
+  resolver で intercept する。
+- `dbg_trace` / `panic!` / `unreachable!` は
+  compile-time elaboration フック; OxiLean elaborator
+  が walker が body を見る前に処理する。
+- Float リテラル lowering は reducer で constant-fold。
+
+Lesson: 「TODO」リストはノイズに腐る。アーキテクチャ
+上他の場所に属するため arm が決して fire すべきでない
+と気付いたとき、明示的にそれを文書化し — エラーメッ
+セージのフレーミングもそれに合わせて更新せよ。
+
+== OX7 translate tail (rust-transpile path)
+
+2026-05-27 OX7 typeclass-step は算術 + 基本比較 BinOp
+をカバーした。2026-05-31 tail が残った surface を閉じ
+る:
+
+- BinOp カバレッジ拡張: `>` / `≥` はオペランドを swap
+  (Lean stdlib は flipped `<` / `≤` として表現); `≠` /
+  `∉` は `Not.not` で wrap; `&&` / `||` / `↔` / `∈` /
+  `⊆` は直接 projection。mapping テーブルの戻り値型が
+  `&'static str` から `Option<BinOpMapping>` に変更 —
+  variant が composition shape (`Direct` / `Swapped` /
+  `Negated`) を typeclass identifier とともに carry。
+- 明示的な `By` / `DotFn` / `Raw` Expr arm — 以前はそ
+  れぞれ catch-all `Unsupported(variant_name)` に
+  hit、実行可能なヒントなし。今は各々 *なぜ* その
+  shape が translate 不可能で、ユーザが *何に* 書き
+  換えるべきかを説明する diagnostic を surface。Expr
+  match は `L4Expr` に対して exhaustive になる —
+  将来の parser variant はビルドを壊し強制、意図的な
+  安全策。
+- Decl カバレッジ: `DefinitionByArms` (等式形式の
+  `def NAME : T | pat₀ => body₀ | …`) は `Definition`
+  + `fun <binders> => match <last_binder> with <arms>`
+  body に desugar。`Mutual` は内部を translate した
+  decl たちを `OxDecl::Mutual` に wrap。
+
+Lesson: 戻り値型をより豊かな情報を carry するように
+refactor するとき (ここでは `&str → Option<BinOpMapping>`)、
+*呼び出し側* が composition shape を自然に文書化する
+pattern-match になる。diff は大きくなるが production
+reasoning が明確になる。トレードする価値あり。
