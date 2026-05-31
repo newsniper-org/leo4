@@ -607,48 +607,110 @@ fn head_ident(e: &L4Expr) -> Option<String> {
 
 /// OX7 typeclass step (2026-05-27): map a surface
 /// arithmetic / comparison operator symbol to the
-/// Lean stdlib typeclass-projection identifier
-/// oxilean-elab + leo4_env_bootstrap expect. Unknown
-/// operators fall through verbatim — they'll surface
-/// as NameNotFound during elab if the env doesn't
-/// carry them. Mirror of
+/// How `arith_op_to_tc_projection` wants the BinOp arm
+/// to compose the resulting App-chain. Most operators
+/// project directly, but a few stdlib idioms need
+/// arg-swapping (`>` → `LT.lt b a`) or negation wrap
+/// (`≠` → `Not.not (Eq.eq a b)`); those carry their
+/// composition shape with them rather than forcing
+/// the BinOp arm to special-case each name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BinOpMapping {
+    /// `(op a b)` → `(tc a b)`. The common case.
+    Direct(&'static str),
+    /// `(op a b)` → `(tc b a)`. Used for stdlib idioms
+    /// where the surface operator is the symmetric of
+    /// the typeclass method — e.g. `>` and `≥` express
+    /// as `<` / `≤` with operands flipped.
+    Swapped(&'static str),
+    /// `(op a b)` → `(Not.not (tc a b))`. Used for
+    /// `≠` which Lean stdlib expresses as `¬ (a = b)`
+    /// with no dedicated typeclass projection.
+    Negated(&'static str),
+}
+
+/// Build `(name lhs rhs)` as an `OxExpr::App` chain
+/// with `dummy_span`s. Shared by the BinOp arm's three
+/// composition shapes (Direct / Swapped / Negated) and
+/// the unmapped-fallback path so they all produce
+/// identical App structure modulo the head identifier
+/// and operand order.
+fn make_app2(
+    head: &str,
+    lhs: Located<OxExpr>,
+    rhs: Located<OxExpr>,
+) -> OxExpr {
+    let f = Located::new(OxExpr::Var(head.to_string()), dummy_span());
+    let f_lhs = Located::new(
+        OxExpr::App(Box::new(f), Box::new(lhs)),
+        dummy_span(),
+    );
+    OxExpr::App(Box::new(f_lhs), Box::new(rhs))
+}
+
+/// Lean stdlib typeclass-projection mapping for surface
+/// binary operators. Unknown operators return `None` and
+/// the BinOp arm falls back to keeping `Var(op)` as the
+/// head — they'll surface as NameNotFound during elab if
+/// the env doesn't carry an entry. Mirror of
 /// `leo4_env_bootstrap::ARITHMETIC_TC_PROJECTIONS`.
-fn arith_op_to_tc_projection(op: &str) -> &str {
+fn arith_op_to_tc_projection(op: &str) -> Option<BinOpMapping> {
+    use BinOpMapping::{Direct, Negated, Swapped};
     match op {
         // Arithmetic.
-        "+" => "HAdd.hAdd",
-        "-" => "HSub.hSub",
-        "*" => "HMul.hMul",
-        "/" => "HDiv.hDiv",
-        "%" => "HMod.hMod",
-        "^" => "HPow.hPow",
+        "+" => Some(Direct("HAdd.hAdd")),
+        "-" => Some(Direct("HSub.hSub")),
+        "*" => Some(Direct("HMul.hMul")),
+        "/" => Some(Direct("HDiv.hDiv")),
+        "%" => Some(Direct("HMod.hMod")),
+        "^" => Some(Direct("HPow.hPow")),
         // Bitwise.
-        "&&&" => "HAnd.hAnd",
-        "|||" => "HOr.hOr",
-        "^^^" => "HXor.hXor",
-        "<<<" => "HShiftLeft.hShiftLeft",
-        ">>>" => "HShiftRight.hShiftRight",
-        // Comparison.
-        "<" => "LT.lt",
-        "<=" | "≤" => "LE.le",
-        // `a > b` and `a ≥ b` swap to `LT.lt b a` /
-        // `LE.le b a` in Lean stdlib. We can't do the
-        // arg swap here without restructuring the App
-        // tree, so for now they pass through and
-        // codegen handles them as TODO — same as the
-        // legacy lowering's behaviour.
-        "==" => "BEq.beq",
+        "&&&" => Some(Direct("HAnd.hAnd")),
+        "|||" => Some(Direct("HOr.hOr")),
+        "^^^" => Some(Direct("HXor.hXor")),
+        "<<<" => Some(Direct("HShiftLeft.hShiftLeft")),
+        ">>>" => Some(Direct("HShiftRight.hShiftRight")),
+        // Comparison — direct.
+        "<" => Some(Direct("LT.lt")),
+        "<=" | "≤" => Some(Direct("LE.le")),
+        // Comparison — swap operands. Lean stdlib's
+        // `LT` / `LE` typeclasses don't have a dedicated
+        // `>` / `≥` projection; `a > b` desugars to
+        // `LT.lt b a` (and `a ≥ b` to `LE.le b a`).
+        // Per-operator swap recorded via `Swapped`.
+        ">" => Some(Swapped("LT.lt")),
+        ">=" | "≥" => Some(Swapped("LE.le")),
+        // Equality / inequality.
+        "==" => Some(Direct("BEq.beq")),
         // OX7 (2026-05-27): propositional equality `a = b`
         // lowers to `Eq.eq a b`. Distinct from `==` (BEq).
-        "=" => "Eq.eq",
-        // Unmapped — keep `Var(op)` for the legacy path.
-        // Includes ">", ">=", "&&", "||", "!=", "≠",
-        // "→", "↔", "∈", "∉", "⊆", etc. Some will
-        // surface as NameNotFound until env coverage
-        // expands; this is intentional (we don't want
-        // silent fallback for operators with non-trivial
-        // semantics).
-        _ => op,
+        "=" => Some(Direct("Eq.eq")),
+        // `a != b` is the Bool-level negation of BEq;
+        // Lean stdlib provides `BNe.bne` directly.
+        "!=" => Some(Direct("BNe.bne")),
+        // `a ≠ b` is the Prop-level negation. Lean
+        // stdlib doesn't ship a typeclass projection
+        // for it — `a ≠ b ≡ ¬ (a = b)`. Wrap via
+        // `Negated(Eq.eq)` so the BinOp arm emits
+        // `Not.not (Eq.eq a b)`.
+        "≠" => Some(Negated("Eq.eq")),
+        // Boolean / propositional connectives.
+        "&&" => Some(Direct("and")),
+        "||" => Some(Direct("or")),
+        "↔" => Some(Direct("Iff")),
+        // Set / Membership relations.
+        "∈" => Some(Direct("Membership.mem")),
+        "∉" => Some(Negated("Membership.mem")),
+        "⊆" => Some(Direct("HasSubset.Subset")),
+        // Unknown — keep `Var(op)` for the legacy path.
+        // Currently includes `→` (handled specially as
+        // Pi-type at the BinOp arm itself, not via this
+        // table) and any operator the user introduced
+        // via `infix`/`infixl`/`infixr` notation. Those
+        // surface as NameNotFound during elab if the
+        // env doesn't carry them — intentional rather
+        // than silently masking via fallback.
+        _ => None,
     }
 }
 
@@ -675,13 +737,13 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
         }
         L4Expr::Paren(inner) => translate_expr(inner),
         L4Expr::BinOp(op, lhs, rhs) => {
-            // OX7 (α, 2026-05-27): the `->` function-type
-            // arrow is a BinOp at the PEG level but
-            // lowers to a non-dependent `Pi` in surface
-            // AST, not an application of a `Var("->"")`.
-            // Handle it specially before the arithmetic
-            // mapping table.
-            if op == "->" {
+            // OX7 (α, 2026-05-27): the `->` (and Unicode
+            // `→`) function-type arrows are BinOps at the
+            // PEG level but lower to a non-dependent
+            // `Pi` in surface AST, not an application of
+            // a `Var("->" / "→")`. Handle them specially
+            // before the arithmetic mapping table.
+            if op == "->" || op == "→" {
                 let dom = translate_expr_located(lhs)?;
                 let codom = translate_expr_located(rhs)?;
                 let binder = OxBinder {
@@ -691,9 +753,9 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
                 };
                 return Ok(OxExpr::Pi(vec![binder], Box::new(codom)));
             }
-            // OX7 typeclass step (2026-05-27): map the
-            // surface operator to its Lean stdlib
-            // typeclass-projection identifier
+            // OX7 typeclass step (2026-05-27, BinOp expand
+            // 2026-05-31): map the surface operator to its
+            // Lean stdlib typeclass-projection identifier
             // (`HAdd.hAdd`, `LT.lt`, …). oxilean-parse-peg
             // preserves the operator symbol verbatim
             // (`BinOp("+", lhs, rhs)`), unlike the legacy
@@ -702,6 +764,14 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             // identifier looks the same to oxilean-elab
             // regardless of which parser produced the
             // tree.
+            //
+            // `BinOpMapping::Swapped` flips the operands
+            // (`a > b` → `LT.lt b a`); `Negated` wraps
+            // in `Not.not` (`a ≠ b` → `Not.not (Eq.eq a
+            // b)`). Both shapes keep elab-side typeclass
+            // dispatch on the resulting App-chain head,
+            // matching what Lean's own elaborator produces
+            // for the same surface input.
             //
             // The mapped identifier needs to be present
             // in the env so elab's identifier-lookup
@@ -712,22 +782,44 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             // at LCNF time to emit native Rust BinOps.
             //
             // Unknown operators (currently anything not
-            // in the table) pass through as `Var(op)`
+            // in the table — user-defined `infix`/`infixl`
+            // notation, etc.) pass through as `Var(op)`
             // for compatibility with the legacy lowering
             // path; they'll surface as NameNotFound if
             // the env doesn't carry an entry.
-            let mapped_op = arith_op_to_tc_projection(op);
-            let f = Located::new(
-                OxExpr::Var(mapped_op.to_string()),
-                dummy_span(),
-            );
             let lhs = translate_expr_located(lhs)?;
             let rhs = translate_expr_located(rhs)?;
-            let f_lhs = Located::new(
-                OxExpr::App(Box::new(f), Box::new(lhs)),
-                dummy_span(),
-            );
-            Ok(OxExpr::App(Box::new(f_lhs), Box::new(rhs)))
+            match arith_op_to_tc_projection(op) {
+                Some(BinOpMapping::Direct(name)) => {
+                    Ok(make_app2(name, lhs, rhs))
+                }
+                Some(BinOpMapping::Swapped(name)) => {
+                    // `(op a b)` → `(name b a)` — operand
+                    // order flipped at the App-chain.
+                    Ok(make_app2(name, rhs, lhs))
+                }
+                Some(BinOpMapping::Negated(name)) => {
+                    // `(op a b)` → `(Not.not (name a b))`
+                    // — wrap the typeclass App in a Not.not
+                    // App so elab still dispatches on
+                    // `name` for the inner step and
+                    // `Not.not` for the outer.
+                    let inner = make_app2(name, lhs, rhs);
+                    let not_head = Located::new(
+                        OxExpr::Var("Not.not".to_string()),
+                        dummy_span(),
+                    );
+                    Ok(OxExpr::App(
+                        Box::new(not_head),
+                        Box::new(Located::new(inner, dummy_span())),
+                    ))
+                }
+                None => {
+                    // Fallback: keep `Var(op)` as the head
+                    // for legacy compatibility.
+                    Ok(make_app2(op, lhs, rhs))
+                }
+            }
         }
         L4Expr::UnaryOp(op, x) => {
             // OX7 (2026-05-27): same typeclass-projection
@@ -1392,6 +1484,196 @@ mod tests {
             panic!("expected outer App");
         };
         assert!(matches!(rhs_c.value, OxExpr::Var(ref s) if s == "c"));
+    }
+
+    // ─── OX7 BinOp coverage expand (2026-05-31) ─────────
+
+    /// Pull a `BinOp("op", lhs, rhs)` parse out of a
+    /// `def x : T := lhs op rhs` definition and translate
+    /// it, returning the resulting `OxExpr`. Shared by the
+    /// BinOp coverage tests below.
+    fn translate_binop(src: &str) -> OxExpr {
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0])
+            .expect("must translate")
+            .value;
+        let OxDecl::Definition { val, .. } = d else {
+            panic!("expected Definition")
+        };
+        val.value
+    }
+
+    /// Walk `App(App(Var(head), Var(left)), Var(right))`
+    /// and assert each layer's identifier matches.
+    fn assert_app2(expr: OxExpr, head: &str, left: &str, right: &str) {
+        let OxExpr::App(f_lhs, rhs) = expr else {
+            panic!("expected outer App, got {expr:?}");
+        };
+        let OxExpr::Var(ref s) = rhs.value else {
+            panic!("expected rhs Var, got {:?}", rhs.value);
+        };
+        assert_eq!(s, right, "rhs operand mismatch");
+        let OxExpr::App(f, lhs) = f_lhs.value else {
+            panic!("expected inner App, got {:?}", f_lhs.value);
+        };
+        let OxExpr::Var(ref s) = f.value else {
+            panic!("expected head Var, got {:?}", f.value);
+        };
+        assert_eq!(s, head, "head identifier mismatch");
+        let OxExpr::Var(ref s) = lhs.value else {
+            panic!("expected lhs Var, got {:?}", lhs.value);
+        };
+        assert_eq!(s, left, "lhs operand mismatch");
+    }
+
+    #[test]
+    fn binop_gt_swaps_to_lt_lt() {
+        // `a > b` desugars to `LT.lt b a` — same
+        // typeclass head as `<`, operands flipped.
+        let e = translate_binop("def x : T := a > b");
+        assert_app2(e, "LT.lt", "b", "a");
+    }
+
+    #[test]
+    fn binop_ge_swaps_to_le_le() {
+        // `a >= b` desugars to `LE.le b a`.
+        let e = translate_binop("def x : T := a >= b");
+        assert_app2(e, "LE.le", "b", "a");
+    }
+
+    #[test]
+    fn binop_unicode_ge_swaps_to_le_le() {
+        // `a ≥ b` (Unicode) — same swap as `>=`.
+        let e = translate_binop("def x : T := a ≥ b");
+        assert_app2(e, "LE.le", "b", "a");
+    }
+
+    #[test]
+    fn binop_ne_ascii_maps_to_bne_bne() {
+        // `a != b` (Bool-level inequality) →
+        // `BNe.bne a b`. No swap, no negate wrap.
+        let e = translate_binop("def x : T := a != b");
+        assert_app2(e, "BNe.bne", "a", "b");
+    }
+
+    #[test]
+    fn binop_ne_unicode_wraps_in_not_not() {
+        // `a ≠ b` (Prop-level inequality) →
+        // `Not.not (Eq.eq a b)`. Outer is the Not.not
+        // App; inner is the Eq.eq App.
+        let e = translate_binop("def x : T := a ≠ b");
+        let OxExpr::App(not_head, inner) = e else {
+            panic!("expected outer App(Not.not, …)");
+        };
+        let OxExpr::Var(ref s) = not_head.value else {
+            panic!("expected Not.not Var");
+        };
+        assert_eq!(s, "Not.not");
+        assert_app2(inner.value, "Eq.eq", "a", "b");
+    }
+
+    #[test]
+    fn binop_and_and_maps_to_and() {
+        let e = translate_binop("def x : T := a && b");
+        assert_app2(e, "and", "a", "b");
+    }
+
+    #[test]
+    fn binop_or_or_maps_to_or() {
+        let e = translate_binop("def x : T := a || b");
+        assert_app2(e, "or", "a", "b");
+    }
+
+    #[test]
+    fn binop_iff_unicode_maps_to_iff_in_table() {
+        // The PEG parser at the current oxilean-parse-peg
+        // version doesn't yet emit a BinOp("↔", _, _) (it
+        // surfaces a parse error for `↔` in expression
+        // position), so an end-to-end parse-roundtrip
+        // assertion would block on a separate parser
+        // change. Assert the translate-side mapping table
+        // directly so the BinOp arm is ready the moment
+        // the parser starts emitting `↔`.
+        assert_eq!(
+            arith_op_to_tc_projection("↔"),
+            Some(BinOpMapping::Direct("Iff"))
+        );
+    }
+
+    #[test]
+    fn binop_membership_in_maps_to_membership_mem() {
+        let e = translate_binop("def x : T := a ∈ b");
+        assert_app2(e, "Membership.mem", "a", "b");
+    }
+
+    #[test]
+    fn binop_membership_notin_wraps_in_not_not() {
+        // `a ∉ b` → `Not.not (Membership.mem a b)`.
+        let e = translate_binop("def x : T := a ∉ b");
+        let OxExpr::App(not_head, inner) = e else {
+            panic!("expected outer App(Not.not, …)");
+        };
+        let OxExpr::Var(ref s) = not_head.value else {
+            panic!("expected Not.not Var");
+        };
+        assert_eq!(s, "Not.not");
+        assert_app2(inner.value, "Membership.mem", "a", "b");
+    }
+
+    #[test]
+    fn binop_subset_maps_to_has_subset_subset() {
+        let e = translate_binop("def x : T := a ⊆ b");
+        assert_app2(e, "HasSubset.Subset", "a", "b");
+    }
+
+    #[test]
+    fn binop_arrow_unicode_lowers_to_pi() {
+        // `A → B` (Unicode arrow) lowers to a Pi-type
+        // with binder name `_` (non-dependent function
+        // type), same as the ASCII `->` path.
+        let decls =
+            parse_decls("def x : T := A → B").expect("must parse");
+        let d = translate_decl(&decls[0]).expect("must translate").value;
+        let OxDecl::Definition { val, .. } = d else {
+            panic!("expected Definition")
+        };
+        let OxExpr::Pi(binders, codom) = val.value else {
+            panic!("expected Pi, got {:?}", val.value);
+        };
+        assert_eq!(binders.len(), 1);
+        assert_eq!(binders[0].name, "_");
+        let dom_ty = binders[0].ty.as_ref().expect("dom ty present");
+        assert!(matches!(dom_ty.value, OxExpr::Var(ref s) if s == "A"));
+        assert!(matches!(codom.value, OxExpr::Var(ref s) if s == "B"));
+    }
+
+    #[test]
+    fn binop_unknown_op_passes_through_as_var() {
+        // Operators the table doesn't recognise pass
+        // through as `Var(op)`. The PEG parser accepts
+        // `×` and `÷` as BinOp shapes but the table
+        // deliberately doesn't map them — `×` is the
+        // Cartesian product type constructor (`Prod`)
+        // rather than a typeclass projection, and `÷`
+        // is the integer-division typeclass (`HDiv` in
+        // some contexts, `Int.div` in others). Leaving
+        // them as `Var(×)` / `Var(÷)` preserves the
+        // legacy passthrough behaviour and lets the env
+        // / elab side decide.
+        let e = translate_binop("def x : T := a × b");
+        assert_app2(e, "×", "a", "b");
+    }
+
+    #[test]
+    fn arith_op_table_returns_none_for_truly_unknown() {
+        // Direct mapping-table assertion for an operator
+        // the parser can't even emit (`<*>` applicative
+        // ap, `>>=` monad bind). Future parser changes
+        // that introduce these will hit the
+        // `Var(op)` fallback unchanged.
+        assert_eq!(arith_op_to_tc_projection("<*>"), None);
+        assert_eq!(arith_op_to_tc_projection(">>="), None);
+        assert_eq!(arith_op_to_tc_projection("some-mystery-op"), None);
     }
 
     // ─── 13b-4: Structure / Inductive / Class / Instance ───
