@@ -217,8 +217,67 @@ fn translate_decl_kind(
             }
             Ok(OxDecl::Namespace { name: name.clone(), decls: out })
         }
-        L4Kind::DefinitionByArms { .. } => {
-            Err(TranslateError::Unsupported("DefinitionByArms (no oxilean equivalent)"))
+        L4Kind::DefinitionByArms { name, binders, ty, arms } => {
+            // Equational `def` desugars to a `Definition`
+            // whose body is `fun <binders> => match
+            // <last_binder> with <arms>`. Lean 4's
+            // convention destructures the trailing
+            // binder; multi-positional patterns are
+            // expressed by tupling at the source level
+            // (and surface as `Pattern::AnonCtor` /
+            // `Pattern::Pair` at the parser layer).
+            //
+            // Type annotation wraps in `Pi` over the
+            // binders, mirroring the `Definition` arm so
+            // the elaborator sees identical signature
+            // shape regardless of which surface form the
+            // user wrote.
+            let oxbinders = translate_binders(binders)?;
+            let last_binder = oxbinders.last().ok_or(TranslateError::Unsupported(
+                "DefinitionByArms with no binders (semantically requires a \
+                 scrutinee; rewrite as `def NAME : T := match … with …` if you \
+                 meant a top-level pattern match)",
+            ))?;
+            // Build `match <last_binder_name> with <arms>`.
+            let scrut = Located::new(
+                OxExpr::Var(last_binder.name.clone()),
+                dummy_span(),
+            );
+            let mut ox_arms: Vec<OxMatchArm> = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let pat = translate_pattern(&arm.pattern)?;
+                let pat_loc = Located::new(pat, dummy_span());
+                let guard_loc = match &arm.guard {
+                    Some(g) => Some(translate_expr_located(g)?),
+                    None => None,
+                };
+                let rhs_loc = translate_expr_located(&arm.body)?;
+                ox_arms.push(OxMatchArm {
+                    pattern: pat_loc,
+                    guard: guard_loc,
+                    rhs: rhs_loc,
+                });
+            }
+            let match_expr =
+                OxExpr::Match(Box::new(scrut), ox_arms);
+            let match_loc = Located::new(match_expr, dummy_span());
+            // Wrap binders into Lam + (optionally) Pi.
+            let val = wrap_lam(&oxbinders, match_loc);
+            let ty = match ty {
+                Some(t) => {
+                    let inner_ty = translate_expr_located(t)?;
+                    Some(wrap_pi(&oxbinders, inner_ty))
+                }
+                None => None,
+            };
+            Ok(OxDecl::Definition {
+                name: name.clone(),
+                univ_params: univ_params.to_vec(),
+                ty,
+                val,
+                where_clauses: Vec::new(),
+                attrs: Vec::new(),
+            })
         }
         L4Kind::Example { .. } => Err(TranslateError::Unsupported("Example (lands in 13b-5)")),
         L4Kind::Structure { name, extends, fields, deriving: _ } => {
@@ -320,7 +379,21 @@ fn translate_decl_kind(
                 decls: out,
             })
         }
-        L4Kind::Mutual { .. } => Err(TranslateError::Unsupported("Mutual (deferred)")),
+        L4Kind::Mutual { decls } => {
+            // `mutual def f := … def g := … end` desugars
+            // to `OxDecl::Mutual { decls: [<translated>] }`
+            // — the container wrapper that signals to
+            // elab that the inner decls share a fixed-
+            // point construction. Per-decl translation
+            // reuses `translate_decl` so attribute wraps
+            // and `Decl::Attribute { … }` outer shapes
+            // are preserved on inner items.
+            let mut out = Vec::with_capacity(decls.len());
+            for inner in decls {
+                out.push(translate_decl(inner)?);
+            }
+            Ok(OxDecl::Mutual { decls: out })
+        }
         L4Kind::Open { items, raw_tail } => {
             // leo4 captures a *list* of opened modules
             // (`open Foo Bar Baz` → items=[Foo, Bar, Baz]).
@@ -1164,22 +1237,28 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
              doesn't recognise, or pretty-printer artifacts (trailing whitespace, \
              stray colons).",
         )),
-        // OX7 (γ, 2026-05-27): name the variant in the
-        // diagnostic so production logs say *which*
-        // shape forced the legacy-walker fallback. The
-        // catch-all also points the user at the
-        // production-code path that needs the new arm.
-        other => Err(TranslateError::Unsupported(
-            expr_variant_name(other),
-        )),
+        // No catch-all: the match above is exhaustive
+        // over `L4Expr` after the OX7 explicit By /
+        // DotFn / Raw arms. When the parser grows a new
+        // `L4Expr` variant, the build breaks here —
+        // intentional, so production never ships a
+        // silently-mismatched translate path. The
+        // `expr_variant_name` helper still exists for
+        // tests that want to assert a variant's symbolic
+        // identifier.
     }
 }
 
-/// OX7 (γ, 2026-05-27) — return a stable, short
-/// identifier for an `L4Expr` variant, used in
-/// `TranslateError::Unsupported` so production logs
-/// pinpoint the exact shape that fell back to the
-/// legacy walker.
+/// OX7 (γ, 2026-05-27, lifted to tests-only 2026-05-31)
+/// — return a stable, short identifier for an `L4Expr`
+/// variant. Originally used in
+/// `TranslateError::Unsupported` as the catch-all
+/// diagnostic; that path retired once the match became
+/// exhaustive after the By / DotFn / Raw arms landed.
+/// Kept for tests that want a symbolic identifier for
+/// a variant without coupling to the test source's
+/// `OxExpr` shape.
+#[cfg(test)]
 fn expr_variant_name(e: &L4Expr) -> &'static str {
     match e {
         L4Expr::Ident(_) => "Ident",
@@ -1742,6 +1821,103 @@ mod tests {
                 assert!(msg.starts_with("DotFn:"));
                 assert!(msg.contains("fun x =>") || msg.contains("explicit `fun"));
             }
+        }
+    }
+
+    // ─── OX7 Decl coverage (2026-05-31) ─────────────────
+
+    #[test]
+    fn definition_by_arms_lowers_to_definition_with_match_body() {
+        // `def double (n : Nat) : Nat
+        //   | 0 => 0
+        //   | x => x`
+        //
+        // — parser emits `DeclKind::DefinitionByArms`;
+        // translator desugars into
+        //   `def double (n : Nat) : Nat :=
+        //      fun n => match n with | 0 => 0 | x => x`
+        // The body becomes `Lam(n => Match(n, arms))`.
+        // Use Nat literal + Var patterns since
+        // oxilean-parse-peg v0.1.3's pattern grammar
+        // doesn't yet cover `[]` / `::` list ctors at
+        // arm-pattern position.
+        let src = "def double (n : Nat) : Nat\n  | 0 => 0\n  | x => x";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0])
+            .expect("DefinitionByArms must translate")
+            .value;
+        let OxDecl::Definition { val, .. } = d else {
+            panic!("expected Definition, got {d:?}");
+        };
+        // Outer is Lam wrapping the match.
+        let OxExpr::Lam(binders, body) = val.value else {
+            panic!("expected Lam outer, got {:?}", val.value);
+        };
+        assert_eq!(binders.len(), 1);
+        assert_eq!(binders[0].name, "n");
+        // Inner is Match on scrutinee = Var("n").
+        let OxExpr::Match(scrut, arms) = body.value else {
+            panic!("expected Match inner, got {:?}", body.value);
+        };
+        assert!(
+            matches!(scrut.value, OxExpr::Var(ref s) if s == "n"),
+            "scrutinee must be the last binder ident"
+        );
+        assert_eq!(arms.len(), 2, "two arms preserved");
+    }
+
+    #[test]
+    fn definition_by_arms_without_binders_surfaces_diagnostic() {
+        // Synthesise via the parser's `def NAME | …` —
+        // this is actually rejected at the parser layer
+        // (DefinitionByArms requires at least one binder
+        // per the PEG grammar). Direct construction
+        // tests the translate diagnostic when the
+        // hypothetical case surfaces.
+        use oxilean_parse_peg::{Decl, DeclKind};
+        let synthetic = Decl {
+            attrs: vec![],
+            univ_params: vec![],
+            modifiers: vec![],
+            doc: None,
+            kind: DeclKind::DefinitionByArms {
+                name: "noBinders".to_string(),
+                binders: vec![],
+                ty: None,
+                arms: vec![],
+            },
+        };
+        let err = translate_decl(&synthetic)
+            .expect_err("DefinitionByArms with no binders must surface as Unsupported");
+        let TranslateError::Unsupported(msg) = err;
+        assert!(
+            msg.contains("DefinitionByArms with no binders"),
+            "diagnostic must explain the scrutinee requirement; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn mutual_block_wraps_inner_decls() {
+        // `mutual def f : Nat := 0 def g : Nat := 0 end`
+        // → `OxDecl::Mutual { decls: [<translated f>,
+        // <translated g>] }`.
+        let src = "mutual\ndef f : Nat := 0\ndef g : Nat := 0\nend";
+        let decls = parse_decls(src).expect("must parse");
+        let d = translate_decl(&decls[0])
+            .expect("Mutual must translate")
+            .value;
+        let OxDecl::Mutual { decls: inner } = d else {
+            panic!("expected Mutual, got {d:?}");
+        };
+        assert_eq!(inner.len(), 2);
+        // Each inner is a Definition.
+        match &inner[0].value {
+            OxDecl::Definition { name, .. } => assert_eq!(name, "f"),
+            other => panic!("inner[0] expected Definition(f), got {other:?}"),
+        }
+        match &inner[1].value {
+            OxDecl::Definition { name, .. } => assert_eq!(name, "g"),
+            other => panic!("inner[1] expected Definition(g), got {other:?}"),
         }
     }
 
