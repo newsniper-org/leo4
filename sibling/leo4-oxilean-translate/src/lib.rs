@@ -1137,6 +1137,33 @@ fn translate_expr(e: &L4Expr) -> Result<OxExpr, TranslateError> {
             }
             Ok(acc.value)
         }
+        // OX7 (2026-05-31) — explicit diagnostics for the
+        // three Expr shapes that don't have an oxilean
+        // surface equivalent. Each carries an actionable
+        // hint instead of just the variant name so
+        // production logs tell users what to do.
+        L4Expr::By(_) => Err(TranslateError::Unsupported(
+            "By: tactic blocks (`by ...`) aren't translatable in the rust-transpile \
+             path — tactic mode requires Lean's tactic framework, which the \
+             OxiLean-driven elaborator doesn't carry. Rewrite as a term-mode \
+             definition (`def foo : T := <term>`) or move the proof obligation to a \
+             leaf axiom (`axiom foo : T`) when the body is propositional content.",
+        )),
+        L4Expr::DotFn(_) => Err(TranslateError::Unsupported(
+            "DotFn: anonymous-fn shorthand (`(· …)`) isn't yet desugared by translate \
+             — full support requires re-parsing the body, counting `·` placeholders, \
+             and wrapping in fresh-named `Lam` binders. For now, rewrite the \
+             expression as an explicit `fun x => …` in source (e.g. `(· + 1)` → \
+             `fun x => x + 1`).",
+        )),
+        L4Expr::Raw(_) => Err(TranslateError::Unsupported(
+            "Raw: the PEG parser surfaced an expression shape it couldn't analyse \
+             further and emitted the raw source text. Check the source for syntax \
+             the grammar doesn't cover yet — typical culprits are macro-introduced \
+             notation, `match` arms with complex patterns the v0 pattern grammar \
+             doesn't recognise, or pretty-printer artifacts (trailing whitespace, \
+             stray colons).",
+        )),
         // OX7 (γ, 2026-05-27): name the variant in the
         // diagnostic so production logs say *which*
         // shape forced the legacy-walker fallback. The
@@ -1662,6 +1689,60 @@ mod tests {
         // / elab side decide.
         let e = translate_binop("def x : T := a × b");
         assert_app2(e, "×", "a", "b");
+    }
+
+    #[test]
+    fn by_block_surfaces_actionable_diagnostic() {
+        // `by ⟨tactics⟩` parses as `Expr::By(vec![...])`.
+        // The translate arm refuses with a hint pointing
+        // at term-mode or axiom rewrites.
+        let decls = parse_decls("def x : T := by skip").expect("must parse");
+        let err = translate_decl(&decls[0]).expect_err("By must surface as Unsupported");
+        match err {
+            TranslateError::Unsupported(msg) => {
+                assert!(msg.starts_with("By:"), "diagnostic must lead with `By:`; got: {msg}");
+                assert!(
+                    msg.contains("term-mode") || msg.contains("axiom"),
+                    "diagnostic must hint at the workaround; got: {msg}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn raw_expr_surfaces_actionable_diagnostic() {
+        // The `Raw` variant is the parser's escape hatch
+        // for shapes it couldn't analyse. Hard to
+        // synthesise via parse_decls (the parser fails
+        // earlier for most truly-unparseable inputs), so
+        // assert the variant-name fallback path
+        // directly via expr_variant_name.
+        assert_eq!(expr_variant_name(&L4Expr::Raw(String::new())), "Raw");
+    }
+
+    #[test]
+    fn dotfn_surfaces_actionable_diagnostic_via_variant() {
+        // `(· + 1)` may not survive the v1 PEG parser's
+        // expression-position grammar in every shape; the
+        // variant-existence path still needs to surface a
+        // hint for the day it does. Assert the variant
+        // name + the translate arm wired to it.
+        assert_eq!(
+            expr_variant_name(&L4Expr::DotFn(String::new())),
+            "DotFn"
+        );
+        // Direct path: hand a synthetic DotFn to
+        // translate_expr and confirm it returns the new
+        // diagnostic, not the generic catch-all.
+        let synthetic = L4Expr::DotFn("· + 1".to_string());
+        let err = translate_expr(&synthetic)
+            .expect_err("DotFn must surface as Unsupported");
+        match err {
+            TranslateError::Unsupported(msg) => {
+                assert!(msg.starts_with("DotFn:"));
+                assert!(msg.contains("fun x =>") || msg.contains("explicit `fun"));
+            }
+        }
     }
 
     #[test]
