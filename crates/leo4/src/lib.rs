@@ -110,7 +110,17 @@ pub use leo4_macros::export;
 /// and registers entries into `::leo4::__private::EXPORTS`. Both
 /// are stable for the macro to refer to, even when the
 /// `leo4-abi` re-export shape evolves.
-#[cfg(feature = "rust-exports")]
+// RC.2 (2026-05-31): unconditional. `#[derive(LeanMarshal)]`
+// emits `USER_TYPES` entries at every derive site and
+// `#[leo4::export]` emits `EXPORTS` entries; both reach the
+// distributed slices via this `__private` re-export. Gating
+// on `feature = "rust-exports"` would propagate a
+// `unexpected_cfg` lint into every downstream user crate that
+// hasn't declared the feature on its own Cargo.toml, so we
+// keep the surface always available. The `rust-exports`
+// cargo feature itself stays as a no-op alias for backward
+// compat (existing user Cargo.toml's `features =
+// ["rust-exports"]` lines still resolve).
 pub mod __private {
     pub use leo4_abi::rust_exports::{
         CtorEntry, ExportEntry, FieldEntry, UserTypeEntry, UserTypeKind, EXPORTS,

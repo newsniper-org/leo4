@@ -20,14 +20,18 @@ description = "Part of the leo4 workspace. See LEO4-DESIGN.md."
 nightly-floats = []
 # Phase 9 reverse-direction: enables the `rust_exports` module and
 # pulls in `linkme` for the distributed-slice metadata collection
-# driven by `#[leo4::export]`. Off by default — only cdylibs that
-# expose Rust functions to Lean need it (typically turned on
-# transparently by the `leo4` facade's matching feature). See
-# SPEC/reverse-direction.md.
-rust-exports = ["dep:linkme"]
+# driven by `#[leo4::export]`. As of RC.2 (2026-05-31) this feature
+# is a no-op alias kept for backward-compat — `rust_exports` is now
+# *unconditionally* compiled because `#[derive(LeanMarshal)]` emits
+# `USER_TYPES` distributed-slice entries at every derive site, and
+# downstream user crates can't predict at their feature-list level
+# whether a derive will fire. Making the module always-available
+# avoids the `unexpected_cfg(feature = "rust-exports")` lint that
+# every user crate would otherwise see. See SPEC/reverse-direction.md.
+rust-exports = []
 
 [dependencies]
-linkme = { workspace = true, optional = true }
+linkme.workspace = true
 
 [lints]
 workspace = true

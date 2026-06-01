@@ -1040,9 +1040,15 @@ fn stringify_rust_type(t: &syn::Type) -> String {
 }
 
 /// RC.2 patch 2 helper — emit a `USER_TYPES` distributed-slice
-/// entry for the given derive target. Returns a token-stream
-/// guarded behind `cfg(feature = "rust-exports")` so cdylibs not
-/// using the reverse direction don't pay the metadata cost.
+/// entry for the given derive target. As of 2026-05-31 the entry
+/// is emitted *unconditionally*: the previous
+/// `#[cfg(feature = "rust-exports")]` guard surfaced as an
+/// `unexpected_cfg` lint in every downstream user crate that
+/// hadn't declared the feature on its own Cargo.toml.
+/// `leo4-abi`'s `rust_exports` module + `leo4::__private` are
+/// now always compiled (the matching `linkme` dep is
+/// unconditional too) so the path resolves without the cfg
+/// gate.
 ///
 /// The emitted entry mirrors `leo4_abi::rust_exports::UserTypeEntry`
 /// — `fqn` is the type's Rust ident as text; `kind` discriminates
@@ -1060,7 +1066,6 @@ fn emit_user_type_schema(
     let name_lit = syn::LitStr::new(&name.to_string(), name.span());
     let entry_ident = format_ident!("__LEO4_USER_TYPE_{}", name);
     quote! {
-        #[cfg(feature = "rust-exports")]
         #[::leo4::__private::linkme::distributed_slice(
             ::leo4::__private::USER_TYPES
         )]

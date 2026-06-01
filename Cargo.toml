@@ -57,18 +57,18 @@ pedantic = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 # Internal crates
-schema-idl            = { version = "1.0.0-rc.1", path = "crates/schema-idl" }
-leo4-idl              = { version = "1.0.0-rc.1", path = "crates/leo4-idl" }
-leo4-abi              = { version = "1.0.0-rc.1", path = "crates/leo4-abi" }
-leo4-build            = { version = "1.0.0-rc.1", path = "crates/leo4-build" }
-leo4-macros           = { version = "1.0.0-rc.1", path = "crates/leo4-macros" }
-leo4-macros-backend   = { version = "1.0.0-rc.1", path = "crates/leo4-macros-backend" }
-leo4-mslean4           = { version = "1.0.0-rc.1", path = "crates/leo4-mslean4" }
-leo4-wasm             = { version = "1.0.0-rc.1", path = "crates/leo4-wasm" }
-leo4                  = { version = "1.0.0-rc.1", path = "crates/leo4" }
-leo4-rust-emit        = { version = "1.0.0-rc.1", path = "crates/leo4-rust-emit" }
-leo4-rust-worker      = { version = "1.0.0-rc.1", path = "crates/leo4-rust-worker" }
-leo4-rust-bridge      = { version = "1.0.0-rc.1", path = "crates/leo4-rust-bridge" }
+schema-idl            = { path = "crates/schema-idl" }
+leo4-idl              = { path = "crates/leo4-idl" }
+leo4-abi              = { path = "crates/leo4-abi" }
+leo4-build            = { path = "crates/leo4-build" }
+leo4-macros           = { path = "crates/leo4-macros" }
+leo4-macros-backend   = { path = "crates/leo4-macros-backend" }
+leo4-mslean4           = { path = "crates/leo4-mslean4" }
+leo4-wasm             = { path = "crates/leo4-wasm" }
+leo4                  = { path = "crates/leo4" }
+leo4-rust-emit        = { path = "crates/leo4-rust-emit" }
+leo4-rust-worker      = { path = "crates/leo4-rust-worker" }
+leo4-rust-bridge      = { path = "crates/leo4-rust-bridge" }
 
 # External
 thiserror   = "2"

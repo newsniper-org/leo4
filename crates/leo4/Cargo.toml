@@ -12,20 +12,26 @@ description = "Top-level façade re-exporting `leo4-mslean4` (loader / dispatch)
 # Pass-through to `leo4-abi`'s `nightly-floats` feature. Nightly
 # Rust required when enabled (`feature(f16, f128)` at crate roots).
 nightly-floats = ["leo4-abi/nightly-floats"]
-# Phase 9 reverse-direction (Rust -> Lean). Enables the
-# `#[leo4::export]` proc-macro re-export and the `__private`
-# module the macro expands against. Off by default — only
-# cdylibs that expose Rust functions to Lean turn it on.
-rust-exports = ["leo4-abi/rust-exports", "dep:linkme"]
+# Phase 9 reverse-direction (Rust -> Lean). As of RC.2
+# (2026-05-31), `__private::EXPORTS` / `__private::USER_TYPES`
+# and the `linkme` re-export are *unconditionally* compiled so
+# `#[derive(LeanMarshal)]` and `#[leo4::export]` emit their
+# distributed-slice entries without surfacing
+# `unexpected_cfg(feature = "rust-exports")` lints in every
+# downstream user crate. The feature stays as a no-op alias
+# for backward compat with user Cargo.toml setups that listed
+# it explicitly.
+rust-exports = ["leo4-abi/rust-exports"]
 
 [dependencies]
 leo4-abi.workspace    = true
 leo4-mslean4.workspace = true
 leo4-macros.workspace = true
-# Re-exported through `leo4::__private::linkme` when the
-# `rust-exports` feature is on, so user cdylibs invoking
-# `#[leo4::export]` need not depend on `linkme` directly.
-linkme = { workspace = true, optional = true }
+# Re-exported through `leo4::__private::linkme` so user
+# cdylibs invoking `#[leo4::export]` / `#[derive(LeanMarshal)]`
+# need not depend on `linkme` directly. Unconditional since
+# RC.2 (2026-05-31).
+linkme.workspace = true
 
 [lints]
 workspace = true

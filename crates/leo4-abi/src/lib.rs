@@ -21,7 +21,15 @@ pub mod complex;
 pub mod floats_nightly;
 pub mod handshake;
 pub mod callback;
-#[cfg(feature = "rust-exports")]
+// RC.2 (2026-05-31): unconditionally compiled. The
+// `rust-exports` cargo feature stays as a no-op alias for
+// backward compat — `#[derive(LeanMarshal)]` now emits
+// `USER_TYPES` entries at every derive site, so the module's
+// public surface must be visible without per-crate feature
+// opt-in (the cfg-guarded emit would surface as
+// `unexpected_cfg(feature = "rust-exports")` lint in every
+// downstream user crate that hasn't declared the feature
+// themselves).
 pub mod rust_exports;
 pub mod rust_native;
 
