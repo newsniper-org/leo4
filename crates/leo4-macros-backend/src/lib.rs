@@ -417,18 +417,38 @@ fn outbound_callback_encode(
     }
 }
 
-/// Strict single-result lowering — `None` for any type the
-/// table doesn't recognise outright, *including* user-defined
-/// nominal idents. Used by `#[leo4::export]` (reverse direction)
-/// where an unrecognised type at macro-expand time becomes a
-/// clear diagnostic before generated code surfaces the same gap
-/// as a less-friendly `LeanMarshal`-trait-not-found error.
+/// Single-result lowering — used by `#[leo4::export]` (reverse
+/// direction) for mangle generation. Recognises:
+///
+/// - Primitives (`u8`..`u128`, `i8`..`i128`, `f32`/`f64`,
+///   `bool`, `char`, `String`).
+/// - Composites (`Vec<T>` → List, `Option<T>` → Option,
+///   `Result<T, E>` → Result, tuples → Tuple).
+/// - Phase 10-B1.x callbacks (`LeanCallback<R, Args>` → Fn,
+///   `fn(...) -> R` bare function pointers → Fn).
+/// - **RC.4 (2026-05-31): user-defined nominal idents** —
+///   `AdsmtVerdict` / `Point` / `Color` etc. lower to
+///   `Record { fqn: <ident>, args: <inner_candidates> }`.
+///   Reverse direction doesn't need to coordinate the mangle's
+///   kind-prefix with the Lean side — the macro is the sole
+///   producer of the mangle, leo4-rust-emit decodes `S_<fqn>_s`
+///   back to a bare fqn for the wrapper signature, and the
+///   real kind (Variant / Enum / etc.) reaches Lean via the
+///   independent `USER_TYPES` schema slice that
+///   `#[derive(LeanMarshal)]` populates.
+///
+/// Returns `None` only when the type genuinely can't be lowered:
+/// the unit type `()`, exotic bare-fn surfaces (variadic /
+/// unsafe / extern ABI), qualified paths (`<T as Trait>::Assoc`),
+/// or paths with lifetime args (`Cow<'static, str>` etc. —
+/// these are typically std library types that don't carry
+/// `#[derive(LeanMarshal)]`).
 ///
 /// `leo4::import!` (forward direction) uses the multi-candidate
 /// version [`rust_type_to_idl_candidates`] instead — it needs to
 /// resolve `AdsmtVerdict`-style user idents against the
-/// mangling-JSON table without forcing the user to manually
-/// disambiguate via `#[leo4(args = "…")]`.
+/// mangling-JSON table where the plugin emitted the *real*
+/// kind, so the macro has to try all 5 candidates.
 fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
     if let Type::Tuple(t) = ty {
         if t.elems.is_empty() {
@@ -537,7 +557,34 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
                 ret: Box::new(ret),
             }
         }
-        _ => return None,
+        // RC.4 (2026-05-31) — user-defined nominal ident
+        // fallback for the reverse direction
+        // (`#[leo4::export]`). The macro is the sole producer
+        // of the mangle on this path; `leo4-rust-emit` decodes
+        // `S_<fqn>_s` back to the bare fqn for the wrapper
+        // signature (RC.2 patch 1) and the real kind reaches
+        // the Lean side via the `USER_TYPES` schema slice
+        // (RC.2 patch 2). Lifetime-bearing paths (`Cow<'a, str>`,
+        // `Ref<'a, T>`, etc.) stay rejected — they're typically
+        // std types without `#[derive(LeanMarshal)]`.
+        _ => {
+            if let PathArguments::AngleBracketed(ab) = &last.arguments {
+                let has_lifetime = ab
+                    .args
+                    .iter()
+                    .any(|a| matches!(a, GenericArgument::Lifetime(_)));
+                if has_lifetime {
+                    return None;
+                }
+            }
+            let inner_args = args_of_seg();
+            let lowered_args: ::std::option::Option<Vec<IDLType>> =
+                inner_args.iter().map(rust_type_to_idl).collect();
+            Record {
+                fqn: name,
+                args: lowered_args?,
+            }
+        }
     })
 }
 
@@ -947,14 +994,20 @@ mod tests {
             Some(IDLType::Tuple(vec![IDLType::U8, IDLType::Bool]))
         );
 
-        // RC.2 patch 3 (2026-05-31): the strict
-        // `rust_type_to_idl` keeps returning `None` for
-        // unrecognised user-defined idents so `#[leo4::export]`
-        // surfaces a clear macro-time diagnostic. The multi-
-        // candidate path `rust_type_to_idl_candidates` (used
-        // exclusively by `leo4::import!`) returns all 5 kinds.
+        // RC.4 (2026-05-31): the strict `rust_type_to_idl`
+        // now lowers user-defined idents to Record so
+        // `#[leo4::export]` can accept them (reverse direction
+        // doesn't need plugin-side mangle-kind coordination).
+        // The multi-candidate path `rust_type_to_idl_candidates`
+        // (used by `leo4::import!`) still returns all 5 kinds.
         let ty: Type = syn::parse_str("MyCustom").unwrap();
-        assert_eq!(rust_type_to_idl(&ty), None);
+        assert_eq!(
+            rust_type_to_idl(&ty),
+            Some(IDLType::Record {
+                fqn: "MyCustom".to_string(),
+                args: vec![],
+            }),
+        );
         let cands = rust_type_to_idl_candidates(&ty).unwrap();
         // 5 candidates for no-generics user ident: Record /
         // Variant / Enum / Flags / Resource. (Order matters
@@ -1331,6 +1384,58 @@ mod tests {
             "winning candidate must be Variant: {kind:?}",
         );
         assert!(body.contains("V_AdsmtVerdict_v"));
+    }
+
+    #[test]
+    fn expand_export_accepts_user_defined_type() {
+        // RC.4 (2026-05-31) — flagship: `#[leo4::export]
+        // pub fn solve(v: AdsmtVerdict) -> u64` expands
+        // without macro-time diagnostic. The mangle path
+        // lowers AdsmtVerdict to `Record { fqn:
+        // "AdsmtVerdict", args: [] }` → mangle
+        // `S_AdsmtVerdict_s` regardless of the user's
+        // actual `#[derive(LeanMarshal)]` kind on the type.
+        // leo4-rust-emit decodes back to bare `AdsmtVerdict`
+        // and the USER_TYPES schema carries the real kind.
+        let input: TokenStream = syn::parse_str(
+            "pub fn solve(v: AdsmtVerdict) -> u64 { v.placeholder() }",
+        )
+        .unwrap();
+        let ts = expand_export(TokenStream::new(), input);
+        let rendered = ts.to_string();
+        // No macro-time diagnostic — body emits cleanly.
+        assert!(
+            !rendered.contains("cannot lower parameter"),
+            "should not reject AdsmtVerdict: {rendered}"
+        );
+        // Mangle uses the Record kind prefix `S_AdsmtVerdict_s`.
+        assert!(
+            rendered.contains("leo4_rust__solve__S_AdsmtVerdict_s"),
+            "mangle missing: {rendered}"
+        );
+        // EXPORTS entry carries the same mangle string in
+        // `param_types`.
+        assert!(
+            rendered.contains("S_AdsmtVerdict_s"),
+            "param_types missing: {rendered}"
+        );
+    }
+
+    #[test]
+    fn expand_export_accepts_nested_user_defined_type() {
+        // `Vec<AdsmtVerdict>` — outer is List, inner is
+        // user ident. Mangle: `L_S_AdsmtVerdict_s_l`.
+        let input: TokenStream = syn::parse_str(
+            "pub fn batch(xs: Vec<AdsmtVerdict>) -> u64 { xs.len() as u64 }",
+        )
+        .unwrap();
+        let ts = expand_export(TokenStream::new(), input);
+        let rendered = ts.to_string();
+        assert!(!rendered.contains("cannot lower parameter"));
+        assert!(
+            rendered.contains("L_S_AdsmtVerdict_s_l"),
+            "expected nested mangle: {rendered}"
+        );
     }
 
     #[test]
