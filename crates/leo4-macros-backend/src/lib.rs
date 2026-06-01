@@ -994,6 +994,126 @@ fn add_lean_marshal_bound(generics: &syn::Generics) -> syn::Generics {
     g
 }
 
+/// RC.2 patch 2 helper — whitespace-normalise the `quote!`
+/// stringification of a `syn::Type`. The default
+/// `quote!{ #t }.to_string()` adds spaces around every token
+/// (`Vec < (String , String) >`); the wrapper emitter consumes
+/// the stored text, so we squeeze adjacent whitespace and
+/// drop spaces flanking `<`, `>`, `,`, `(`, `)`, `&`, `;`, `:`
+/// so the stored form looks like ordinary Rust source
+/// (`Vec<(String,String)>`).
+fn stringify_rust_type(t: &syn::Type) -> String {
+    let raw = quote! { #t }.to_string();
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_was_space = false;
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            if prev_was_space {
+                continue;
+            }
+            prev_was_space = true;
+            continue;
+        }
+        // Drop spaces around punctuation that doesn't need
+        // separation in Rust source.
+        if matches!(ch, '<' | '>' | ',' | '(' | ')' | '&' | ';' | ':') {
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            out.push(ch);
+            prev_was_space = false;
+            continue;
+        }
+        if prev_was_space {
+            // Only insert separating space if previous output
+            // char is alphanumeric / `_` (real token boundary).
+            if let Some(last) = out.chars().last() {
+                if last.is_alphanumeric() || last == '_' {
+                    out.push(' ');
+                }
+            }
+            prev_was_space = false;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// RC.2 patch 2 helper — emit a `USER_TYPES` distributed-slice
+/// entry for the given derive target. Returns a token-stream
+/// guarded behind `cfg(feature = "rust-exports")` so cdylibs not
+/// using the reverse direction don't pay the metadata cost.
+///
+/// The emitted entry mirrors `leo4_abi::rust_exports::UserTypeEntry`
+/// — `fqn` is the type's Rust ident as text; `kind` discriminates
+/// record / tuple-record / variant / unit-enum / unit-struct;
+/// `fields` populates for records, `ctors` for variants/unit-enums.
+/// Field type mangle stays empty (proc-macro path doesn't have IDL
+/// access); the wrapper emitter computes mangle from `rust_type`
+/// at emit time.
+fn emit_user_type_schema(
+    name: &syn::Ident,
+    kind_ts: TokenStream,
+    fields_ts: TokenStream,
+    ctors_ts: TokenStream,
+) -> TokenStream {
+    let name_lit = syn::LitStr::new(&name.to_string(), name.span());
+    let entry_ident = format_ident!("__LEO4_USER_TYPE_{}", name);
+    quote! {
+        #[cfg(feature = "rust-exports")]
+        #[::leo4::__private::linkme::distributed_slice(
+            ::leo4::__private::USER_TYPES
+        )]
+        #[linkme(crate = ::leo4::__private::linkme)]
+        #[allow(non_upper_case_globals)]
+        static #entry_ident: ::leo4::__private::UserTypeEntry =
+            ::leo4::__private::UserTypeEntry {
+                fqn: #name_lit,
+                kind: #kind_ts,
+                fields: #fields_ts,
+                ctors: #ctors_ts,
+            };
+    }
+}
+
+/// Emit a `&[FieldEntry]` static literal from a `syn::Fields`.
+/// Named fields keep their ident; unnamed fields use empty
+/// strings (the wrapper emitter falls back to `_arg<i>`).
+fn emit_field_entries_static(fields: &syn::Fields) -> TokenStream {
+    let span = proc_macro2::Span::call_site();
+    match fields {
+        syn::Fields::Named(named) => {
+            let entries = named.named.iter().map(|f| {
+                let n = f.ident.as_ref().expect("named field");
+                let name_lit = syn::LitStr::new(&n.to_string(), span);
+                let ty_lit = syn::LitStr::new(&stringify_rust_type(&f.ty), span);
+                quote! {
+                    ::leo4::__private::FieldEntry {
+                        name: #name_lit,
+                        type_mangle: "",
+                        rust_type: #ty_lit,
+                    }
+                }
+            });
+            quote! { &[ #( #entries ),* ] }
+        }
+        syn::Fields::Unnamed(unnamed) => {
+            let entries = unnamed.unnamed.iter().map(|f| {
+                let ty_lit = syn::LitStr::new(&stringify_rust_type(&f.ty), span);
+                quote! {
+                    ::leo4::__private::FieldEntry {
+                        name: "",
+                        type_mangle: "",
+                        rust_type: #ty_lit,
+                    }
+                }
+            });
+            quote! { &[ #( #entries ),* ] }
+        }
+        syn::Fields::Unit => quote! { &[] },
+    }
+}
+
 fn expand_derive_record(input: &syn::DeriveInput, s: &syn::DataStruct) -> TokenStream {
     let name = &input.ident;
     let bounded = add_lean_marshal_bound(&input.generics);
@@ -1049,6 +1169,33 @@ fn expand_derive_record(input: &syn::DeriveInput, s: &syn::DataStruct) -> TokenS
             quote! { Ok((Self, off)) },
         ),
     };
+    // RC.2 patch 2 — emit USER_TYPES schema entry alongside
+    // the LeanMarshal impl. Kind discriminates between
+    // named-field record (Record), positional newtype/tuple
+    // struct (TupleRecord), and degenerate unit struct
+    // (UnitStruct). Generic types skip schema emit — the
+    // `static` would need to interpolate the generic params,
+    // and reverse-direction wrappers currently only deal
+    // with monomorphic ctor signatures.
+    let is_generic = !input.generics.params.is_empty();
+    let schema_ts = if is_generic {
+        quote! {}
+    } else {
+        let kind_ts = match &s.fields {
+            syn::Fields::Named(_) => {
+                quote! { ::leo4::__private::UserTypeKind::Record }
+            }
+            syn::Fields::Unnamed(_) => {
+                quote! { ::leo4::__private::UserTypeKind::TupleRecord }
+            }
+            syn::Fields::Unit => {
+                quote! { ::leo4::__private::UserTypeKind::UnitStruct }
+            }
+        };
+        let fields_ts = emit_field_entries_static(&s.fields);
+        emit_user_type_schema(name, kind_ts, fields_ts, quote! { &[] })
+    };
+
     quote! {
         impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
             fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
@@ -1060,6 +1207,8 @@ fn expand_derive_record(input: &syn::DeriveInput, s: &syn::DataStruct) -> TokenS
                 #decode_block
             }
         }
+
+        #schema_ts
     }
 }
 
@@ -1128,6 +1277,35 @@ fn expand_derive_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenStrea
         let tag = i as u32;
         quote! { #tag => Self::#vn, }
     });
+
+    // RC.2 patch 2 — emit USER_TYPES schema entry. UnitEnum
+    // kind: every ctor is a unit, fields list is empty per
+    // ctor. Generic enums skip schema emit (same rationale
+    // as expand_derive_record).
+    let is_generic = !input.generics.params.is_empty();
+    let schema_ts = if is_generic {
+        quote! {}
+    } else {
+        let span = proc_macro2::Span::call_site();
+        let ctor_entries = e.variants.iter().map(|v| {
+            let vn = &v.ident;
+            let vn_lit = syn::LitStr::new(&vn.to_string(), span);
+            quote! {
+                ::leo4::__private::CtorEntry {
+                    name: #vn_lit,
+                    fields: &[],
+                }
+            }
+        });
+        let ctors_ts = quote! { &[ #( #ctor_entries ),* ] };
+        emit_user_type_schema(
+            name,
+            quote! { ::leo4::__private::UserTypeKind::UnitEnum },
+            quote! { &[] },
+            ctors_ts,
+        )
+    };
+
     quote! {
         impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
             fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
@@ -1158,6 +1336,8 @@ fn expand_derive_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenStrea
                 ::core::result::Result::Ok((value, off + 4))
             }
         }
+
+        #schema_ts
     }
 }
 
@@ -1240,6 +1420,37 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
             }
         }
     }
+    // RC.2 patch 2 — emit USER_TYPES schema entry for the
+    // variant. Per-ctor field entries collected via the
+    // shared helper so the wrapper emitter sees consistent
+    // {name, type_mangle: "", rust_type} rows regardless
+    // of which derive arm produced them. Generic variants
+    // skip schema emit (same rationale as record).
+    let is_generic = !input.generics.params.is_empty();
+    let schema_ts = if is_generic {
+        quote! {}
+    } else {
+        let span = proc_macro2::Span::call_site();
+        let ctor_entries = e.variants.iter().map(|v| {
+            let vn = &v.ident;
+            let vn_lit = syn::LitStr::new(&vn.to_string(), span);
+            let fields_ts = emit_field_entries_static(&v.fields);
+            quote! {
+                ::leo4::__private::CtorEntry {
+                    name: #vn_lit,
+                    fields: #fields_ts,
+                }
+            }
+        });
+        let ctors_ts = quote! { &[ #( #ctor_entries ),* ] };
+        emit_user_type_schema(
+            name,
+            quote! { ::leo4::__private::UserTypeKind::Variant },
+            quote! { &[] },
+            ctors_ts,
+        )
+    };
+
     quote! {
         impl #impl_g ::leo4::LeanMarshal for #name #ty_g #where_g {
             fn canonical_encode(&self, buf: &mut ::std::vec::Vec<u8>) {
@@ -1268,6 +1479,8 @@ fn expand_derive_variant(input: &syn::DeriveInput, e: &syn::DataEnum) -> TokenSt
                 }
             }
         }
+
+        #schema_ts
     }
 }
 

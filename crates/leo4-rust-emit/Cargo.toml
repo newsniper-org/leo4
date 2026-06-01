@@ -23,6 +23,13 @@ clap.workspace       = true
 # feature gate.
 leo4-abi = { workspace = true, features = ["rust-exports"] }
 schema-idl.workspace = true
+# RC.2 patch 2 (2026-05-31) — wrapper emit needs to walk the
+# stored Rust type source-text (e.g. `Vec<(String,String)>`) and
+# translate it to Lean (`Array (String × String)`). `syn`'s
+# `parse_str::<Type>` gives us a typed AST instead of a hand-
+# rolled tokeniser.
+syn = { workspace = true, features = ["full", "parsing"] }
+quote.workspace = true
 
 [lints]
 workspace = true

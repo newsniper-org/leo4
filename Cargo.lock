@@ -639,8 +639,10 @@ dependencies = [
  "clap",
  "leo4-abi",
  "libloading",
+ "quote",
  "schema-idl",
  "serde_json",
+ "syn",
 ]
 
 [[package]]

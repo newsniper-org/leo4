@@ -112,7 +112,10 @@ pub use leo4_macros::export;
 /// `leo4-abi` re-export shape evolves.
 #[cfg(feature = "rust-exports")]
 pub mod __private {
-    pub use leo4_abi::rust_exports::{ExportEntry, EXPORTS};
+    pub use leo4_abi::rust_exports::{
+        CtorEntry, ExportEntry, FieldEntry, UserTypeEntry, UserTypeKind, EXPORTS,
+        USER_TYPES,
+    };
     // Re-export `linkme` itself so the macro's
     // `#[::linkme::distributed_slice(...)]` path resolves through
     // `leo4` without the user crate adding `linkme` directly.

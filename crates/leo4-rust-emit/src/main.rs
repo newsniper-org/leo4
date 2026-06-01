@@ -27,7 +27,9 @@ use std::{
 };
 
 use clap::Parser;
-use leo4_abi::rust_exports::ExportEntry;
+use leo4_abi::rust_exports::{
+    ExportEntry, FieldEntry, UserTypeEntry, UserTypeKind,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "leo4-rust-emit", version, about = "Emit leo4 reverse-direction IDL + handshake from a built cdylib")]
@@ -104,6 +106,13 @@ fn run(cli: &Cli) -> Result<(), String> {
     let iface = cli.iface.clone().unwrap_or_else(|| camel_case(&pkg));
 
     let entries = unsafe { load_exports(&cdylib)? };
+    // RC.2 patch 2 (2026-05-31) — load the user-defined type
+    // schema table alongside EXPORTS. Cdylibs that pre-date the
+    // RC.2 macro emit (or that have zero `#[derive(LeanMarshal)]`
+    // types) report a missing `leo4_rust_describe_user_types`
+    // symbol; treat that as "no user types" rather than fatal,
+    // so the wrapper still emits.
+    let user_types = unsafe { load_user_types(&cdylib).unwrap_or_default() };
 
     let canonical_idl = render_canonical_idl(&pkg, &iface, &entries);
     let schema_hash = compute_schema_hash(&canonical_idl);
@@ -134,7 +143,7 @@ fn run(cli: &Cli) -> Result<(), String> {
             .lean_module
             .clone()
             .unwrap_or_else(|| format!("{iface}.Rust"));
-        let lean_src = render_lean_wrapper(&module, &pkg, &iface, &schema_hash, &entries)?;
+        let lean_src = render_lean_wrapper(&module, &pkg, &iface, &schema_hash, &entries, &user_types)?;
         let lean_path =
             cli.out_dir.join(format!("{pkg}.leo4-rust-imports.lean"));
         atomic_write(&lean_path, lean_src.as_bytes())?;
@@ -219,6 +228,112 @@ unsafe fn load_exports(cdylib: &Path) -> Result<Vec<EntryView>, String> {
     // lifetime contract preserved.
     drop(lib);
     Ok(out)
+}
+
+// ─── User-defined type schema (RC.2 patch 2, 2026-05-31) ────────────
+
+/// Borrowed view of a single `FieldEntry`, owned post-dlclose.
+#[derive(Debug, Clone)]
+struct FieldView {
+    name: String,
+    /// IDL-side mangle. Reserved for the RC.3 mangle-first
+    /// translation path; RC.2 wrapper-emit reads `rust_type`
+    /// exclusively (the macro emits empty `type_mangle` because
+    /// proc-macro context doesn't carry IDL access).
+    #[allow(dead_code)]
+    type_mangle: String,
+    rust_type: String,
+}
+
+/// Borrowed view of a single `CtorEntry`, owned post-dlclose.
+#[derive(Debug, Clone)]
+struct CtorView {
+    name: String,
+    fields: Vec<FieldView>,
+}
+
+/// Borrowed view of a single `UserTypeEntry`, owned post-dlclose.
+#[derive(Debug, Clone)]
+struct UserTypeView {
+    fqn: String,
+    kind: UserTypeKind,
+    fields: Vec<FieldView>,
+    ctors: Vec<CtorView>,
+}
+
+/// SAFETY: caller must pass a path that is a leo4-exporting cdylib
+/// produced by the same workspace (or any cdylib whose
+/// `leo4_rust_describe_user_types` symbol matches the `repr(C)`
+/// `UserTypeEntry` layout in this build of `leo4-abi`).
+unsafe fn load_user_types(cdylib: &Path) -> Result<Vec<UserTypeView>, String> {
+    type Describe =
+        unsafe extern "C" fn(*mut *const UserTypeEntry, *mut usize) -> i32;
+
+    // SAFETY: opening a shared library is inherently unsafe.
+    let lib = unsafe {
+        libloading::Library::new(cdylib)
+            .map_err(|e| format!("dlopen {cdylib:?}: {e}"))?
+    };
+
+    let sym: libloading::Symbol<'_, Describe> = unsafe {
+        lib.get(b"leo4_rust_describe_user_types\0").map_err(|e| {
+            format!(
+                "cdylib does not export `leo4_rust_describe_user_types` ({e}). \
+                 Older builds (pre-2026-05-31) didn't emit the user-type \
+                 schema slice; wrapper-side mirror Lean decls will be \
+                 skipped — user-defined nominal types referenced by \
+                 exports will surface as opaque `axiom T : Type` stubs."
+            )
+        })?
+    };
+
+    let mut ptr: *const UserTypeEntry = std::ptr::null();
+    let mut len: usize = 0;
+    // SAFETY: outparams are valid; symbol matches signature.
+    let rc = unsafe { sym(&raw mut ptr, &raw mut len) };
+    if rc != 0 {
+        return Err(format!("leo4_rust_describe_user_types returned {rc}"));
+    }
+    if len > 0 && ptr.is_null() {
+        return Err(
+            "describe_user_types returned non-zero length with null pointer".into(),
+        );
+    }
+
+    let mut out = Vec::with_capacity(len);
+    let slice: &[UserTypeEntry] =
+        unsafe { std::slice::from_raw_parts(ptr, len) };
+    for e in slice {
+        let fields: Vec<FieldView> = e
+            .fields
+            .iter()
+            .map(|f| view_field(f))
+            .collect();
+        let ctors: Vec<CtorView> = e
+            .ctors
+            .iter()
+            .map(|c| CtorView {
+                name: c.name.to_owned(),
+                fields: c.fields.iter().map(view_field).collect(),
+            })
+            .collect();
+        out.push(UserTypeView {
+            fqn: e.fqn.to_owned(),
+            kind: e.kind,
+            fields,
+            ctors,
+        });
+    }
+    drop(lib);
+    Ok(out)
+}
+
+fn view_field(f: &FieldEntry) -> FieldView {
+    FieldView {
+        name: f.name.to_owned(),
+        type_mangle: f.type_mangle.to_owned(),
+        rust_type: f.rust_type.to_owned(),
+    }
 }
 
 // ─── IDL rendering ───────────────────────────────────────────────────
@@ -477,6 +592,7 @@ fn render_lean_wrapper(
     _iface: &str,
     schema_hash: &str,
     entries: &[EntryView],
+    user_types: &[UserTypeView],
 ) -> Result<String, String> {
     let mut s = String::new();
     s.push_str("-- Auto-generated by leo4-rust-emit. Do not edit.\n");
@@ -486,6 +602,21 @@ fn render_lean_wrapper(
     s.push_str("-- cdylib surfaces here as one typed `IO α` action.\n\n");
     s.push_str("import Leo4\n\n");
     s.push_str(&format!("namespace {module}\n\n"));
+
+    // RC.2 patch 2 (2026-05-31) — emit mirror Lean declarations
+    // for every user-defined nominal type referenced via
+    // `#[derive(LeanMarshal)]` in the cdylib. Each entry
+    // produces either a `structure` (record / tuple-record /
+    // unit-struct) or an `inductive` (variant / unit-enum) with
+    // a `deriving Leo4.LeanMarshal` clause so the wrapper's
+    // `canonicalEncode` / `canonicalDecode` calls resolve via
+    // the macro-derived instance. Wire-format parity with the
+    // Rust `#[derive(LeanMarshal)]` is the macro's
+    // responsibility — `crates/leo4-macros-backend` emits
+    // identical encode/decode logic on both sides.
+    if !user_types.is_empty() {
+        s.push_str(&render_user_type_mirror_block(user_types));
+    }
 
     s.push_str("/-- Compile-time pin: schema_hash for this cdylib.\n");
     s.push_str("    The dispatcher's worker verifies against this on init. -/\n");
@@ -527,6 +658,311 @@ fn render_lean_wrapper(
 
     s.push_str(&format!("end {module}\n"));
     Ok(s)
+}
+
+/// RC.2 patch 2 — emit the mirror Lean declaration block at
+/// the top of the wrapper namespace. One `structure` /
+/// `inductive` per user-defined type, in declaration order
+/// preserved from `USER_TYPES` (linkme order — stable across
+/// re-runs because the macro emits one entry per `derive`
+/// site).
+fn render_user_type_mirror_block(types: &[UserTypeView]) -> String {
+    let mut s = String::new();
+    s.push_str("/-- ── User-defined nominal types ─────────────────\n");
+    s.push_str("    Mirror declarations for every `#[derive(LeanMarshal)]`\n");
+    s.push_str("    type referenced by this wrapper's exports. Auto-\n");
+    s.push_str("    synthesised from the cdylib's `USER_TYPES`\n");
+    s.push_str("    distributed-slice (RC.2 patch 2, 2026-05-31). The\n");
+    s.push_str("    `deriving Leo4.LeanMarshal` clause on each decl\n");
+    s.push_str("    produces a wire-format-equivalent `LeanMarshal`\n");
+    s.push_str("    instance matching the Rust side. -/\n\n");
+    for ty in types {
+        s.push_str(&render_one_user_type(ty));
+        s.push('\n');
+    }
+    s
+}
+
+fn render_one_user_type(ty: &UserTypeView) -> String {
+    match ty.kind {
+        UserTypeKind::Record => render_record_mirror(ty),
+        UserTypeKind::TupleRecord => render_tuple_record_mirror(ty),
+        UserTypeKind::Variant => render_variant_mirror(ty),
+        UserTypeKind::UnitEnum => render_unit_enum_mirror(ty),
+        UserTypeKind::UnitStruct => render_unit_struct_mirror(ty),
+    }
+}
+
+fn render_record_mirror(ty: &UserTypeView) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "/-- Mirror of Rust `#[derive(LeanMarshal)] struct {0} {{ … }}`. -/\n",
+        ty.fqn
+    ));
+    s.push_str(&format!("structure {} where\n", ty.fqn));
+    if ty.fields.is_empty() {
+        s.push_str("  -- (empty record)\n");
+    } else {
+        for f in &ty.fields {
+            let lean_ty = rust_type_to_lean_type(&f.rust_type);
+            let field_name = if f.name.is_empty() {
+                "field0".to_string()
+            } else {
+                lean_safe_ident(&f.name)
+            };
+            s.push_str(&format!("  {field_name} : {lean_ty}\n"));
+        }
+    }
+    s.push_str(&format!("deriving Leo4.LeanMarshal\n"));
+    s
+}
+
+fn render_tuple_record_mirror(ty: &UserTypeView) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "/-- Mirror of Rust `#[derive(LeanMarshal)] struct {0}(…);` (tuple struct). -/\n",
+        ty.fqn
+    ));
+    s.push_str(&format!("structure {} where\n", ty.fqn));
+    if ty.fields.is_empty() {
+        s.push_str("  -- (empty tuple struct)\n");
+    } else {
+        for (i, f) in ty.fields.iter().enumerate() {
+            let lean_ty = rust_type_to_lean_type(&f.rust_type);
+            s.push_str(&format!("  field{i} : {lean_ty}\n"));
+        }
+    }
+    s.push_str(&format!("deriving Leo4.LeanMarshal\n"));
+    s
+}
+
+fn render_variant_mirror(ty: &UserTypeView) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "/-- Mirror of Rust `#[derive(LeanMarshal)] enum {0} {{ … }}`. -/\n",
+        ty.fqn
+    ));
+    s.push_str(&format!("inductive {} where\n", ty.fqn));
+    for c in &ty.ctors {
+        let ctor_name = lowercase_first(&c.name);
+        let ctor_safe = lean_safe_ident(&ctor_name);
+        if c.fields.is_empty() {
+            s.push_str(&format!("  | {ctor_safe} : {0}\n", ty.fqn));
+        } else {
+            s.push_str(&format!("  | {ctor_safe}"));
+            for (i, f) in c.fields.iter().enumerate() {
+                let lean_ty = rust_type_to_lean_type(&f.rust_type);
+                let binder_name = if f.name.is_empty() {
+                    format!("_arg{i}")
+                } else {
+                    lean_safe_ident(&f.name)
+                };
+                s.push_str(&format!(" ({binder_name} : {lean_ty})"));
+            }
+            s.push_str(&format!(" : {0}\n", ty.fqn));
+        }
+    }
+    s.push_str(&format!("deriving Leo4.LeanMarshal\n"));
+    s
+}
+
+fn render_unit_enum_mirror(ty: &UserTypeView) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "/-- Mirror of Rust `#[derive(LeanMarshal)] enum {0} {{ … }}` (all unit variants). -/\n",
+        ty.fqn
+    ));
+    s.push_str(&format!("inductive {} where\n", ty.fqn));
+    for c in &ty.ctors {
+        let ctor_name = lowercase_first(&c.name);
+        let ctor_safe = lean_safe_ident(&ctor_name);
+        s.push_str(&format!("  | {ctor_safe} : {0}\n", ty.fqn));
+    }
+    s.push_str(&format!("deriving Leo4.LeanMarshal\n"));
+    s
+}
+
+fn render_unit_struct_mirror(ty: &UserTypeView) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "/-- Mirror of Rust `#[derive(LeanMarshal)] struct {0};` (unit struct). -/\n",
+        ty.fqn
+    ));
+    s.push_str(&format!("structure {} where\n", ty.fqn));
+    s.push_str(&format!("deriving Leo4.LeanMarshal\n"));
+    s
+}
+
+/// Lowercase the first ASCII alphabetic char in `s`. Used to map
+/// Rust ctor idents (`Sat`, `Unsat`, `Abductive`, `Unknown`) to
+/// Lean ctor idents (`sat`, `unsat`, `abductive`, `unknown` —
+/// Lean's stdlib convention for inductive ctor names).
+fn lowercase_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_ascii_lowercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// RC.2 patch 2 — translate a Rust source-text type
+/// (whitespace-normalised by the derive macro, e.g.
+/// `"Vec<(String,String)>"`) into a Lean type expression
+/// (`"Array (String × String)"`). Uses `syn::parse_str::<Type>`
+/// to get a typed AST, then walks the result.
+///
+/// Recognised Rust types:
+///
+/// - Primitives: `u8`/`u16`/.../`u128` → `UInt8`/.../`UInt128`,
+///   `i8`/.../`i128` → `Int8`/.../`Int128`, `f32`/`f64` →
+///   `Float32`/`Float`, `bool` → `Bool`, `char` → `Char`,
+///   `()` → `Unit`.
+/// - Strings: `String` → `String`, `&str` / `&'static str` →
+///   `String` (Lean has no borrowed-string type at the boundary).
+/// - Collections: `Vec<u8>` → `ByteArray`, `Vec<T>` → `Array T`,
+///   `Option<T>` → `Option T`, `Result<T, E>` → `Except E T`.
+/// - Tuples: `(A, B)` → `A × B`, `(A, B, C)` → `A × B × C` (right-
+///   associative).
+/// - BigInt / BigNat: `BigInt` → `Int`, `BigNat` → `Nat`.
+/// - Box / reference: `Box<T>` → `T` (transparent at the boundary).
+/// - Unknown: passes through verbatim — assumes the input is a
+///   user-defined nominal type whose mirror decl lives in the
+///   same wrapper file.
+fn rust_type_to_lean_type(rust_src: &str) -> String {
+    match syn::parse_str::<syn::Type>(rust_src) {
+        Ok(ty) => translate_syn_type(&ty),
+        Err(_) => {
+            // Parse failed (the macro emitted an unparseable
+            // form). Fall back to the source text; the wrapper
+            // user will see a Lean-level type error pointing at
+            // the offending line and can hand-correct.
+            rust_src.to_string()
+        }
+    }
+}
+
+fn translate_syn_type(ty: &syn::Type) -> String {
+    use syn::Type;
+    match ty {
+        Type::Path(tp) => translate_type_path(tp),
+        Type::Tuple(tt) => {
+            if tt.elems.is_empty() {
+                return "Unit".to_string();
+            }
+            let parts: Vec<String> = tt
+                .elems
+                .iter()
+                .map(translate_syn_type)
+                .collect();
+            // Right-associative product. `(A, B, C)` → `A × (B × C)`
+            // — matches Lean's Prod convention; parens preserve
+            // associativity.
+            translate_tuple_right_assoc(&parts)
+        }
+        Type::Reference(tr) => translate_syn_type(&tr.elem),
+        Type::Paren(tp) => format!("({})", translate_syn_type(&tp.elem)),
+        Type::Array(ta) => {
+            // Rust `[T; N]` → Lean `Array T` (length erased
+            // at the boundary; matches `Vec<T>` lowering).
+            format!("Array {}", translate_syn_type(&ta.elem))
+        }
+        Type::Slice(ts) => {
+            format!("Array {}", translate_syn_type(&ts.elem))
+        }
+        _ => quote::ToTokens::to_token_stream(ty).to_string(),
+    }
+}
+
+fn translate_type_path(tp: &syn::TypePath) -> String {
+    let seg = match tp.path.segments.last() {
+        Some(s) => s,
+        None => return quote::ToTokens::to_token_stream(tp).to_string(),
+    };
+    let name = seg.ident.to_string();
+
+    // Extract generic args, if any.
+    let args: Vec<&syn::Type> = match &seg.arguments {
+        syn::PathArguments::AngleBracketed(ab) => ab
+            .args
+            .iter()
+            .filter_map(|a| match a {
+                syn::GenericArgument::Type(t) => Some(t),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    match (name.as_str(), args.len()) {
+        // Primitives.
+        ("u8", 0) => "UInt8".to_string(),
+        ("u16", 0) => "UInt16".to_string(),
+        ("u32", 0) => "UInt32".to_string(),
+        ("u64", 0) => "UInt64".to_string(),
+        ("u128", 0) => "UInt128".to_string(),
+        ("usize", 0) => "USize".to_string(),
+        ("i8", 0) => "Int8".to_string(),
+        ("i16", 0) => "Int16".to_string(),
+        ("i32", 0) => "Int32".to_string(),
+        ("i64", 0) => "Int64".to_string(),
+        ("i128", 0) => "Int128".to_string(),
+        ("isize", 0) => "ISize".to_string(),
+        ("f32", 0) => "Float32".to_string(),
+        ("f64", 0) => "Float".to_string(),
+        ("bool", 0) => "Bool".to_string(),
+        ("char", 0) => "Char".to_string(),
+        ("String", 0) => "String".to_string(),
+        ("str", 0) => "String".to_string(),
+        ("BigInt", 0) => "Int".to_string(),
+        ("BigNat", 0) => "Nat".to_string(),
+        // Containers.
+        ("Vec", 1) => {
+            let inner = translate_syn_type(args[0]);
+            if inner == "UInt8" {
+                "ByteArray".to_string()
+            } else {
+                format!("Array ({inner})")
+            }
+        }
+        ("Option", 1) => format!("Option ({})", translate_syn_type(args[0])),
+        ("Result", 2) => {
+            // Rust `Result<T, E>` ↔ Lean `Except E T` (Lean
+            // puts error before value).
+            let t = translate_syn_type(args[0]);
+            let e = translate_syn_type(args[1]);
+            format!("Except ({e}) ({t})")
+        }
+        ("Box", 1) => translate_syn_type(args[0]),
+        // User-defined / unknown — pass through. Generic
+        // user types apply args directly: `Pair<u32, str>` →
+        // `Pair UInt32 String`.
+        _ => {
+            if args.is_empty() {
+                name
+            } else {
+                let arg_strs: Vec<String> =
+                    args.iter().map(|a| translate_syn_type(a)).collect();
+                let arg_block: Vec<String> = arg_strs
+                    .iter()
+                    .map(|s| format!("({s})"))
+                    .collect();
+                format!("{name} {}", arg_block.join(" "))
+            }
+        }
+    }
+}
+
+fn translate_tuple_right_assoc(parts: &[String]) -> String {
+    match parts.len() {
+        0 => "Unit".to_string(),
+        1 => parts[0].clone(),
+        2 => format!("({} × {})", parts[0], parts[1]),
+        _ => {
+            let head = &parts[0];
+            let tail = translate_tuple_right_assoc(&parts[1..]);
+            format!("({head} × {tail})")
+        }
+    }
 }
 
 fn render_one_export(e: &EntryView) -> Result<String, String> {
@@ -655,9 +1091,142 @@ fn lean_type_of_mangle(mangle: &str) -> Option<String> {
                 let inner = lean_type_of_mangle(rest)?;
                 return Some(format!("Option {inner}"));
             }
+            // User-defined nominal types — RC.2 patch 1
+            // (2026-05-31). Mangle prefixes per
+            // `crates/schema-idl/src/mangle.rs::mangle_type`:
+            //
+            // - `S_<fqn>_s` — record (no generics) →
+            //   Lean type ident `<fqn>` (underscored).
+            // - `V_<fqn>_v` — variant (no generics).
+            // - `E_<fqn>_e` — enum (all-unit C-style).
+            // - `F_<fqn>_f` — flags (bitfield).
+            // - `X_<fqn>_x` — resource handle.
+            //
+            // RC.2 scope: no-generics cases only. The FQN
+            // is the underscored form
+            // (`fqn_seg(fqn).replace(['.','-'], '_')`) —
+            // round-trip dot-restoration is lossy (an
+            // underscore could come from a dot, a dash, or
+            // a literal underscore in the source ident),
+            // so the emitter passes through as-is. The
+            // matching mirror Lean decl (`inductive` /
+            // `structure` / etc.) gets emitted by Patch 2
+            // alongside the wrapper, so the resulting
+            // `Rust.lean` is self-contained.
+            //
+            // Generic instantiations (`S_<fqn>_<arg1>_<arg2>_..._s`,
+            // `V_<fqn>_<args>_v`, `X_<fqn>_<args>_x`) need
+            // a full mangle tokeniser to split FQN from
+            // generic args unambiguously (mangle is
+            // ambiguous under simple split because FQN
+            // segments can collide with arg-mangle tokens
+            // like `u32` if a user picks `def u32 := …` as
+            // a type alias). RC.2 defers — returns `None`
+            // for those, falling back to the stub-panic
+            // path; RC.3 lifts the tokeniser.
+            if let Some(rest) =
+                other.strip_prefix("S_").and_then(|r| r.strip_suffix("_s"))
+            {
+                if mangle_segment_is_plain_fqn(rest) {
+                    return Some(rest.to_string());
+                }
+                return None;
+            }
+            if let Some(rest) =
+                other.strip_prefix("V_").and_then(|r| r.strip_suffix("_v"))
+            {
+                if mangle_segment_is_plain_fqn(rest) {
+                    return Some(rest.to_string());
+                }
+                return None;
+            }
+            if let Some(rest) =
+                other.strip_prefix("E_").and_then(|r| r.strip_suffix("_e"))
+            {
+                if mangle_segment_is_plain_fqn(rest) {
+                    return Some(rest.to_string());
+                }
+                return None;
+            }
+            if let Some(rest) =
+                other.strip_prefix("F_").and_then(|r| r.strip_suffix("_f"))
+            {
+                if mangle_segment_is_plain_fqn(rest) {
+                    return Some(rest.to_string());
+                }
+                return None;
+            }
+            if let Some(rest) =
+                other.strip_prefix("X_").and_then(|r| r.strip_suffix("_x"))
+            {
+                if mangle_segment_is_plain_fqn(rest) {
+                    return Some(rest.to_string());
+                }
+                return None;
+            }
             return None;
         }
     })
+}
+
+/// RC.2 patch 1 helper — heuristic check that `rest`
+/// looks like an unambiguous FQN with no embedded generic
+/// args. Returns `true` when every underscore-separated
+/// segment is a plain Lean ident segment (alphanumeric,
+/// no leading digit) AND none of the segments matches a
+/// primitive mangle token (`u8`/`u16`/.../`f32`/`f64`/
+/// `b`/`c`/`str`/`bI`/`bN`) or a composite mangle prefix
+/// (`L`/`O`/`Rz`/`T`/`S`/`V`/`E`/`F`/`X`/`I`/`A`).
+///
+/// Rationale: the mangle scheme collapses `.` and `-` to
+/// `_` so `Sample.Color` and `Sample_Color` both encode
+/// to `Sample_Color`. The decoder can't distinguish
+/// them. But it CAN tell that `My_Kv_Pair_u32_str` has
+/// `u32` and `str` segments which are primitive mangles
+/// — i.e. it's a generic instantiation, not a plain FQN.
+/// Defer those to RC.3.
+///
+/// False positives possible if a user names a Lean type
+/// `Foo.u32` or `bar_str_quux` etc. — they get treated
+/// as generic instantiations and return `None` → falls
+/// back to stub-panic. Same observable as the pre-RC.2
+/// behaviour; users rename or wait for RC.3's tokeniser.
+fn mangle_segment_is_plain_fqn(rest: &str) -> bool {
+    if rest.is_empty() {
+        return false;
+    }
+    for segment in rest.split('_') {
+        if segment.is_empty() {
+            return false;
+        }
+        // Reject if segment is a primitive mangle token.
+        if matches!(
+            segment,
+            "u8" | "u16" | "u32" | "u64"
+            | "i8" | "i16" | "i32" | "i64"
+            | "f32" | "f64"
+            | "b" | "c" | "str" | "bI" | "bN"
+            | "self"
+            // Composite-mangle terminator letters at
+            // standalone segment position would only
+            // appear inside a generic-arg list (e.g.
+            // `S_Foo_L_u32_l_s` → segments after `Foo`
+            // are `L`/`u32`/`l`).
+            | "l" | "o" | "z" | "t" | "s" | "v" | "e"
+            | "f" | "x" | "i" | "a"
+            | "r"
+        ) {
+            return false;
+        }
+        // First char of any FQN segment must be a letter
+        // (Lean ident grammar) — never a digit. Mangle
+        // tokens like `c0c` (Cyc(0)) get rejected here.
+        let first = segment.chars().next().unwrap();
+        if !first.is_alphabetic() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Lean identifiers borrow Rust's lexical set, but a tiny set of
@@ -892,9 +1461,99 @@ mod tests {
 
     #[test]
     fn lean_type_of_mangle_unknown_returns_none() {
-        assert_eq!(lean_type_of_mangle("S_Sample_Point_s"), None);
         assert_eq!(lean_type_of_mangle("garbage"), None);
+        // RC.2 patch 1 lifted the `S_<fqn>_s` arm — see
+        // `lean_type_of_mangle_user_defined_*` tests below.
     }
+
+    // ─── RC.2 patch 1 — user-defined nominal types ───
+    // 2026-05-31. `lean_type_of_mangle` now decodes the
+    // five user-defined-nominal mangle prefixes
+    // (`S_<fqn>_s`, `V_<fqn>_v`, `E_<fqn>_e`,
+    // `F_<fqn>_f`, `X_<fqn>_x`) to the underscored FQN
+    // form. Generic instantiations stay `None`-fallback
+    // (defer to RC.3 tokeniser).
+
+    #[test]
+    fn lean_type_of_mangle_user_defined_record_no_generics() {
+        // `structure Point where x : UInt32, y : UInt32`
+        // → mangle `S_Point_s` → Lean type `Point`.
+        assert_eq!(
+            lean_type_of_mangle("S_Point_s").as_deref(),
+            Some("Point"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_user_defined_variant_no_generics() {
+        // The flagship typed-enum case the RC.2 patch
+        // exists for: `enum AdsmtVerdict { Sat { … },
+        // Unsat { … }, Abductive { … }, Unknown { … } }`
+        // → mangle `V_AdsmtVerdict_v` → Lean type
+        // `AdsmtVerdict`. The matching `inductive`
+        // decl lands via Patch 2.
+        assert_eq!(
+            lean_type_of_mangle("V_AdsmtVerdict_v").as_deref(),
+            Some("AdsmtVerdict"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_user_defined_namespaced_fqn() {
+        // Lean FQN `Sample.Color` mangles to
+        // `E_Sample_Color_e` (dots → underscores).
+        // Decoder returns `Sample_Color` (underscored;
+        // round-trip dot-restoration is lossy). Users
+        // expecting `Sample.Color` need to either rename
+        // their Lean type or wait for the RC.3 mangle
+        // tokeniser.
+        assert_eq!(
+            lean_type_of_mangle("E_Sample_Color_e").as_deref(),
+            Some("Sample_Color"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_user_defined_flags() {
+        assert_eq!(
+            lean_type_of_mangle("F_Perms_f").as_deref(),
+            Some("Perms"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_user_defined_resource() {
+        assert_eq!(
+            lean_type_of_mangle("X_ParserHandle_x").as_deref(),
+            Some("ParserHandle"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_generic_instantiation_returns_none() {
+        // Generic instantiations like `S_My_Kv_Pair_u32_str_s`
+        // require a full mangle tokeniser to split FQN from
+        // generic args — `mangle_segment_is_plain_fqn`
+        // detects the embedded primitive-mangle tokens
+        // (`u32`, `str`) and rejects. Falls back to the
+        // stub-panic path; RC.3 lifts.
+        assert_eq!(
+            lean_type_of_mangle("S_My_Kv_Pair_u32_str_s"),
+            None,
+        );
+        assert_eq!(
+            lean_type_of_mangle("V_Result2_u32_v"),
+            None,
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_segment_starting_with_digit_returns_none() {
+        // Lean idents can't start with a digit. A mangle
+        // like `S_1Foo_s` violates the heuristic → None.
+        assert_eq!(lean_type_of_mangle("S_1Foo_s"), None);
+    }
+
 
     #[test]
     fn lean_safe_ident_avoids_keywords() {
@@ -924,10 +1583,15 @@ mod tests {
 
     #[test]
     fn render_one_export_stubs_unmapped_signature() {
+        // RC.2 patch 1 (2026-05-31): `S_Sample_Point_s`
+        // now maps to a Lean type (`Sample_Point`); pick a
+        // mangle that genuinely doesn't decode (generic
+        // instantiation — RC.3 tokeniser territory) so
+        // the stub-panic path still gets coverage.
         let e = EntryView {
             logical_name: "solve".into(),
-            mangled: "leo4_rust__solve__S_Sample_Point_s".into(),
-            param_types: vec!["S_Sample_Point_s".into()],
+            mangled: "leo4_rust__solve__S_My_Pair_u32_str_s".into(),
+            param_types: vec!["S_My_Pair_u32_str_s".into()],
             ret_type: "u32".into(),
             isolated: false,
             abi_version: 1,
@@ -949,7 +1613,7 @@ mod tests {
             isolated: false,
             abi_version: 1,
         }];
-        let s = render_lean_wrapper("My.Rust", "my", "My", "abcdefghijklm", &entries).unwrap();
+        let s = render_lean_wrapper("My.Rust", "my", "My", "abcdefghijklm", &entries, &[]).unwrap();
         assert!(s.contains("namespace My.Rust"));
         assert!(s.contains("def schemaHash : String := \"abcdefghijklm\""));
         assert!(s.contains("@[extern \"leo4_rust_call_lean\"]"));
@@ -959,5 +1623,255 @@ mod tests {
         assert!(s.contains("private def decodeStatus"));
         assert!(s.contains("def ping") && s.contains("IO (Unit)"));
         assert!(s.contains("end My.Rust"));
+    }
+
+    // ─── RC.2 patch 2 — mirror decl emit ───────────────
+
+    #[test]
+    fn rust_type_to_lean_type_scalars() {
+        assert_eq!(rust_type_to_lean_type("u8"), "UInt8");
+        assert_eq!(rust_type_to_lean_type("u64"), "UInt64");
+        assert_eq!(rust_type_to_lean_type("i32"), "Int32");
+        assert_eq!(rust_type_to_lean_type("f64"), "Float");
+        assert_eq!(rust_type_to_lean_type("bool"), "Bool");
+        assert_eq!(rust_type_to_lean_type("char"), "Char");
+        assert_eq!(rust_type_to_lean_type("String"), "String");
+        assert_eq!(rust_type_to_lean_type("()"), "Unit");
+    }
+
+    #[test]
+    fn rust_type_to_lean_type_vec_special_cases() {
+        // Vec<u8> → ByteArray (special-cased for the common
+        // binary-blob pattern that wire-decodes faster as
+        // ByteArray than via Array UInt8).
+        assert_eq!(rust_type_to_lean_type("Vec<u8>"), "ByteArray");
+        // Vec<T> for general T → Array T.
+        assert_eq!(rust_type_to_lean_type("Vec<u32>"), "Array (UInt32)");
+        assert_eq!(rust_type_to_lean_type("Vec<String>"), "Array (String)");
+    }
+
+    #[test]
+    fn rust_type_to_lean_type_option_result_box() {
+        assert_eq!(
+            rust_type_to_lean_type("Option<u64>"),
+            "Option (UInt64)"
+        );
+        assert_eq!(
+            rust_type_to_lean_type("Result<u32,String>"),
+            "Except (String) (UInt32)"
+        );
+        // Box is transparent at the boundary.
+        assert_eq!(rust_type_to_lean_type("Box<u64>"), "UInt64");
+    }
+
+    #[test]
+    fn rust_type_to_lean_type_tuples_right_assoc() {
+        assert_eq!(
+            rust_type_to_lean_type("(u32,u64)"),
+            "(UInt32 × UInt64)"
+        );
+        assert_eq!(
+            rust_type_to_lean_type("(u32,u64,String)"),
+            "(UInt32 × (UInt64 × String))"
+        );
+        // The flagship nested case from the user's
+        // AdsmtVerdict.Sat — Vec<(String, String)>.
+        assert_eq!(
+            rust_type_to_lean_type("Vec<(String,String)>"),
+            "Array ((String × String))"
+        );
+    }
+
+    #[test]
+    fn rust_type_to_lean_type_user_defined_passes_through() {
+        // Unknown idents are assumed to be user-defined
+        // nominal types — the wrapper's mirror block puts
+        // them in scope.
+        assert_eq!(
+            rust_type_to_lean_type("AdsmtVerdict"),
+            "AdsmtVerdict"
+        );
+        assert_eq!(
+            rust_type_to_lean_type("Vec<AdsmtVerdict>"),
+            "Array (AdsmtVerdict)"
+        );
+        // Generic user-types apply args as Lean App-style.
+        assert_eq!(
+            rust_type_to_lean_type("Pair<u32,String>"),
+            "Pair (UInt32) (String)"
+        );
+    }
+
+    #[test]
+    fn render_unit_enum_mirror_emits_inductive_with_deriving() {
+        // C-style enum mirror.
+        let ty = UserTypeView {
+            fqn: "Color".into(),
+            kind: UserTypeKind::UnitEnum,
+            fields: vec![],
+            ctors: vec![
+                CtorView { name: "Red".into(), fields: vec![] },
+                CtorView { name: "Green".into(), fields: vec![] },
+                CtorView { name: "Blue".into(), fields: vec![] },
+            ],
+        };
+        let s = render_one_user_type(&ty);
+        assert!(s.contains("inductive Color where"));
+        // Lowercase Lean ctor names.
+        assert!(s.contains("| red : Color"));
+        assert!(s.contains("| green : Color"));
+        assert!(s.contains("| blue : Color"));
+        assert!(s.contains("deriving Leo4.LeanMarshal"));
+    }
+
+    #[test]
+    fn render_record_mirror_emits_structure_with_fields() {
+        let ty = UserTypeView {
+            fqn: "Point".into(),
+            kind: UserTypeKind::Record,
+            fields: vec![
+                FieldView { name: "x".into(), type_mangle: "".into(), rust_type: "u32".into() },
+                FieldView { name: "y".into(), type_mangle: "".into(), rust_type: "u32".into() },
+            ],
+            ctors: vec![],
+        };
+        let s = render_one_user_type(&ty);
+        assert!(s.contains("structure Point where"));
+        assert!(s.contains("x : UInt32"));
+        assert!(s.contains("y : UInt32"));
+        assert!(s.contains("deriving Leo4.LeanMarshal"));
+    }
+
+    #[test]
+    fn render_variant_mirror_emits_full_typed_enum_for_adsmt_verdict() {
+        // The flagship typed-enum case the RC.2 patches
+        // exist for. End-to-end check that:
+        // 1. Inductive is emitted with the right name.
+        // 2. Each ctor lowercases the first char.
+        // 3. Each named field gets its name as a binder.
+        // 4. Nested Vec<(String,String)> translates to
+        //    `Array ((String × String))`.
+        // 5. Vec<AbductiveCandidate> translates to
+        //    `Array (AbductiveCandidate)`.
+        // 6. `deriving Leo4.LeanMarshal` ends the decl.
+        let ty = UserTypeView {
+            fqn: "AdsmtVerdict".into(),
+            kind: UserTypeKind::Variant,
+            fields: vec![],
+            ctors: vec![
+                CtorView {
+                    name: "Sat".into(),
+                    fields: vec![FieldView {
+                        name: "model".into(),
+                        type_mangle: "".into(),
+                        rust_type: "Vec<(String,String)>".into(),
+                    }],
+                },
+                CtorView {
+                    name: "Unsat".into(),
+                    fields: vec![
+                        FieldView { name: "core".into(), type_mangle: "".into(), rust_type: "Vec<String>".into() },
+                        FieldView { name: "cert".into(), type_mangle: "".into(), rust_type: "String".into() },
+                    ],
+                },
+                CtorView {
+                    name: "Abductive".into(),
+                    fields: vec![FieldView {
+                        name: "candidates".into(),
+                        type_mangle: "".into(),
+                        rust_type: "Vec<AbductiveCandidate>".into(),
+                    }],
+                },
+                CtorView {
+                    name: "Unknown".into(),
+                    fields: vec![FieldView {
+                        name: "reason".into(),
+                        type_mangle: "".into(),
+                        rust_type: "String".into(),
+                    }],
+                },
+            ],
+        };
+        let s = render_one_user_type(&ty);
+        assert!(s.contains("inductive AdsmtVerdict where"), "missing inductive header: {s}");
+        // Sat with nested Vec<(String,String)>.
+        assert!(
+            s.contains("| sat (model : Array ((String × String))) : AdsmtVerdict"),
+            "missing sat arm: {s}"
+        );
+        // Unsat with two named fields.
+        assert!(
+            s.contains("| unsat (core : Array (String)) (cert : String) : AdsmtVerdict"),
+            "missing unsat arm: {s}"
+        );
+        // Abductive with Vec<AbductiveCandidate>.
+        assert!(
+            s.contains("| abductive (candidates : Array (AbductiveCandidate)) : AdsmtVerdict"),
+            "missing abductive arm: {s}"
+        );
+        // Unknown with single String field.
+        assert!(
+            s.contains("| unknown (reason : String) : AdsmtVerdict"),
+            "missing unknown arm: {s}"
+        );
+        assert!(s.contains("deriving Leo4.LeanMarshal"));
+    }
+
+    #[test]
+    fn render_lean_wrapper_emits_mirror_block_for_typed_enum_export() {
+        // End-to-end: an export with a typed-enum
+        // parameter, along with the matching USER_TYPES
+        // entry, round-trips through render_lean_wrapper.
+        // The wrapper emits both the mirror inductive AND
+        // the typed `def solve` wrapper signature.
+        let entries = vec![EntryView {
+            logical_name: "solve".into(),
+            mangled: "leo4_rust__solve__V_AdsmtVerdict_v".into(),
+            param_types: vec!["V_AdsmtVerdict_v".into()],
+            ret_type: "str".into(),
+            isolated: false,
+            abi_version: 1,
+        }];
+        let user_types = vec![UserTypeView {
+            fqn: "AdsmtVerdict".into(),
+            kind: UserTypeKind::Variant,
+            fields: vec![],
+            ctors: vec![
+                CtorView {
+                    name: "Sat".into(),
+                    fields: vec![FieldView {
+                        name: "model".into(),
+                        type_mangle: "".into(),
+                        rust_type: "Vec<(String,String)>".into(),
+                    }],
+                },
+                CtorView {
+                    name: "Unknown".into(),
+                    fields: vec![FieldView {
+                        name: "reason".into(),
+                        type_mangle: "".into(),
+                        rust_type: "String".into(),
+                    }],
+                },
+            ],
+        }];
+        let s = render_lean_wrapper(
+            "My.Rust",
+            "my",
+            "My",
+            "0123456789abc",
+            &entries,
+            &user_types,
+        )
+        .unwrap();
+        // Mirror inductive present.
+        assert!(s.contains("inductive AdsmtVerdict where"));
+        assert!(s.contains("| sat (model : Array ((String × String))) : AdsmtVerdict"));
+        assert!(s.contains("| unknown (reason : String) : AdsmtVerdict"));
+        assert!(s.contains("deriving Leo4.LeanMarshal"));
+        // Typed export signature.
+        assert!(s.contains("def solve (a0 : AdsmtVerdict) : IO (String)"));
+        // No stub panic — patch 1 mapped the variant.
+        assert!(!s.contains("has an unmapped parameter"));
     }
 }
