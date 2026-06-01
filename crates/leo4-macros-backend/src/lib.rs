@@ -228,15 +228,43 @@ fn expand_one(item: &ImportItem, mangling: &serde_json::Value) -> syn::Result<To
         }
         lookup_mangled_body(mangling, &fname, arg_mangles)
     } else {
-        let arg_idls_opt: Vec<Option<IDLType>> =
-            arg_types.iter().map(rust_type_to_idl).collect();
+        // RC.2 patch 3 (2026-05-31) — multi-candidate lookup.
+        // Each arg type lowers to a list of candidate IDLTypes;
+        // for user-defined idents the list contains all 5
+        // possible kinds (Record / Variant / Enum / Flags /
+        // Resource). The macro then takes the Cartesian product
+        // across args and tries each combo against the mangling-
+        // JSON table. The unique match wins. Falls through to
+        // Tier 3 (single-instantiation fname lookup) when no
+        // candidate succeeds.
+        let arg_idls_opt: Vec<Option<Vec<IDLType>>> = arg_types
+            .iter()
+            .map(rust_type_to_idl_candidates)
+            .collect();
         let all_known = arg_idls_opt.iter().all(Option::is_some);
         if all_known {
-            let arg_mangles: Vec<String> = arg_idls_opt
-                .iter()
-                .map(|t| mangle_type(t.as_ref().unwrap()))
-                .collect();
-            lookup_mangled_body(mangling, &fname, &arg_mangles)
+            let arg_cands: Vec<Vec<IDLType>> =
+                arg_idls_opt.into_iter().map(Option::unwrap).collect();
+            let combos = cartesian_product(&arg_cands);
+            let mut found: Result<String, String> = Err(
+                "no candidate arg-mangle combo matched (RC.2 patch 3 multi-kind lookup)"
+                    .to_string(),
+            );
+            for combo in &combos {
+                let arg_mangles: Vec<String> =
+                    combo.iter().map(mangle_type).collect();
+                if let Ok(body) =
+                    lookup_mangled_body(mangling, &fname, &arg_mangles)
+                {
+                    found = Ok(body);
+                    break;
+                }
+            }
+            // Fall through to Tier 3 if multi-candidate lookup
+            // failed — preserves backward compat with the prior
+            // behaviour where unknown types triggered single-
+            // instantiation fallback.
+            found.or_else(|_| lookup_single_instantiation(mangling, &fname))
         } else {
             lookup_single_instantiation(mangling, &fname)
         }
@@ -389,27 +417,28 @@ fn outbound_callback_encode(
     }
 }
 
+/// Strict single-result lowering — `None` for any type the
+/// table doesn't recognise outright, *including* user-defined
+/// nominal idents. Used by `#[leo4::export]` (reverse direction)
+/// where an unrecognised type at macro-expand time becomes a
+/// clear diagnostic before generated code surfaces the same gap
+/// as a less-friendly `LeanMarshal`-trait-not-found error.
+///
+/// `leo4::import!` (forward direction) uses the multi-candidate
+/// version [`rust_type_to_idl_candidates`] instead — it needs to
+/// resolve `AdsmtVerdict`-style user idents against the
+/// mangling-JSON table without forcing the user to manually
+/// disambiguate via `#[leo4(args = "…")]`.
 fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
     if let Type::Tuple(t) = ty {
         if t.elems.is_empty() {
-            // unit type `()`; no IDL counterpart at v0.
             return None;
         }
         let inners: ::std::option::Option<Vec<IDLType>> =
             t.elems.iter().map(rust_type_to_idl).collect();
         return inners.map(IDLType::Tuple);
     }
-    // Phase 10-B1.x outbound callback recognition (#75 step 2,
-    // 2026-05-28). `fn(T₁,…,Tₙ) -> R` bare function-pointer types
-    // in `leo4::import!` signatures lower to the same
-    // `IDLType::Fn` slot that `LeanCallback<R, Args>` uses on the
-    // inbound side — wire form is identical (u64 callback_id),
-    // SPEC §13a. The macro then emits a register + encode +
-    // call + decode shim around the user's `fn` pointer.
     if let Type::BareFn(bare) = ty {
-        // Skip exotic bare-fn surfaces (variadic, unsafe, extern
-        // ABI): leo4 boundary closures are always plain Rust
-        // `fn(...) -> R`.
         if bare.lifetimes.is_some()
             || bare.unsafety.is_some()
             || bare.abi.is_some()
@@ -449,7 +478,10 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
             })
             .collect()
     };
-    use IDLType::{U8, U16, U32, U64, I8, I16, I32, I64, Record, F32, F64, Bool, Char, String, List, Option, Result, Fn};
+    use IDLType::{
+        U8, U16, U32, U64, I8, I16, I32, I64, Record, F32, F64, Bool, Char,
+        String, List, Option, Result, Fn,
+    };
     Some(match name.as_str() {
         "u8" => U8,
         "u16" => U16,
@@ -459,8 +491,6 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
         "i16" => I16,
         "i32" => I32,
         "i64" => I64,
-        // Stable 128-bit integers (#55). Pair with Lean `Leo4.LeanU128`
-        // / `Leo4.LeanI128` records on the wire (16 bytes LE).
         "u128" => Record {
             fqn: "Leo4.LeanU128".to_string(),
             args: vec![],
@@ -490,10 +520,6 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
             let e = args.get(1).and_then(rust_type_to_idl).map(Box::new);
             Result(Box::new(t), e)
         }
-        // Phase 10-B1.x — function-arrow params crossing the boundary
-        // as Lean closures appear in user exports as
-        // `LeanCallback<R, Args>`. The second generic is either a
-        // tuple of arg types (n-ary) or a single type (1-arg shorthand).
         "LeanCallback" => {
             let args = args_of_seg();
             let ret = rust_type_to_idl(args.first()?)?;
@@ -513,12 +539,262 @@ fn rust_type_to_idl(ty: &Type) -> Option<IDLType> {
         }
         _ => return None,
     })
-    .or({
-        // Fall through to handle Type::Tuple via the outer caller —
-        // the closure above returns None for unrecognised idents,
-        // and Some(...) for the matched arms; .or_else here is dead.
-        None
-    })
+}
+
+/// RC.2 patch 3 — lower a Rust type to one *or more* candidate
+/// `IDLType`s. Single-element list for unambiguous mappings
+/// (scalars, `Vec<T>`, `Option<T>`, `Result<T, E>`, `LeanCallback`,
+/// `fn(...)`, tuples of known types). For user-defined nominal
+/// idents (anything not in the recognised primitive / composite
+/// table — `AdsmtVerdict`, `Point`, `Color`, etc.) the macro
+/// can't tell from the type alone whether the user's `Lean`
+/// inductive / structure on the other side was Record / Variant /
+/// Enum / Flags / Resource — they all collapse to a bare ident in
+/// Rust source. Returns *all five candidate kinds* so the
+/// `import!` arg-lookup loop can try each against the mangling-
+/// JSON table and pick the unique match.
+///
+/// Nested-generic types with multiple user-defined idents (e.g.
+/// `Result<AdsmtVerdict, AbductiveCandidate>`) produce the
+/// Cartesian product of inner candidates — so the outer wrapper
+/// sees every consistent combination.
+///
+/// Returns `None` when the type can't be lowered at all (the unit
+/// type `()`, exotic bare-fn surfaces, qualified paths, etc.).
+/// Used exclusively by `leo4::import!`; `#[leo4::export]` stays
+/// on the strict [`rust_type_to_idl`] path so unrecognised
+/// parameter types surface as macro-time diagnostics.
+fn rust_type_to_idl_candidates(ty: &Type) -> Option<Vec<IDLType>> {
+    if let Type::Tuple(t) = ty {
+        if t.elems.is_empty() {
+            return None;
+        }
+        // Cartesian product over per-elem candidates.
+        let per_elem: ::std::option::Option<Vec<Vec<IDLType>>> =
+            t.elems.iter().map(rust_type_to_idl_candidates).collect();
+        let per_elem = per_elem?;
+        let combos = cartesian_product(&per_elem);
+        return Some(combos.into_iter().map(IDLType::Tuple).collect());
+    }
+    if let Type::BareFn(bare) = ty {
+        if bare.lifetimes.is_some()
+            || bare.unsafety.is_some()
+            || bare.abi.is_some()
+            || bare.variadic.is_some()
+        {
+            return None;
+        }
+        let args_per: ::std::option::Option<Vec<Vec<IDLType>>> = bare
+            .inputs
+            .iter()
+            .map(|a| rust_type_to_idl_candidates(&a.ty))
+            .collect();
+        let args_per = args_per?;
+        let ret_cands = match &bare.output {
+            ReturnType::Default => return None,
+            ReturnType::Type(_, t) => rust_type_to_idl_candidates(t)?,
+        };
+        let args_combos = cartesian_product(&args_per);
+        let mut out = Vec::with_capacity(args_combos.len() * ret_cands.len());
+        for args in &args_combos {
+            for ret in &ret_cands {
+                out.push(IDLType::Fn {
+                    args: args.clone(),
+                    ret: Box::new(ret.clone()),
+                });
+            }
+        }
+        return Some(out);
+    }
+    let Type::Path(p) = ty else { return None };
+    if p.qself.is_some() {
+        return None;
+    }
+    let last = p.path.segments.last()?;
+    let name = last.ident.to_string();
+    let args_of_seg = || -> Vec<Type> {
+        let PathArguments::AngleBracketed(ab) = &last.arguments else {
+            return Vec::new();
+        };
+        ab.args
+            .iter()
+            .filter_map(|a| match a {
+                GenericArgument::Type(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    use IDLType::{
+        U8, U16, U32, U64, I8, I16, I32, I64, Record, Variant, Enum, Flags,
+        Resource, F32, F64, Bool, Char, String, List, Option, Result, Fn,
+    };
+    match name.as_str() {
+        "u8" => Some(vec![U8]),
+        "u16" => Some(vec![U16]),
+        "u32" => Some(vec![U32]),
+        "u64" => Some(vec![U64]),
+        "i8" => Some(vec![I8]),
+        "i16" => Some(vec![I16]),
+        "i32" => Some(vec![I32]),
+        "i64" => Some(vec![I64]),
+        "u128" => Some(vec![Record {
+            fqn: "Leo4.LeanU128".to_string(),
+            args: vec![],
+        }]),
+        "i128" => Some(vec![Record {
+            fqn: "Leo4.LeanI128".to_string(),
+            args: vec![],
+        }]),
+        "f32" => Some(vec![F32]),
+        "f64" => Some(vec![F64]),
+        "bool" => Some(vec![Bool]),
+        "char" => Some(vec![Char]),
+        "String" => Some(vec![String]),
+        "Vec" => {
+            let args = args_of_seg();
+            let inner_cands = rust_type_to_idl_candidates(args.first()?)?;
+            Some(
+                inner_cands
+                    .into_iter()
+                    .map(|i| List(Box::new(i)))
+                    .collect(),
+            )
+        }
+        "Option" => {
+            let args = args_of_seg();
+            let inner_cands = rust_type_to_idl_candidates(args.first()?)?;
+            Some(
+                inner_cands
+                    .into_iter()
+                    .map(|i| Option(Box::new(i)))
+                    .collect(),
+            )
+        }
+        "Result" => {
+            let args = args_of_seg();
+            let t_cands = rust_type_to_idl_candidates(args.first()?)?;
+            let e_cands = args
+                .get(1)
+                .and_then(rust_type_to_idl_candidates)
+                .unwrap_or_else(|| vec![]);
+            let mut out = Vec::new();
+            for t in &t_cands {
+                if e_cands.is_empty() {
+                    out.push(Result(Box::new(t.clone()), None));
+                } else {
+                    for e in &e_cands {
+                        out.push(Result(
+                            Box::new(t.clone()),
+                            Some(Box::new(e.clone())),
+                        ));
+                    }
+                }
+            }
+            Some(out)
+        }
+        "LeanCallback" => {
+            let args = args_of_seg();
+            let ret_cands = rust_type_to_idl_candidates(args.first()?)?;
+            let args_param = args.get(1)?;
+            let arrow_args_cands: Vec<Vec<IDLType>> = match args_param {
+                Type::Tuple(t) => {
+                    let per_elem: ::std::option::Option<Vec<Vec<IDLType>>> =
+                        t.elems.iter().map(rust_type_to_idl_candidates).collect();
+                    cartesian_product(&per_elem?)
+                }
+                _ => {
+                    let inner_cands =
+                        rust_type_to_idl_candidates(args_param)?;
+                    inner_cands.into_iter().map(|c| vec![c]).collect()
+                }
+            };
+            let mut out = Vec::new();
+            for args in &arrow_args_cands {
+                for ret in &ret_cands {
+                    out.push(Fn {
+                        args: args.clone(),
+                        ret: Box::new(ret.clone()),
+                    });
+                }
+            }
+            Some(out)
+        }
+        // RC.2 patch 3 (2026-05-31) — user-defined nominal ident
+        // fallback. The macro can't tell whether the matching
+        // Lean-side declaration is `inductive` (Variant or Enum)
+        // vs `structure` (Record) vs `flags` vs `resource` from
+        // the Rust type alone (all collapse to a bare ident).
+        // Return all 5 candidate kinds; the `import!` /
+        // `#[leo4::export]` arg-lookup loop tries each combo
+        // against the mangling-JSON table to find the unique
+        // match. Generic instantiations (the type has an
+        // angle-bracketed arg list) recurse into each arg with
+        // its own candidate set + Cartesian product.
+        _ => {
+            let fqn = name.clone();
+            let inner_arg_types = args_of_seg();
+            let inner_arg_cands: ::std::option::Option<Vec<Vec<IDLType>>> =
+                inner_arg_types
+                    .iter()
+                    .map(rust_type_to_idl_candidates)
+                    .collect();
+            let inner_arg_cands = inner_arg_cands?;
+            let arg_combos = if inner_arg_cands.is_empty() {
+                vec![vec![]]
+            } else {
+                cartesian_product(&inner_arg_cands)
+            };
+            let mut out = Vec::with_capacity(arg_combos.len() * 5);
+            for args in &arg_combos {
+                out.push(Record {
+                    fqn: fqn.clone(),
+                    args: args.clone(),
+                });
+                out.push(Variant {
+                    fqn: fqn.clone(),
+                    args: args.clone(),
+                });
+                // Enum / Flags are kind-only; they don't carry
+                // type args. Only emit candidates when
+                // `args.is_empty()`.
+                if args.is_empty() {
+                    out.push(Enum(fqn.clone()));
+                    out.push(Flags(fqn.clone()));
+                }
+                out.push(Resource {
+                    fqn: fqn.clone(),
+                    args: args.clone(),
+                });
+            }
+            Some(out)
+        }
+    }
+}
+
+/// Helper — generic Cartesian product over `Vec<Vec<T>>`. Given
+/// `[[a, b], [c, d, e]]` returns `[[a, c], [a, d], [a, e],
+/// [b, c], [b, d], [b, e]]`. Empty outer → `[[]]`. Empty inner
+/// in any position → no combos (returns empty outer).
+fn cartesian_product<T: Clone>(lists: &[Vec<T>]) -> Vec<Vec<T>> {
+    if lists.is_empty() {
+        return vec![vec![]];
+    }
+    let mut acc: Vec<Vec<T>> = vec![vec![]];
+    for list in lists {
+        if list.is_empty() {
+            return Vec::new();
+        }
+        let mut next = Vec::with_capacity(acc.len() * list.len());
+        for prefix in &acc {
+            for item in list {
+                let mut combo = prefix.clone();
+                combo.push(item.clone());
+                next.push(combo);
+            }
+        }
+        acc = next;
+    }
+    acc
 }
 
 /// Find the mangled body for a leo4 export matching `fname` and the
@@ -671,8 +947,24 @@ mod tests {
             Some(IDLType::Tuple(vec![IDLType::U8, IDLType::Bool]))
         );
 
+        // RC.2 patch 3 (2026-05-31): the strict
+        // `rust_type_to_idl` keeps returning `None` for
+        // unrecognised user-defined idents so `#[leo4::export]`
+        // surfaces a clear macro-time diagnostic. The multi-
+        // candidate path `rust_type_to_idl_candidates` (used
+        // exclusively by `leo4::import!`) returns all 5 kinds.
         let ty: Type = syn::parse_str("MyCustom").unwrap();
         assert_eq!(rust_type_to_idl(&ty), None);
+        let cands = rust_type_to_idl_candidates(&ty).unwrap();
+        // 5 candidates for no-generics user ident: Record /
+        // Variant / Enum / Flags / Resource. (Order matters
+        // only insofar as the lookup loop tries them in order.)
+        assert_eq!(cands.len(), 5);
+        assert!(matches!(cands[0], IDLType::Record { .. }));
+        assert!(matches!(cands[1], IDLType::Variant { .. }));
+        assert!(matches!(cands[2], IDLType::Enum(_)));
+        assert!(matches!(cands[3], IDLType::Flags(_)));
+        assert!(matches!(cands[4], IDLType::Resource { .. }));
     }
 
     #[test]
@@ -905,6 +1197,140 @@ mod tests {
             rendered.contains("does not support `async fn`"),
             "expected diagnostic in: {rendered}"
         );
+    }
+
+    // ─── RC.2 patch 3 — multi-candidate lookup ─────────
+
+    #[test]
+    fn rust_type_to_idl_candidates_user_defined_ident_emits_5_kinds() {
+        let ty: Type = syn::parse_str("AdsmtVerdict").unwrap();
+        let cands = rust_type_to_idl_candidates(&ty)
+            .expect("user-defined ident must produce candidates");
+        assert_eq!(cands.len(), 5, "5 kinds: R/V/E/F/X — got {cands:?}");
+        // Verify each kind appears.
+        let mut seen_record = false;
+        let mut seen_variant = false;
+        let mut seen_enum = false;
+        let mut seen_flags = false;
+        let mut seen_resource = false;
+        for c in &cands {
+            match c {
+                IDLType::Record { fqn, .. } if fqn == "AdsmtVerdict" => {
+                    seen_record = true;
+                }
+                IDLType::Variant { fqn, .. } if fqn == "AdsmtVerdict" => {
+                    seen_variant = true;
+                }
+                IDLType::Enum(fqn) if fqn == "AdsmtVerdict" => {
+                    seen_enum = true;
+                }
+                IDLType::Flags(fqn) if fqn == "AdsmtVerdict" => {
+                    seen_flags = true;
+                }
+                IDLType::Resource { fqn, .. } if fqn == "AdsmtVerdict" => {
+                    seen_resource = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(seen_record && seen_variant && seen_enum && seen_flags && seen_resource);
+    }
+
+    #[test]
+    fn rust_type_to_idl_candidates_nested_vec_of_user_defined() {
+        // `Vec<AdsmtVerdict>` — outer is List, inner is user
+        // ident → 5 List(Record/Variant/Enum/Flags/Resource)
+        // candidates.
+        let ty: Type = syn::parse_str("Vec<AdsmtVerdict>").unwrap();
+        let cands = rust_type_to_idl_candidates(&ty).unwrap();
+        assert_eq!(cands.len(), 5);
+        for c in &cands {
+            assert!(matches!(c, IDLType::List(_)));
+        }
+    }
+
+    #[test]
+    fn rust_type_to_idl_candidates_known_scalar_returns_single_element() {
+        let ty: Type = syn::parse_str("u64").unwrap();
+        let cands = rust_type_to_idl_candidates(&ty).unwrap();
+        assert_eq!(cands.len(), 1);
+        assert!(matches!(cands[0], IDLType::U64));
+    }
+
+    #[test]
+    fn cartesian_product_basics() {
+        // Empty outer → single empty inner.
+        let r: Vec<Vec<i32>> = cartesian_product(&[]);
+        assert_eq!(r, vec![Vec::<i32>::new()]);
+
+        // Single list of 3 → 3 1-element vecs.
+        let r = cartesian_product(&[vec![1, 2, 3]]);
+        assert_eq!(r, vec![vec![1], vec![2], vec![3]]);
+
+        // 2 × 3 = 6 combos.
+        let r = cartesian_product(&[vec![1, 2], vec![10, 20, 30]]);
+        assert_eq!(r.len(), 6);
+        assert!(r.contains(&vec![1, 10]));
+        assert!(r.contains(&vec![1, 20]));
+        assert!(r.contains(&vec![1, 30]));
+        assert!(r.contains(&vec![2, 10]));
+        assert!(r.contains(&vec![2, 20]));
+        assert!(r.contains(&vec![2, 30]));
+
+        // Any empty inner short-circuits to no combos.
+        let r: Vec<Vec<i32>> = cartesian_product(&[vec![1, 2], vec![]]);
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn cartesian_product_combos_for_two_user_defined_args() {
+        // Two user-defined args → 5 × 5 = 25 combos.
+        let ty1: Type = syn::parse_str("AdsmtVerdict").unwrap();
+        let ty2: Type = syn::parse_str("AbductiveCandidate").unwrap();
+        let cands_per: Vec<Vec<IDLType>> = vec![
+            rust_type_to_idl_candidates(&ty1).unwrap(),
+            rust_type_to_idl_candidates(&ty2).unwrap(),
+        ];
+        let combos = cartesian_product(&cands_per);
+        assert_eq!(combos.len(), 25);
+    }
+
+    #[test]
+    fn import_multi_candidate_resolves_variant_mangle_via_lookup() {
+        // The flagship test: macro-expand-side simulation of
+        // `leo4::import! { fn solve(v: AdsmtVerdict) -> AdsmtVerdict; }`
+        // against a mangling JSON where the Lean side declared
+        // `AdsmtVerdict` as a `variant`. The candidate loop
+        // tries Record first (`S_AdsmtVerdict_s`) — misses —
+        // then Variant (`V_AdsmtVerdict_v`) — hits.
+        let mangling_json = serde_json::json!({
+            "entries": [{
+                "logical_name": "MyPkg::Util::solve",
+                "instantiations": [{
+                    "param_types": [{"encoded": "V_AdsmtVerdict_v"}],
+                    "ret_type": {"encoded": "V_AdsmtVerdict_v"},
+                    "mangled": "leo4__MyPkg__Util__solve__V_AdsmtVerdict_v__habcdefghijklm",
+                }]
+            }]
+        });
+        let ty: Type = syn::parse_str("AdsmtVerdict").unwrap();
+        let cands = rust_type_to_idl_candidates(&ty).unwrap();
+        let mut hit = None;
+        for c in &cands {
+            let mangle = mangle_type(c);
+            if let Ok(body) =
+                lookup_mangled_body(&mangling_json, "solve", &[mangle])
+            {
+                hit = Some((c.clone(), body));
+                break;
+            }
+        }
+        let (kind, body) = hit.expect("variant kind candidate must hit");
+        assert!(
+            matches!(kind, IDLType::Variant { ref fqn, .. } if fqn == "AdsmtVerdict"),
+            "winning candidate must be Variant: {kind:?}",
+        );
+        assert!(body.contains("V_AdsmtVerdict_v"));
     }
 
     #[test]
