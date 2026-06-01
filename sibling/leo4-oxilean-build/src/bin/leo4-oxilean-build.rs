@@ -91,11 +91,13 @@
 //! - `2`: usage error (bad args, missing manifest field,
 //!   IO error reading manifest / source / out_dir).
 
-use leo4_abi::rust_exports::ExportEntry;
+use leo4_abi::rust_exports::{ExportEntry, UserTypeEntry};
 use leo4_oxilean_build::{
     leo4_env_bootstrap::bootstrap_env,
     pure_emit::transpile_sources_to_pure_crate,
-    reverse_emit::{render_reverse_wrapper, ExportEntryView},
+    reverse_emit::{
+        render_reverse_wrapper, view_user_type, ExportEntryView, UserTypeView,
+    },
 };
 use std::collections::HashMap;
 use std::io::Read;
@@ -559,7 +561,15 @@ fn run_reverse(manifest: &Manifest) -> ExitCode {
         }
     };
 
-    let lean_src = match render_reverse_wrapper(iface, &entries) {
+    // RC.5 (2026-05-31) — load USER_TYPES alongside EXPORTS so
+    // the wrapper can emit mirror Lean `inductive` / `structure`
+    // decls for every `#[derive(LeanMarshal)]` type. Pre-RC.5
+    // cdylibs that don't expose `leo4_rust_describe_user_types`
+    // surface as "no user types" (non-fatal); the wrapper still
+    // emits without mirror decls.
+    let user_types = unsafe { load_user_types(cdylib).unwrap_or_default() };
+
+    let lean_src = match render_reverse_wrapper(iface, &entries, &user_types) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("leo4-oxilean-build: ERROR — reverse wrapper render failed: {e}");
@@ -666,6 +676,59 @@ unsafe fn load_exports(cdylib: &Path) -> Result<Vec<ExportEntryView>, String> {
     }
 
     // Drop the lib *after* we've copied everything out.
+    drop(lib);
+    Ok(out)
+}
+
+/// RC.5 (2026-05-31) — load the cdylib's `USER_TYPES` table via
+/// `libloading`, mirroring `load_exports` for the new
+/// `#[derive(LeanMarshal)]` schema channel introduced by
+/// `crates/leo4-abi/src/rust_exports.rs`. Returns an empty Vec
+/// when the cdylib pre-dates the RC.2 schema channel (no
+/// `leo4_rust_describe_user_types` symbol exported); callers
+/// treat that as "no mirror decls to emit" without failing.
+///
+/// # Safety
+///
+/// Same contract as `load_exports`: caller passes a leo4-abi-
+/// compatible cdylib path. Layout mismatch on `UserTypeEntry`
+/// surfaces as garbled metadata.
+unsafe fn load_user_types(cdylib: &Path) -> Result<Vec<UserTypeView>, String> {
+    type Describe =
+        unsafe extern "C" fn(*mut *const UserTypeEntry, *mut usize) -> i32;
+
+    // SAFETY: opening a shared library — same trust contract as
+    // `load_exports`.
+    let lib = unsafe {
+        libloading::Library::new(cdylib)
+            .map_err(|e| format!("dlopen `{}`: {e}", cdylib.display()))?
+    };
+
+    let sym: libloading::Symbol<'_, Describe> = unsafe {
+        lib.get(b"leo4_rust_describe_user_types\0").map_err(|e| {
+            format!(
+                "cdylib does not export `leo4_rust_describe_user_types` ({e}). \
+                 Pre-RC.2 cdylibs lack this symbol; wrapper Lean mirror decls \
+                 will be skipped."
+            )
+        })?
+    };
+
+    let mut ptr: *const UserTypeEntry = std::ptr::null();
+    let mut len: usize = 0;
+    // SAFETY: outparams are stack locals; signature matches.
+    let rc = unsafe { sym(&raw mut ptr, &raw mut len) };
+    if rc != 0 {
+        return Err(format!("leo4_rust_describe_user_types returned {rc}"));
+    }
+    if len > 0 && ptr.is_null() {
+        return Err(
+            "describe_user_types returned non-zero length with null pointer".into(),
+        );
+    }
+
+    let slice: &[UserTypeEntry] = unsafe { std::slice::from_raw_parts(ptr, len) };
+    let out: Vec<UserTypeView> = slice.iter().map(view_user_type).collect();
     drop(lib);
     Ok(out)
 }

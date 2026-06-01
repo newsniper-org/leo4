@@ -59,9 +59,19 @@ leo4-oxilean-translate = { path = "../leo4-oxilean-translate" }
 
 # OX8.2b — `--mode reverse` cdylib loader. The CLI opens the
 # user cdylib via `Library::new`, resolves the C entry
-# `leo4_rust_describe_exports`, and walks the returned
-# `ExportEntry` slice to feed `reverse_emit::render_reverse_wrapper`.
+# `leo4_rust_describe_exports` (and the matching
+# `leo4_rust_describe_user_types` since RC.5), and walks the
+# returned slices to feed `reverse_emit::render_reverse_wrapper`.
 libloading = "0.8"
+
+# RC.5 (2026-05-31) — `reverse_emit` mirror Lean-decl synthesis
+# for `#[derive(LeanMarshal)]` types reuses the same syn-based
+# Rust source-text → Lean type translator that leo4-rust-emit
+# uses. Pulls `syn` for the AST walk + `quote` (transitively
+# included by syn's parsing surface; the dep stays explicit so
+# the build manifest documents the intent).
+syn   = { version = "2", features = ["full", "parsing"] }
+quote = "1"
 
 # OX6 step 13 — PEG-based Lean 4 parser. Translator lives in
 # the `leo4_translate` module; production wiring lands across

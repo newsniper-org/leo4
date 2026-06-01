@@ -123,7 +123,7 @@ use std::sync::Arc;
 // expose it as a named constant (cf. `crates/leo4-abi/src/
 // error.rs` — only DECODE_ERROR..DECODE_DEPTH_EXCEEDED).
 use leo4_abi::error::error_codes;
-use leo4_abi::rust_exports::ExportEntry;
+use leo4_abi::rust_exports::{ExportEntry, UserTypeEntry};
 use leo4_abi::LeanError;
 
 /// Domain-specific error code for "runner could not complete
@@ -166,6 +166,12 @@ use oxilean_parse::{Lexer, Parser};
 /// `crates/leo4-abi/src/rust_exports.rs`.
 type DescribeExportsFn =
     unsafe extern "C" fn(*mut *const ExportEntry, *mut usize) -> i32;
+
+/// RC.5 (2026-05-31) — signature of the cdylib's
+/// `leo4_rust_describe_user_types` FFI entry. Mirrors the
+/// declaration in `crates/leo4-abi/src/rust_exports.rs`.
+type DescribeUserTypesFn =
+    unsafe extern "C" fn(*mut *const UserTypeEntry, *mut usize) -> i32;
 
 /// Signature of each individual `#[leo4::export]`-wrapped
 /// symbol that the leo4 proc macro emits inside the cdylib.
@@ -214,6 +220,20 @@ pub struct RunDiagnostics {
     /// completed without error. Pre-condition for an
     /// upstream `run_main` driver to actually fire.
     pub resolver_ready: bool,
+    /// RC.5 (2026-05-31) — number of `UserTypeEntry` rows
+    /// walked from the cdylib's
+    /// `leo4_rust_describe_user_types`. Each entry surfaces
+    /// as a stub `Axiom <fqn> : Type` declaration in the env
+    /// so Main.lean references like `def foo : AdsmtVerdict
+    /// → … := …` elaborate name-resolution-wise. (Full
+    /// inductive declarations with constructors + pattern-
+    /// match support require parsing the auto-generated
+    /// wrapper Lean file alongside Main.lean — outside the
+    /// runner's scope. The wrapper contains the
+    /// `inductive`/`structure` with `deriving Leo4.LeanMarshal`;
+    /// users running `leo4 run` get the full path. This stub
+    /// covers the direct runner-as-library usage.)
+    pub user_types_seen: usize,
 }
 
 /// Production-form runner entry point.
@@ -380,6 +400,36 @@ fn run_main_inner(
         Err(e) => return Err(e),
     };
 
+    // RC.5 (2026-05-31) — walk USER_TYPES alongside EXPORTS
+    // and synthesise stub `Axiom <fqn> : Type` declarations
+    // in the env so Main.lean references to user-defined
+    // types resolve by name. Cdylibs pre-dating RC.2's
+    // schema channel (no `leo4_rust_describe_user_types`
+    // symbol) report a missing symbol — treated as no-op
+    // here, not fatal.
+    let user_types = unsafe { describe_user_types(&lib) }.unwrap_or(&[]);
+    diag.user_types_seen = user_types.len();
+    for ut in user_types {
+        // Add as `Axiom <fqn> : Type` (Sort 1). Constructors
+        // + pattern-match support require parsing the
+        // auto-generated wrapper Lean file's full
+        // `inductive` decls — that's handled by users
+        // running through `leo4 run` (which loads the
+        // wrapper file ahead of Main.lean). Direct-library
+        // callers get the name-resolution stub only.
+        let decl = Declaration::Axiom {
+            name: oxilean_kernel::Name::str(ut.fqn),
+            univ_params: Vec::new(),
+            ty: oxilean_kernel::Expr::Sort(oxilean_kernel::Level::succ(
+                oxilean_kernel::Level::zero(),
+            )),
+        };
+        // DuplicateDeclaration ignored — same name from
+        // multiple cdylibs (rare) or the user's Lean source
+        // declaring the type independently is fine.
+        let _ = env.add(decl);
+    }
+
     let main_src = std::fs::read_to_string(main_lean_path).map_err(|e| {
         LeanError::new(
             RUST_DLSYM_FAILED,
@@ -402,6 +452,62 @@ fn run_main_inner(
     //    wire-up is a one-line addition.
 
     Ok((invoker, env, diag))
+}
+
+/// RC.5 (2026-05-31) — resolve and call
+/// `leo4_rust_describe_user_types`; return a borrowed slice
+/// view of the USER_TYPES entries. Cdylibs pre-dating the RC.2
+/// schema channel surface as `LeanError(RUST_DLSYM_FAILED)` —
+/// caller treats that as "no user types" rather than fatal.
+///
+/// # Safety
+/// Caller must keep `lib` alive for the lifetime of the
+/// returned slice — same lifetime contract as
+/// [`describe_exports`].
+unsafe fn describe_user_types(
+    lib: &libloading::Library,
+) -> Result<&[UserTypeEntry], LeanError> {
+    let symbol: libloading::Symbol<'_, DescribeUserTypesFn> = unsafe {
+        lib.get(b"leo4_rust_describe_user_types\0")
+    }
+    .map_err(|e| {
+        LeanError::new(
+            RUST_DLSYM_FAILED,
+            format!(
+                "leo4-oxilean-runner: dlsym(leo4_rust_describe_user_types) \
+                 failed: {e}. Pre-RC.2 cdylibs lack this symbol; the runner \
+                 falls back to no user-type axiom synthesis."
+            ),
+        )
+    })?;
+
+    let mut ptr: *const UserTypeEntry = std::ptr::null();
+    let mut len: usize = 0;
+    // SAFETY: stack-local outparams; signature matches.
+    let rc = unsafe { symbol(&raw mut ptr, &raw mut len) };
+    if rc != 0 {
+        return Err(LeanError::new(
+            RUST_DLSYM_FAILED,
+            format!(
+                "leo4-oxilean-runner: leo4_rust_describe_user_types returned \
+                 non-zero status {rc}"
+            ),
+        ));
+    }
+    if len == 0 {
+        return Ok(&[]);
+    }
+    if ptr.is_null() {
+        return Err(LeanError::new(
+            RUST_DLSYM_FAILED,
+            "leo4-oxilean-runner: leo4_rust_describe_user_types reported \
+             non-zero len but null pointer"
+                .to_string(),
+        ));
+    }
+    // SAFETY: the cdylib's USER_TYPES lives in .rodata for the
+    // lifetime of `lib`; caller bound to that.
+    Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
 /// Resolve and call `leo4_rust_describe_exports`; return a
