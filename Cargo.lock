@@ -527,7 +527,7 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "leo4"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4-abi",
  "leo4-macros",
@@ -537,14 +537,14 @@ dependencies = [
 
 [[package]]
 name = "leo4-abi"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "linkme",
 ]
 
 [[package]]
 name = "leo4-build"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 
 [[package]]
 name = "leo4-cli"
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-example-01-hello"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4",
  "leo4-build",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-example-02-roundtrip"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4",
  "leo4-build",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-example-04-mutual-ast"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4",
  "leo4-build",
@@ -582,14 +582,14 @@ dependencies = [
 
 [[package]]
 name = "leo4-example-05-rust-export"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4",
 ]
 
 [[package]]
 name = "leo4-idl"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "schema-idl",
  "serde_json",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-macros"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4-macros-backend",
  "proc-macro2",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-macros-backend"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-mslean4"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4-abi",
  "libloading",
@@ -627,14 +627,14 @@ dependencies = [
 
 [[package]]
 name = "leo4-rust-bridge"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "leo4-rust-emit"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "clap",
  "leo4-abi",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-rust-worker"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "clap",
  "leo4-abi",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "leo4-wasm"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "leo4-abi",
  "serde",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "leo4c"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "clap",
  "leo4-idl",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "schema-idl"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "serde_json",
 ]
