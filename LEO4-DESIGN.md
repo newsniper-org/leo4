@@ -1,6 +1,10 @@
 # leo4 — Design Document
 
-> **Status**: pre-implementation, all major design decisions resolved.
+> **Status**: v0.1.0 released 2026-05-21 (Phases 0–8). Phase 9
+> reverse direction landed 2026-05-23. **v1.0 RC 1 about to tag
+> (2026-05-31)** — all RC blockers closed; C1 / C5 / G2 sequenced
+> post-RC1.
+> All major design decisions resolved.
 > Owner: 병익 (Honey-Be). Begin date: 2026-05.
 >
 > This document is the single source of truth for leo4's design. Implementation

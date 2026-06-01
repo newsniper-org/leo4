@@ -16,29 +16,58 @@ byte-identical mangling across **70 mangled instantiations**
 (29 logical entries) with schema_hash `qi5gb74dbjyxo` between
 the Lean plugin and the Rust `schema-idl` crate.
 
-**v1.0 RC progress (2026-05-29 update)** — most v1.0
-RC blockers cleared. The remaining gauge is the
-`oxilean_runtime::driver` IO walker; the walker now
-covers `IO.pure`, `IO.bind` (arity-4 + arity-2), and
-`@[extern]` Const dispatch — `EStateM` lowerings +
-beta-application of `k` with concrete result from `m`
-remain. Recent batch:
+**v1.0 RC progress (2026-05-31 update)** — **all v1.0
+RC blockers cleared; v1.0 RC 1 about to tag.** C1 /
+C5 / G2 sequencing moved to **post-RC1** (decision
+2026-05-31) — Windows runtime CI, the musl matrix row,
+and the crates.io publish all happen *after* the RC 1
+tag rather than as gating items. The `feat/mslean4-
+lecq-lecr-ipcs` branch work is pushed back accordingly.
+The A1 cool-japan upstream PR remains RC-direct timing.
+Recent batch:
 
-- **#76 P0c IO walker coverage** (2026-05-29). Fork
-  `d357a01` adds `IO.bind` + `@[extern]` Const
-  dispatch on top of the 2026-05-28 v0 walker. leo4
-  main bumps the fork + adapts the runner caller
-  (`c0f81c7`) and lands the leo4-oxilean outbound
-  dispatch bridge (`44bb382`) — when the walker
-  fires a Lean closure dereference, the
-  `register_outbound_dispatch_callback` shim unpacks
-  `(callback_id, rest)` and forwards to
-  `OxiLeanInvoker::invoke_outbound`. The cool-japan
-  driver API coordination is posted at
+- **#76 P0c IO walker — CLOSED 2026-05-31**. The walker
+  now covers the full monad transformer family
+  (`IO.pure` / `EIO.pure` / `EStateM.pure` /
+  `ExceptT.pure` / `StateT.pure` / `ReaderT.pure` +
+  matching `.bind`s), `IO.bind` beta-application
+  against concrete `m` results, canonical-ABI arg
+  encoding (literals / Bool / Unit / sized-integer
+  typeclass projections via `OfNat.ofNat` + `Neg.neg`
+  + `Char.ofNat` / composite ctors `Prod.mk` /
+  `Subtype.mk` / `Option.some`/`none` /
+  `Sum.inl`/`inr` / **user-defined record + inductive
+  ctors via env-lookup of
+  `ConstantInfo::Constructor`**), stdlib `IO.println`
+  family + stdlib `IO.FS.*` family
+  (read / write / append / remove / create / rename)
+  direct dispatch. The out-of-scope-by-design tail
+  (non-IO monad-class run projections / `IO.FS.Handle.*`
+  / compile-time hooks / float-lit lowering) is now
+  explicitly classified, not "still open". Fork tests
+  1197 → 1219. Fork commits: `23176d1` (IO builtin),
+  `469ffea` (IO.FS + user-defined ctor) on
+  `0.1.3-leo4-ox7`; leo4 main bumps `daf8ba8` +
+  `322ea64`. The cool-japan driver API coordination
+  thread at
   [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
-  — no maintainer comments yet as of 2026-05-31 (3
-  days since posting). Body PR submission stays
-  deferred; the in-fork shape continues to grow.
+  still awaits maintainer reply; body PR submission
+  stays deferred until feedback arrives.
+- **#72 OX7 OxiLean codegen — CLOSED 2026-05-31**.
+  Translate coverage tail finished: `BinOp` expand
+  (`>` / `≥` swap, `≠` / `∉` negated, `&&` / `||` /
+  `↔` / `∈` / `⊆` direct, `→` Unicode arrow lowered
+  to Pi); explicit `By` / `DotFn` / `Raw` Expr arms
+  with actionable diagnostics; `DefinitionByArms`
+  desugar to `Definition` with match body; `Mutual`
+  wrap into `OxDecl::Mutual`; Expr match now
+  exhaustive over `L4Expr`. translate tests 36 → 56.
+  Main commits: `3e4309b` (BinOp), `1cd643a` (By /
+  DotFn / Raw), `0dab156` (Decl + exhaustive).
+- **#62 Typst books synced 2026-05-31** — learning +
+  implement-from-scratch volumes refreshed across all
+  4 languages (commit `f90dc71`, 8 files, +874
+  lines).
 
 Recent batch (2026-05-28):
 
@@ -54,10 +83,11 @@ Recent batch (2026-05-28):
   - `OxiLeanInvoker::{attach_outbound_registry,
     outbound_registry, invoke_outbound}` (`521979e`) —
     adapter-side dispatch surface.
-  - Fork `8b2af9f` lands the v0 IO walker recognising
-    `IO.pure` shape only; remaining shapes return
-    `DriverError::NotYetImplemented` with the offending
-    expression's debug repr.
+  - Fork `8b2af9f` landed the v0 IO walker
+    (`IO.pure`); subsequent commits grew it through
+    the full monad family + canonical-ABI arg
+    encoding (now CLOSED — see the 2026-05-31 batch
+    above).
   - `docs/cool-japan-driver-api-coordination-draft.md`
     (discussion-only) proposes the
     `oxilean_runtime::driver` API for cool-japan
@@ -68,16 +98,20 @@ Recent batch (2026-05-28):
   runner → scaffold). `sibling/leo4-oxilean-runner/`
   helper folds dlopen + EXPORTS walk + invoker
   registration + parse + elab into one `run_main(...)`
-  call; final IO-effect drive blocked on the same
-  IO walker body above.
-- **OX7 codegen + parser donation** — fork branch
-  `0.1.3-leo4-ox7` accumulates the codegen fixes
-  (Const name / native scalars / typeclass projection
-  fold / ite / Bool / HPow / String-literal coercion)
-  + the OX6 PEG parser donation + the `extern_resolver`
-  + `CallbackRegistry` extensions. cool-japan upstream
-  PR draft complete; **submission deferred to
-  post-v1.0 RC**.
+  call. The IO-effect drive previously blocked on the
+  walker body is unblocked as of 2026-05-31.
+- **OX7 codegen + parser donation — CLOSED 2026-05-31**.
+  Fork branch `0.1.3-leo4-ox7` accumulates the codegen
+  fixes (Const name / native scalars / typeclass
+  projection fold / ite / Bool / HPow / String-literal
+  coercion) + the OX6 PEG parser donation + the
+  `extern_resolver` + `CallbackRegistry` extensions.
+  Translate-coverage tail (`BinOp` expand, explicit
+  By/DotFn/Raw arms, `DefinitionByArms` desugar,
+  `Mutual` wrap, exhaustive Expr match) closed in the
+  2026-05-31 batch above. cool-japan upstream PR
+  draft complete; **submission deferred to post-v1.0
+  RC**.
 - **Leaf crates dedup** — `sibling/leo4-oxilean-
   bootstrap/` + `sibling/leo4-oxilean-translate/`
   share-of-truth crates so the build and runner
@@ -266,7 +300,8 @@ What works today:
   `leo4_lean4_parse::Decl` → `oxilean_parse::Decl`
   so the elab / codegen pipeline stays unchanged.
 
-Open items:
+Open items (all moved to **post-v1.0 RC 1** per the
+2026-05-31 sequencing decision):
 
 - Some `LeanError` codes (`0x02` / `0x03` / `0x04` / `0x06` / `0x08`)
   are reserved but not yet exercised by a test fixture.
@@ -274,16 +309,18 @@ Open items:
   for `*-pc-windows-gnullvm`). Code compiles + worker-side
   Windows IPC landed 2026-05-24; manual VirtualBox pass
   (`docs/windows-manual-test-plan.md`) precedes CI.
-- **C5** musl CI matrix row pending; code 0-changes
-  needed (audit verified 2026-05-24).
+  Sequenced post-RC1.
+- **C5** musl CI matrix row. Code 0-changes needed (audit
+  verified 2026-05-24). Sequenced post-RC1.
 - **G2** Publish to crates.io — API surface stabilised;
-  metadata + dep-order publish remains.
+  metadata + dep-order publish remains. Sequenced post-RC1.
 - `LEO4_ERR_RUST_WORKER_RESTARTED` (0x00020002) is reserved
   but not surfaced — recycle is currently transparent.
 - `LEO4_RUST_WORKER_RECYCLE_SECONDS` (time-based recycle)
   deferred; call-based ships.
-- Callback / function-arrow ABI deferred (no concrete
-  consumer yet).
+- Callback / function-arrow ABI substrate (leo4 side + IO
+  walker bridge) shipped; broader real-consumer rollout
+  follows post-RC1.
 - schema-idl items G (`ConstraintExpr<Atom>` typed AST) and the
   `wasm64` sibling stay deferred until a concrete consumer surfaces.
 

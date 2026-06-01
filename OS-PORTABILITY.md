@@ -3,7 +3,10 @@
 > Status: living document. Drafted 2026-05-21 alongside the Phase
 > 9-0 spawn / IPC abstraction landing (SPEC/reverse-direction.md
 > §4.4). Updated as new OS branches are identified or lifted into
-> existing layers.
+> existing layers. **As of 2026-05-31, C1 (Windows runtime CI) and
+> C5 (musl matrix row) are sequenced to post-v1.0 RC 1** — the
+> tier policy below is unchanged; only the CI / verification
+> work-item timing moved.
 
 ## 0. Why this document exists
 
@@ -22,9 +25,10 @@ where current OS branches live.
 A per-*path* (not per-crate) tier policy split, locked
 2026-05-24:
 
-- **`*-linux-musl*`** is **Tier 1+** (v1.0 RC mandatory)
-  for paths with **no `leo4-mslean4` and no lake
-  dependency**: the rust-transpile (OxiLean-only) end-
+- **`*-linux-musl*`** is **Tier 1+** (CI matrix row
+  sequenced post-v1.0 RC 1 per the 2026-05-31 decision;
+  policy itself unchanged) for paths with **no
+  `leo4-mslean4` and no lake dependency**: the rust-transpile (OxiLean-only) end-
   to-end, the scaffold-only CLI commands, and every
   pure-Rust crate. Excluded paths: `leo4-mslean4`
   runtime (Lean ships glibc-built `libleanshared` —

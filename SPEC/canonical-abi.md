@@ -296,9 +296,15 @@ callback_id:u64
   enclosing call. The receiving side MUST NOT retain the id past the
   return; doing so produces undefined behaviour. (`own<fn(…) -> R>`
   for transferable closures is reserved but not yet specified.)
-- Re-entrant dispatch runtime lands in a Phase 10-B1.x follow-up;
-  this section pins the wire shape so cross-impl conformance tests
-  (mangling + IDL round-trip) can ship ahead of the runtime.
+- Re-entrant dispatch runtime: inbound (Lean closure called from
+  Rust) + outbound (Rust closure passed to Lean via OxiLean
+  invoker) substrate landed in Phase 10-B1.x (2026-05-28). The
+  fork-side IO walker that drives the dispatch loop on the
+  OxiLean transpile path closed 2026-05-31 (#76 P0c). Body
+  coverage for `IO.bind` / `@[extern]` Const dispatch / monad
+  transformer family / canonical-ABI arg encoding / stdlib
+  `IO.println` + `IO.FS.*` direct dispatch all wired on fork
+  branch `0.1.3-leo4-ox7`.
 
 ## 14. Function Call Convention
 

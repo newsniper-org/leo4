@@ -597,8 +597,7 @@ dependencies = [
 [[package]]
 name = "oxiz-core"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1eb16314f114ec644efb6194016f327aa6d626942d5ffe0d43808d231be443e2"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "bumpalo",
  "hashbrown 0.17.1",
@@ -625,8 +624,7 @@ dependencies = [
 [[package]]
 name = "oxiz-math"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03b8858fecb3470ac2e49d4386bc1a2a6353b8756096aa20bd827d691d14b326"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "hashbrown 0.17.1",
  "num-bigint",
@@ -642,8 +640,7 @@ dependencies = [
 [[package]]
 name = "oxiz-nlsat"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc21c1c0b676e5923f4cc20eca1e092ab692dababea3cc5a1ad87a067bc5aeff"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "num-bigint",
  "num-rational",
@@ -661,8 +658,7 @@ dependencies = [
 [[package]]
 name = "oxiz-proof"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5cdaefb17df92a1c454bac2e3a6cb1e10e0c40af98991a424b24aa23ab7a39f"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "num-bigint",
  "num-rational",
@@ -678,8 +674,7 @@ dependencies = [
 [[package]]
 name = "oxiz-sat"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6bae5efe614760161d2fbe8b949d825260776a7478193603cdc329bdcbb87d3"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "hashbrown 0.17.1",
  "libm",
@@ -694,8 +689,7 @@ dependencies = [
 [[package]]
 name = "oxiz-solver"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d4835d2a4ddea0eca2132925e53131a8ae3a62a92f8ef59e270fcc93ab1b77f"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "hashbrown 0.17.1",
  "num-bigint",
@@ -715,8 +709,7 @@ dependencies = [
 [[package]]
 name = "oxiz-theories"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1048023a7514f8faa6341609a6930b2f3b89621ca171e35137cfb1d043973fb1"
+source = "git+https://github.com/honey-be/oxiz?branch=feat%2Fenable-writer#8d2ec3f1b27eea6d4f4b1644cccb663037dc4ea3"
 dependencies = [
  "egg",
  "hashbrown 0.17.1",

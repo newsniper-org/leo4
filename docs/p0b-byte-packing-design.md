@@ -1,8 +1,21 @@
 # P0b — OxiLean adapter byte-packing of Fn args + closure registry encoding side
 
-> Status: **DESIGN SKETCH** (2026-05-28). Tracked as task #75.
-> Implementation lands in a follow-up commit on top of the
-> #74 / #76 / #77 / #79 batch (commit landing in flight).
+> Status (2026-05-31): **CLOSED**. Tracked as task #75. All
+> three implementation steps landed 2026-05-28: step 1
+> (leo4-abi `RustCallbackRegistry`) + step 2 (`leo4-macros`
+> outbound emit) + step 3 (`OxiLeanInvoker`
+> `register_outbound_dispatch_callback` /
+> `invoke_outbound`). The fork-side IO walker (#76 P0c) that
+> drives end-to-end smoke against the dispatch loop also
+> closed 2026-05-31 — walker now covers monad-transformer-
+> family `.pure` / `.bind`, `IO.bind` beta-app,
+> canonical-ABI arg encoding (literals / Bool / Unit /
+> sized integers / floats / Char / composite ctors /
+> user-defined record + inductive ctors via env-lookup),
+> stdlib `IO.println` / `IO.eprintln` / `IO.print` /
+> `IO.eprint` direct dispatch, and stdlib `IO.FS.*` family
+> direct dispatch. Design sketch below is preserved as the
+> historical motivation record.
 
 ## The gap
 
@@ -16,7 +29,10 @@ The leo4 callback ABI (Phase 10-B1) has two halves:
     callback_id`.
 
   - **Outbound (Rust passes a Rust closure to Lean)** —
-    NOT YET LANDED. The user-facing surface would look
+    LANDED 2026-05-28 (leo4-abi `RustCallbackRegistry`
+    substrate + leo4-macros emit + OxiLeanInvoker
+    `register_outbound_dispatch_callback` /
+    `invoke_outbound`). The user-facing surface looks
     like:
 
     ```rust
@@ -119,8 +135,14 @@ mandatory.
     + Main.lean `sum_squares_100 (fun x => x * x)` →
     return 328350.
 
-The fork-side `driver::run_main` (#76) needs an IO
-walker before step 4 can fire end-to-end; pre-walker the
-steps 1-3 surface lands but step 4 hits the same
-`NotYetImplemented` sentinel the rest of the runner
-returns today.
+**Update 2026-05-31:** the fork-side `driver::run_main`
+IO walker (#76 P0c) closed — coverage now spans monad
+transformer family `.pure` / `.bind`, `IO.bind` beta-app,
+canonical-ABI arg encoding (literals / Bool / Unit /
+sized integers / floats / Char / composite ctors /
+user-defined record + inductive ctors), stdlib
+`IO.println` / `IO.eprintln` / `IO.print` / `IO.eprint`
+direct dispatch, and stdlib `IO.FS.*` family direct
+dispatch. Step 4 (`sum_squares_100`-style fixture) is
+fireable on the fork branch `0.1.3-leo4-ox7`; smoke
+landed alongside.

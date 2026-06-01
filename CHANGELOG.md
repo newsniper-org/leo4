@@ -7,6 +7,59 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Closed — #76 P0c IO walker + #72 OX7 OxiLean codegen; all v1.0 RC blockers cleared (2026-05-31)
+
+v1.0 RC 1 about to tag. The two remaining RC blockers
+closed today; C1 / C5 / G2 sequencing moved to **post-
+RC1** (manual work happens after the tag, not before).
+
+  - **#76 P0c IO walker — CLOSED**. Fork commits
+    `23176d1` (IO builtin) + `469ffea` (IO.FS +
+    user-defined ctor) on `0.1.3-leo4-ox7`. leo4 main
+    bumps `daf8ba8` + `322ea64`. Coverage now spans
+    the full monad transformer family (`IO.pure` /
+    `EIO.pure` / `EStateM.pure` / `ExceptT.pure` /
+    `StateT.pure` / `ReaderT.pure` + matching
+    `.bind`s); `IO.bind` beta-application against
+    concrete `m` results; canonical-ABI arg encoding
+    (literals / Bool / Unit / sized-integer typeclass
+    projections via `OfNat.ofNat` + `Neg.neg` +
+    `Char.ofNat` / composite ctors `Prod.mk` /
+    `Subtype.mk` / `Option.some`/`none` /
+    `Sum.inl`/`inr` / **user-defined record + inductive
+    ctors via env-lookup of `ConstantInfo::Constructor`**);
+    stdlib `IO.println` family; stdlib `IO.FS.*` family
+    (`read` / `write` / `append` / `remove` / `create`
+    / `rename`) direct dispatch. Fork test count
+    1197 → 1219. The out-of-scope-by-design tail
+    (non-IO monad-class run projections /
+    `IO.FS.Handle.*` / compile-time hooks / float-lit
+    lowering) is now explicitly classified — no more
+    "still NotYetImplemented" framing.
+  - **#72 OX7 OxiLean codegen — CLOSED**. Translate
+    coverage tail finished: `BinOp` expand (`>` / `≥`
+    swap, `≠` / `∉` negated, `&&` / `||` / `↔` / `∈`
+    / `⊆` direct, `→` Unicode arrow lowered to Pi);
+    explicit `By` / `DotFn` / `Raw` Expr arms with
+    actionable diagnostics; `DefinitionByArms` desugar
+    to `Definition` with match body; `Mutual` wrap
+    into `OxDecl::Mutual`; Expr match now exhaustive
+    over `L4Expr`. Main commits: `3e4309b` (BinOp),
+    `1cd643a` (By / DotFn / Raw), `0dab156`
+    (Decl + exhaustive). translate tests 36 → 56.
+  - **C1 / C5 / G2 sequencing — moved to post-RC1**
+    (decision 2026-05-31). Windows runtime CI, the
+    musl matrix row, and the crates.io publish all
+    happen after the v1.0 RC 1 tag. The
+    `feat/mslean4-lecq-lecr-ipcs` branch work is
+    pushed back to the same window. A1 cool-japan
+    upstream PR stays RC-direct timing.
+  - **#62 Typst learning + implement-from-scratch
+    books synced** (commit `f90dc71`). 8 files
+    (4 langs × 2 books), +874 lines. Honours the
+    project memory's "update at every 중요 시점"
+    rule before the RC tag.
+
 ### Added — IO walker grows IO.bind + @[extern] dispatch shapes, outbound dispatch bridge (2026-05-29)
 
 Closes two of the five gaps the v0 walker (`ab30ca1`) left

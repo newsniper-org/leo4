@@ -354,29 +354,37 @@ host-imports). This makes OxiLean potentially the
 *lowest-friction* integration point for the adsmt SMT-solver
 use case once a `leo4-oxilean` adapter exists.
 
-**Direct-inspection results (2026-05-21)** — three hooks
-needed for full leo4-rust-native integration; grep into
-OxiLean v0.1.2 sources verified which exist:
+**Direct-inspection results (2026-05-21, updated 2026-05-31)** —
+three hooks needed for full leo4-rust-native integration; grep
+into OxiLean v0.1.2 sources verified the original gaps. Fork
+branch `0.1.3-leo4-ox7` has since shipped Hooks 1 + 2 + a
+matching `driver::run_main` module (OX8.3a/b/c + #76 P0c):
 
-| Hook | Status in v0.1.2 | Location of evidence |
+| Hook | Status in v0.1.2 (upstream) | Status on fork `0.1.3-leo4-ox7` (2026-05-31) |
 |---|---|---|
-| **(1) callback registration** — closure storage in evaluator | **NOT PRESENT** | `oxilean_kernel::ffi::ExternRegistry` + `oxilean_runtime::closure::FunctionTable` both metadata-only |
-| **(2) by-name dispatch** — `Env::call_by_mangled_name` analogue | **NOT PRESENT (high-level)** | `Environment` public API is query/merge only; runtime is `BytecodeChunk`-level (`execute_chunk`), not name-level |
-| **(3) attribute / deriving registration** — `registerBuiltinAttribute` analogue | **PRESENT** | `oxilean_elab::attribute::AttributeManager::register_custom_handler(AttrHandler)` + `DeriveHandlerRegistry::register(DeriveHandler)` |
+| **(1) callback registration** — closure storage in evaluator | NOT PRESENT — `oxilean_kernel::ffi::ExternRegistry` metadata-only | **SHIPPED** — `CallbackRegistry` + `ExternCallback` + `ExternCallError` in `oxilean-kernel/src/ffi/` (fork commit `72add72`, OX8.3a) |
+| **(2) by-name dispatch** — `Env::call_by_mangled_name` analogue | NOT PRESENT (high-level) | **SHIPPED** — `ExternResolver` trait + `dispatch_extern_const` in `oxilean-runtime` (fork commit `bf17523`, OX8.3b) + `driver::run_main_with_args` IO-walker (fork commits `f9bfd45` / `8b2af9f` / `d357a01` / `23176d1` / `469ffea`, #76 P0c, walker covers monad transformer family / `IO.bind` / canonical-ABI arg encoding / user record + inductive ctors / `IO.println` / `IO.FS.*` family) |
+| **(3) attribute / deriving registration** — `registerBuiltinAttribute` analogue | PRESENT — `AttributeManager::register_custom_handler` + `DeriveHandlerRegistry::register` | unchanged — used as-is by `leo4-oxilean-build` |
 
-So 1-of-3 hooks ships today. Implications:
+All three hooks now ship on the fork. Implications:
 
 * The **recognition layer** (scanning a user package for
   `@[leo4_export]` + `deriving LeanMarshal` to emit
-  handshake JSON) is **unblocked** — a separate
-  `leo4-oxilean-build` companion crate can bind Hook 3
-  and ship today.
+  handshake JSON) is **production-wired** — see
+  `sibling/leo4-oxilean-build/`.
 * The **dispatch layer** (`LeanProc::call` +
-  `LeanProcInvoker::invoke` actually running) **stays
-  blocked on Hooks 1 + 2** until upstream PRs land. The
-  scaffold adapter at `sibling/leo4-oxilean/` currently
-  surfaces these as `LEO4_ERR_RUST_DLSYM_FAILED`
-  (0x0002_0005) stubs.
+  `LeanProcInvoker::invoke`) is **production-wired** via
+  `OxiLeanInvoker::register_export_callback` (inbound) +
+  `register_outbound_dispatch_callback` (outbound). The
+  `LEO4_ERR_RUST_DLSYM_FAILED` stub at
+  `sibling/leo4-oxilean/` is no longer the steady state.
+* **Upstream PR submission** to cool-japan/oxilean
+  deferred to post-RC1 per leo4 release sequencing. Driver
+  API coord posted at
+  [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
+  (no maintainer feedback yet as of 2026-05-31). Codegen
+  + parser + ExternResolver hooks PR draft pinned in
+  `docs/cool-japan-upstream-pr-draft.md`.
 
 Three remaining **maturity** questions an adapter author
 still needs to settle (in addition to the dispatch hooks):

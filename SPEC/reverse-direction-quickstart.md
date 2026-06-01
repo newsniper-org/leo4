@@ -71,7 +71,16 @@ works as a `#[leo4::export]` parameter or return type:
 What's not yet supported:
 
 - **Function-arrow parameters** (`fn(T) -> R`): IDL +
-  mangling shipped in Phase 10-B1; runtime in B1.x.
+  mangling shipped in Phase 10-B1; inbound + outbound
+  runtime substrate landed Phase 10-B1.x (2026-05-28),
+  with the OxiLean transpile-path IO walker closure
+  on 2026-05-31 (#76 P0c) covering `IO.bind` /
+  `@[extern]` / monad transformer family /
+  canonical-ABI arg encoding / stdlib `IO.println` +
+  `IO.FS.*` direct dispatch on the fork branch
+  `0.1.3-leo4-ox7`. mslean4-path callback dispatch
+  via worker IPC `LECQ` / `LECR` frames remains
+  v1.x.
 - **`async fn` exports**: deferred to ≥ v1.x.
 - **Cross-process resource handles** (passing a Rust
   `LeanRef<'a, T>` across the worker boundary): deferred.

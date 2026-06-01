@@ -687,7 +687,7 @@ dispatcher may surface include: `0x05` (handshake mismatch),
 `0x07` (return buffer too small — propagated identically to
 forward direction).
 
-## 10a. Re-entrant callbacks (Phase 10-B1 design landing, runtime deferred)
+## 10a. Re-entrant callbacks (Phase 10-B1 wire / Phase 10-B1.x runtime)
 
 A `#[leo4::export]` Rust function whose signature includes a
 function-arrow parameter (e.g. `fn(formula: Formula, ask: fn(SubFormula) -> bool) -> bool`)
@@ -697,11 +697,19 @@ invoke the closure that the Lean caller passed. The wire shape for
 `SPEC/canonical-abi.md` §13a); converting that id into an actual
 invocation is what this section specifies.
 
-This section is the **design landing** that pins the protocol shape
-so cross-impl IDL / mangling conformance can ship now (Phase
-10-B1). The runtime implementation (frames, dispatcher state
-machine, Lean-side closure registry) is deferred to a Phase
-10-B1.x follow-up.
+This section is the **wire-and-runtime contract**. Wire shape +
+mangling landed in Phase 10-B1; the runtime substrate
+(`RustCallbackRegistry` for outbound, macro emit, `OxiLeanInvoker`
+outbound dispatch) landed Phase 10-B1.x on 2026-05-28. The
+fork-side IO walker (#76 P0c) that drives the dispatch loop on
+the OxiLean transpile path closed 2026-05-31 — covering
+monad-transformer-family `.pure` / `.bind`, `IO.bind` beta-app,
+canonical-ABI arg encoding (literals / Bool / Unit / sized
+integers / floats / Char / composite ctors / user record +
+inductive ctors), stdlib `IO.println` / `IO.eprintln` /
+`IO.print` / `IO.eprint` direct dispatch, and stdlib `IO.FS.*`
+family direct dispatch. mslean4-path worker-IPC `LECQ` / `LECR`
+frame implementation remains v1.x.
 
 ### Wire-level frame extension
 
@@ -826,7 +834,7 @@ build is `cc <single-file>` on every supported platform.
 | Recycle policy — time-based (`LEO4_RUST_WORKER_RECYCLE_SECONDS`) | ✅ (Phase 10-A4) |
 | Declarative Lake `extern_lib` integration | Out (9.X — needs Lake 5.x API spike) |
 | `LEO4_ERR_RUST_WORKER_RESTARTED` surfacing on recycle | ✅ (Phase 10-A5 side-channel via `leo4_rust_bridge_take_restart_flag`) |
-| Callback / function-arrow ABI | Out (9.X candidate) |
+| Callback / function-arrow ABI | Wire + mangling done (Phase 10-B1); outbound + inbound runtime substrate done (Phase 10-B1.x, 2026-05-28); OxiLean transpile-path IO walker done (#76 P0c, 2026-05-31); mslean4 worker-IPC `LECQ`/`LECR` frames v1.x |
 | Stronger isolation (zygote-fork, wasm sandbox) | Out (9.X candidate) |
 | `async fn` reverse exports | Out (no concrete consumer yet) |
 

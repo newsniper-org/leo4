@@ -718,15 +718,23 @@ would be expensive to relitigate:
       production main collapse (cdylib walk + EXPORTS +
       `OxiLeanInvoker` callback registration + parse +
       elab); IO walker body is the only remaining gap.
-    - **OX7 — OxiLean codegen + PEG donation** —
-      coverage matured through batch translate-arm
-      adds (If / Match / Let / Do / Forall / Exists /
-      AnonStruct / InterpStr / MatchBind / IfLet / etc.)
-      and the multi-decl env threading fix
-      (`ff87ae6`). cool-japan upstream PR draft
-      (`docs/cool-japan-upstream-pr-draft.md`) complete;
-      **submission deferred to post-v1.0 RC** per user
-      instruction.
+    - **OX7 — OxiLean codegen + PEG donation —
+      CLOSED 2026-05-31**. Coverage matured through
+      batch translate-arm adds (If / Match / Let / Do
+      / Forall / Exists / AnonStruct / InterpStr /
+      MatchBind / IfLet / etc.) and the multi-decl
+      env threading fix (`ff87ae6`). The translate
+      tail closed 2026-05-31: `BinOp` expand (`>` /
+      `≥` swap, `≠` / `∉` negated, `&&` / `||` / `↔`
+      / `∈` / `⊆` direct, `→` Unicode arrow lowered
+      to Pi), explicit `By` / `DotFn` / `Raw` Expr
+      arms, `DefinitionByArms` desugar, `Mutual`
+      wrap, exhaustive Expr match (translate tests
+      36 → 56; commits `3e4309b` / `1cd643a` /
+      `0dab156`). cool-japan upstream PR draft
+      (`docs/cool-japan-upstream-pr-draft.md`)
+      complete; **submission deferred to post-v1.0
+      RC** per user instruction.
     - **#75 P0b 3 steps for oxilean callback runtime —
       DONE 2026-05-28**. leo4-abi `RustCallbackRegistry`
       substrate (`a2c21d9`), `leo4::import!` macro
@@ -737,8 +745,8 @@ would be expensive to relitigate:
       invoke_outbound}` (`521979e`). Generic
       `impl Fn(...)` intentionally not supported in v0
       — users pass `fn` pointers + explicit state.
-    - **#76 P0c IO walker — coverage grows**
-      (2026-05-28..29). Sub-commit timeline:
+    - **#76 P0c IO walker — CLOSED 2026-05-31**.
+      Sub-commit timeline:
       - Fork `f9bfd45` (2026-05-28) — module + stub.
       - Fork `8b2af9f` (2026-05-28) — v0 walker (`IO.pure`).
       - Fork `d357a01` (2026-05-29) — `IO.bind α β m k`
@@ -753,15 +761,38 @@ would be expensive to relitigate:
         converts a single `@[extern]`-mangled symbol into
         the `(callback_id LE prefix, rest)` shape +
         forwards to `invoke_outbound`.
+      - Fork `23176d1` (2026-05-31) — full monad
+        transformer family pure/bind shapes (`IO.pure` /
+        `EIO.pure` / `EStateM.pure` / `ExceptT.pure` /
+        `StateT.pure` / `ReaderT.pure` + matching
+        `.bind`s), `IO.bind` beta-application against
+        concrete `m` results, canonical-ABI arg
+        encoding (literals / Bool / Unit / sized-integer
+        typeclass projections via `OfNat.ofNat` +
+        `Neg.neg` + `Char.ofNat` / composite ctors
+        `Prod.mk` / `Subtype.mk` / `Option.some`/`none`
+        / `Sum.inl`/`inr`), stdlib `IO.println` family.
+      - Fork `469ffea` (2026-05-31) — stdlib `IO.FS.*`
+        family direct dispatch (read / write / append
+        / remove / create / rename) + user-defined
+        record + inductive ctors via env-lookup of
+        `ConstantInfo::Constructor`.
+      - leo4 main `daf8ba8` + `322ea64` (2026-05-31) —
+        submodule bumps tracking the fork closure.
+
+      Out-of-scope-by-design tail (non-IO monad-class
+      run projections / `IO.FS.Handle.*` / compile-time
+      hooks / float-lit lowering) explicitly classified.
+      Fork tests 1197 → 1219.
 
       The cool-japan API coordination is **posted** at
       [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2);
       `docs/cool-japan-driver-api-coordination-draft.md`
       tracks the signature evolution. No maintainer
-      feedback yet (still nothing as of 2026-05-31, 3 days
-      after posting). Body PR submission stays deferred
-      until feedback arrives — the in-fork shape continues
-      to evolve in the meantime.
+      feedback yet as of 2026-05-31. Body PR submission
+      stays deferred until feedback arrives — the
+      in-fork shape is now stabilised at the
+      2026-05-31 closure.
     - **leo4-oxilean-bootstrap + leo4-oxilean-translate
       leaf crates** — extracted from the two consumers
       that previously vendored ~1880 LOC between them
@@ -781,6 +812,37 @@ would be expensive to relitigate:
       KB install is downstream's deployment concern,
       not leo4's. CI matrix focus stays on NT ≥ 10.0
       (cheap-image policy, not support floor).
+  - **2026-05-31 — RC blockers all CLOSED; v1.0 RC 1
+    about to tag**.
+    - **#76 P0c IO walker CLOSED**. Walker now covers
+      the full monad transformer family (`IO.pure` /
+      `EIO.pure` / `EStateM.pure` / `ExceptT.pure` /
+      `StateT.pure` / `ReaderT.pure` + matching
+      `.bind`s), `IO.bind` beta-app against concrete
+      `m` results, canonical-ABI arg encoding
+      (literals / Bool / Unit / sized-integer
+      typeclass projections / composite ctors /
+      user-defined record + inductive ctors via
+      env-lookup of `ConstantInfo::Constructor`),
+      stdlib `IO.println` + `IO.FS.*` family direct
+      dispatch. Out-of-scope-by-design tail (non-IO
+      monad-class run projections / `IO.FS.Handle.*`
+      / compile-time hooks / float-lit lowering)
+      explicitly classified. Fork tests 1197 → 1219.
+    - **#72 OX7 OxiLean codegen CLOSED**. Translate
+      coverage tail finished: `BinOp` expand, explicit
+      `By` / `DotFn` / `Raw` arms, `DefinitionByArms`
+      desugar, `Mutual` wrap, exhaustive Expr match.
+      translate tests 36 → 56. Commits `3e4309b` /
+      `1cd643a` / `0dab156`.
+    - **C1 / C5 / G2 sequencing moved to post-RC1**.
+      Manual work happens after v1.0 RC 1 tag, not
+      before. `feat/mslean4-lecq-lecr-ipcs` branch
+      pushed back accordingly. A1 cool-japan upstream
+      PR still RC-direct timing.
+    - **#62 Typst books synced** (commit `f90dc71`).
+      8 files, 4 langs × 2 books, +874 lines. Honours
+      the "update at every 중요 시점" memory.
 
 Anything in this list that needs to change → discuss with
 병익 before touching code. See CLAUDE.md "If a request from

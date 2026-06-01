@@ -341,51 +341,57 @@ implemented.
 
 ### T7 — `leo4 run` `--impl rust-transpile`
 
-**STATUS (2026-05-27): EXPERIMENTAL — primitive arithmetic
-works end-to-end; broader coverage still pending OX7
-follow-ups.**
+**STATUS (2026-05-31): OX7 CLOSED — rust-transpile path
+end-to-end on the fork.** The "EXPERIMENTAL" framing
+below applied through 2026-05-27; preserved as the
+historical T7 baseline.
 
 OX7 spike on 2026-05-26 found that OxiLean 0.1.2 codegen
 was broken at multiple layers (BVar/Const ID tracking,
 return-type inference, UInt mapping, HAdd typeclasses,
-elab-side FVar bloat). All six fixes (1a / #1 / #2 / 1b-α /
-1b-β / typeclass) landed across 2026-05-26..27 on the leo4
-fork [github.com/newsniper-org/oxilean](https://github.com/newsniper-org/oxilean)
+elab-side FVar bloat). All six initial fixes (1a / #1 /
+#2 / 1b-α / 1b-β / typeclass) landed across 2026-05-26..27
+on the leo4 fork
+[github.com/newsniper-org/oxilean](https://github.com/newsniper-org/oxilean)
 branch `0.1.3-leo4-ox7` (submoduled at `sibling/oxilean/`).
+The translate-coverage tail (#72) closed 2026-05-31:
+BinOp expansion (`>` / `≥` swap, `≠` / `∉` negated,
+`&&` / `||` / `↔` / `∈` / `⊆` direct, `→` Unicode →
+Pi), explicit `By` / `DotFn` / `Raw` Expr arms,
+`DefinitionByArms` desugar, `Mutual` wrap, exhaustive
+Expr match — translate tests 36 → 56 (main commits
+`3e4309b` / `1cd643a` / `0dab156`).
 
-What works now:
+What works now (2026-05-31):
 
   - `def f (a b : UInt64) : UInt64 := a + b` (and the
-    other primitive ASCII operators `-`, `*`, `/`, `%`,
-    `<`, `<=`, `==`, plus their `Int*` / `Float*` analogues)
-    transpiles to compilable native Rust:
-    `pub fn f(_x0: u64, _x1: u64) -> u64 { (_x0 + _x1) }`.
+    other primitive ASCII / Unicode operators) transpiles
+    to compilable native Rust.
   - `def f (a b : UInt64) : UInt64 := UInt64.add a b`
-    (and other monomorphic primitive-namespace methods)
-    transpiles to `UInt64_add(_x0, _x1)` (caller-supplied
-    fn).
+    (monomorphic primitive-namespace methods) transpiles
+    to `UInt64_add(_x0, _x1)`.
   - All sized integer / float / Char Lean primitives map
     to their native Rust scalars.
+  - `if` / `match` / `let-in` expression bodies translate
+    through `translate_expr`'s exhaustive Expr coverage.
+  - Multi-decl modules with cross-fn calls: env-threading
+    in `unfold_decl` (leo4-side `ff87ae6`) lets later
+    decls resolve earlier decls' `Const` names.
+  - `HPow.hPow` lowers to `.pow(rhs)` method call (fork
+    commit `da49bec`).
+  - String-literal `let`-binding coercion (fork commit
+    `de4268d`).
 
-What still has limits:
+Out-of-scope-by-design tail (post-OX7, classified, not
+"still open"): non-IO monad-class run projections;
+`IO.FS.Handle.*` direct dispatch; compile-time hooks;
+float-literal lowering edge cases. None block the v1.0
+RC1 ship.
 
-  - `If`/`Match`/`Let`/`Do` expression bodies — `translate_expr`
-    has no arm for these yet; the source silently falls
-    back to the legacy walker which doesn't desugar `+`.
-  - User-namespace methods invoked via dot-syntax
-    (`MyType.foo a b`) — same Proj-fast-path as primitive
-    methods, so should work; not exercised yet.
-  - `HPow.hPow` (the `^` operator) — Rust has no native
-    `**`, so codegen falls back to `RustExpr::Call`;
-    consumer must provide a free fn or wait for the
-    method-call emit path.
-  - Multi-decl modules with cross-fn calls — single-decl
-    fixtures are covered; multi-decl coverage isn't
-    exercised in the conformance smoke tests yet.
-  - The `--impl rust-transpile` runtime still emits an
-    `experimental` warning naming OX7 — this stays until
-    coverage broadens enough to drop it (tracked as part
-    of OX7 closure).
+The `--impl rust-transpile` runtime still emits an
+`experimental` warning until the post-RC docs lift —
+the warning is a release-gate marker, not a coverage
+signal.
 
 Pre-req: run from MSYS2 ucrt64 (same shell choice as T3).
 

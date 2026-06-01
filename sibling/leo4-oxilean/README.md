@@ -6,16 +6,23 @@
 > `LeanProcInvoker` trait surface.
 >
 > **Status (2026-05-31)**: PRODUCTION-WIRED on the leo4
-> fork branch `0.1.3-leo4-ox7`. Forward + reverse dispatch
-> (inbound `@[extern]` callbacks via `ExternResolver` +
-> outbound `RustCallbackRegistry` bridge) is functional;
-> the underlying IO walker grows shape-by-shape on the
-> fork side (see `oxilean_runtime::driver`'s docs for the
-> currently-recognised set). The earlier "every dispatch
-> returns a stub error" stance is historical — the
-> wiring closed across `OX8.3a`/`b`/`c` (2026-05-28) +
-> `#75` callback ABI 3 steps + `#76` IO walker landings
-> (2026-05-28..29).
+> fork branch `0.1.3-leo4-ox7`, cleared for v1.0 RC 1
+> tagging. Forward + reverse dispatch (inbound `@[extern]`
+> callbacks via `ExternResolver` + outbound
+> `RustCallbackRegistry` bridge) is functional. The
+> underlying IO walker is no longer "shape-by-shape" —
+> #76 P0c closed 2026-05-31 with the full monad-transformer
+> family covered, `IO.bind` beta-application, full
+> canonical-ABI arg encoding (including user-defined
+> record + inductive ctors via env-lookup of
+> `ConstantInfo::Constructor`), and direct dispatch for
+> stdlib `IO.println` + `IO.FS.*` families. Out-of-scope
+> tail (`StateT.run`, `IO.FS.Handle`, `dbg_trace`, float
+> literals) is explicitly classified, not open. Fork tests
+> 1219 passing; translate tests 56 passing (#72 closed
+> 2026-05-31). The earlier "every dispatch returns a stub
+> error" / "scaffold-only" framing is historical — see
+> `docs/ox8-1-leo4-oxilean-audit.md`'s top-of-file note.
 
 ## What this is
 
@@ -54,7 +61,7 @@ once they land upstream, this adapter compiles
 against an unmodified OxiLean release with no leo4-side
 churn.
 
-## What works today (19 / 19 tests passing)
+## What works today (19 / 19 adapter tests passing; fork side 1219)
 
 - `OxiLeanInvoker::new()` constructs an
   `Arc<Mutex<oxilean_kernel::ffi::ExternRegistry>>` wrapper
@@ -112,12 +119,19 @@ maintainer feedback as of 2026-05-31).
       `dispatch_extern_const(env, registry, resolver,
       name, args)` + `dispatch_extern_decl` in
       `oxilean-runtime/src/extern_resolver.rs` (OX8.3b,
-      fork commit `bf17523`). The new
-      `oxilean_runtime::driver` module (2026-05-28..29,
-      fork commits `f9bfd45` → `8b2af9f` → `d357a01`)
-      drives `main : IO α` through that hook for
-      `IO.pure`, `IO.bind` (arity-4 + arity-2), and
-      `@[extern]` Const reductions.
+      fork commit `bf17523`). The
+      `oxilean_runtime::driver` module drives
+      `main : IO α` through that hook. #76 P0c (closed
+      2026-05-31) extended coverage to the full monad
+      transformer family, `IO.bind` beta-application,
+      full canonical-ABI argument encoding (including
+      user-defined record + inductive ctors via
+      env-lookup of `ConstantInfo::Constructor`), and
+      direct dispatch for stdlib `IO.println` +
+      `IO.FS.*` families. Out-of-scope tail
+      (`StateT.run`, `IO.FS.Handle`, `dbg_trace`, float
+      literals) is explicitly classified rather than
+      pending.
 - [x] **Hook 3 — Attribute / deriving registration**
       (the `registerBuiltinAttribute` analogue).
       **Status: PRESENT in v0.1.2.**
@@ -146,13 +160,22 @@ Adapter implications:
   ...)` and `DeriveHandlerRegistry::register(...)` for
   `LeanMarshal`.
 * The **actual dispatch layer** (`OxiLeanProc::call` +
-  `OxiLeanInvoker::invoke`) stays blocked on Hooks 1 & 2.
-  Until they land upstream, this adapter's traits return
-  the `RUST_DLSYM_FAILED` (0x0002_0005) stubs that the
-  current 8 tests pin down.
+  `OxiLeanInvoker::invoke`) is **live on the fork** —
+  Hooks 1 & 2 landed (OX8.3a/b, 2026-05-28) and the
+  driver IO walker closed under #76 P0c on 2026-05-31.
+  Registered exports + callbacks dispatch through
+  `ExternResolver` + `dispatch_extern_const` end-to-end;
+  the `RUST_DLSYM_FAILED` (0x0002_0005) code now only
+  fires when a caller registered export metadata but
+  didn't install the runtime callback closure, which is
+  a programmer-error path covered by tests.
+* On **cool-japan upstream OxiLean v0.1.2** the adapter
+  remains blocked until the PR series merges; tracking
+  in `docs/cool-japan-*.md`.
 
 Tracking: `SPEC/rust-native-lean.md` §7.1 + §8 reflects
-this 3-of-3 status (all hooks now exist on the fork).
+this 3-of-3 status (all hooks now exist on the fork and
+the driver is wired through).
 
 ## Phase 10-B1 callback ABI — wired end-to-end
 

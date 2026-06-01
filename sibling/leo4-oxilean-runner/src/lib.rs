@@ -31,25 +31,52 @@
 //! ## `main : IO α` execution — walker coverage
 //!
 //! OxiLean v0.1.3-leo4-ox7 (the fork branch this crate
-//! tracks) now ships `oxilean_runtime::driver::run_main`
-//! — an IO walker that drives an elaborated `main : IO α`
+//! tracks) ships `oxilean_runtime::driver::run_main` —
+//! an IO walker that drives an elaborated `main : IO α`
 //! to its IO effects under an installed `ExternResolver`
-//! + `ExternRegistry`. The walker recognises:
+//! + `ExternRegistry`. As of fork commit `469ffea`
+//! (2026-05-31) the walker recognises:
 //!
-//! - `IO.pure` / `Pure.pure` (nullary terminal),
-//! - `IO.bind α β m k` (arity-4 with implicits) and
-//!   `Bind.bind m k` (arity-2 after implicit erasure),
+//! - The full monad transformer family at the `IO`
+//!   leaf — `IO.pure` / `Pure.pure` / `EIO.pure` /
+//!   `EStateM.pure` / `ExceptT.pure` / `StateT.pure` /
+//!   `ReaderT.pure` (and the underscore-mangled
+//!   spellings) as terminals; matching `*.bind` siblings
+//!   as monadic sequence.
+//! - `IO.bind m k` beta-application — when `m` walks to
+//!   a concrete result and `k` is a `Lam`, the walker
+//!   substitutes and walks the body.
 //! - `@[extern]`-attributed `Const` reductions via
-//!   `dispatch_extern_const` against the supplied registry.
+//!   `dispatch_extern_const`, with full canonical-ABI
+//!   arg encoding (literals + Bool + Unit + sized-integer
+//!   typeclass projections via `OfNat.ofNat` / `Neg.neg` /
+//!   `Char.ofNat` + composite ctors `Prod.mk` /
+//!   `Subtype.mk` / `Option.some` / `Sum.inl` + **user-
+//!   defined record / inductive ctors via env-lookup of
+//!   `ConstantInfo::Constructor`**).
+//! - Stdlib `IO.println` / `IO.eprintln` / `IO.print` /
+//!   `IO.eprint` direct dispatch against `print!` /
+//!   `println!` / `eprint!` / `eprintln!`, ahead of the
+//!   `@[extern]` resolver arm.
+//! - Stdlib `IO.FS.*` family (read / write / append /
+//!   remove / create / rename) direct dispatch against
+//!   `std::fs`. `readFile` surfaces contents as
+//!   `Ok(Some(Lit(Str)))` so `IO.bind m k` beta-applies
+//!   `k` against the bytes; IO errors wrap into
+//!   `DriverError::ExternFailed`.
 //!
-//! Shapes the walker doesn't yet cover (e.g. `EStateM
-//! Error IO.RealWorld α` lowerings the Lean stdlib funnels
-//! IO through, beta-application of `k` in `IO.bind m k`
-//! with a concrete result feed from `m`) surface a clean
-//! [`LeanError`] with code `0x0002_0005`
-//! (`RUST_DLSYM_FAILED`) whose message carries the
-//! offending sub-expression's debug repr — the gap is
-//! per-shape, not "everything".
+//! Shapes outside the recognised set are *out-of-scope by
+//! design*, not implementation gaps: non-IO monad-class
+//! run projections (`StateT.run` / `ReaderT.run` /
+//! `ExceptT.run` belong at the LCNF / bytecode
+//! interpreter layer below the walker), `IO.FS.Handle.*`
+//! (needs host-side `File` lifetime modelling the walker
+//! doesn't carry), compile-time hooks (`dbg_trace` /
+//! `panic!` / `unreachable!` — elaborator-handled), and
+//! float-literal lowering (constant-folded by reducer).
+//! Each surfaces a clean [`LeanError`] with code
+//! `0x0002_0005` (`RUST_DLSYM_FAILED`) carrying the
+//! offending sub-expression's debug repr.
 //!
 //! The intermediate pipeline steps — cdylib load, EXPORTS
 //! walk, invoker registration, parse, elab,
@@ -64,9 +91,11 @@
 //!
 //! The driver's API shape is under discussion upstream
 //! at <https://github.com/cool-japan/oxilean/issues/2>;
-//! body PRs (continuing to grow the recognised-shape set
-//! in the fork's `oxilean_runtime/driver/mod.rs`) land
-//! once that discussion settles.
+//! upstream-PR submission (the API surface + the
+//! recognised-shape set in the fork's
+//! `oxilean_runtime/driver/mod.rs`) lands once that
+//! discussion settles. As of 2026-05-31 the issue has
+//! been silent 3+ days.
 
 #![allow(clippy::missing_errors_doc)]
 // FFI / type-name-in-docs noise — backticking every

@@ -18,15 +18,26 @@ Current siblings:
   sync user-facing API.
 - **`oxilean/`** (git submodule, since 2026-05-26) — OxiLean
   fork at `https://github.com/newsniper-org/oxilean`, branch
-  `0.1.3-leo4-ox7`. OX7 work tree: codegen fixes (BVar/Const
-  ID tracking, return-type inference, UInt/Int/Float Rust
-  type mapping, HAdd-family typeclass + Nat/UInt/Int instance
-  registration). The fork also hosts `oxilean-parse-peg/`,
-  the PEG-based Lean 4 parser donated upstream from the
-  former `sibling/leo4-lean4-parse/` (subtree-imported with
-  history preserved, then renamed + made leo4-independent
-  via crate-local `ParseError`). Eventually upstreamed to
-  `cool-japan/oxilean` (γ-1' contribution option 1).
+  `0.1.3-leo4-ox7`. As of 2026-05-31 the work tree carries:
+  the OX7 codegen series (BVar/Const ID tracking, return-type
+  inference, UInt/Int/Float Rust type mapping, HAdd-family
+  typeclass + Nat/UInt/Int instance registration); the OX8.3a
+  `CallbackRegistry` + OX8.3b `ExternResolver` /
+  `dispatch_extern_const` hooks; and the `oxilean_runtime::
+  driver` module (#76 P0c, closed 2026-05-31) — full monad-
+  transformer-family IO walker with `IO.bind` beta-application,
+  canonical-ABI arg encoding (including user-defined record /
+  inductive ctors via env-lookup of `ConstantInfo::Constructor`),
+  and direct dispatch for `IO.println` + `IO.FS.*` stdlib
+  families. Out-of-scope tail (`StateT.run`, `IO.FS.Handle`,
+  `dbg_trace`, float literals) is explicitly classified rather
+  than open. Fork tests: 1219 passing. The fork also hosts
+  `oxilean-parse-peg/`, the PEG-based Lean 4 parser donated
+  upstream from the former `sibling/leo4-lean4-parse/`
+  (subtree-imported with history preserved, then renamed +
+  made leo4-independent via crate-local `ParseError`).
+  Eventually upstreamed to `cool-japan/oxilean` (γ-1'
+  contribution option 1).
 - **`leo4-oxilean-build/`** — OxiLean transpile path (the
   `rust-transpile` impl kind in `leo4.toml`). Pipeline:
   parse via `oxilean-parse-peg` (from the `oxilean/` fork
@@ -38,19 +49,24 @@ Current siblings:
   → emit a Rust crate. `leo4-parser` cargo feature (default
   ON since 2026-05-24) selects the new path;
   `--no-default-features` falls back to oxilean-parse-direct.
-  EXPERIMENTAL in v1.0 RC pending OX7 (see warning emitted
-  by `leo4 run --impl rust-transpile`).
+  Cleared for v1.0 RC 1 (2026-05-31): #72 (codegen, translate
+  tests 36 → 56) + #76 P0c (driver IO walker) both closed;
+  primitive-arithmetic, `if`/`match`/`let-in`, multi-decl,
+  `Mutual`, `BinOp` Unicode + negated forms, and user-record /
+  inductive ctor encoding all transpile end-to-end. Out-of-
+  scope tail remains classified, not blocking.
 - **`leo4-oxilean-runner/`** — OX8.5 B1/B2 runner helper
-  (2026-05-28). Folds the cdylib `dlopen` + `EXPORTS`-slice
-  walk + `OxiLeanInvoker` callback registration +
-  `lean/Main.lean` parse + elab into a single `run_main`
-  entry point. The `leo4 create reverse --impl rust-transpile`
-  scaffold's `src/main.rs` collapses to one call. The final
-  "drive `main : IO Unit` to its IO effects" step is
-  pending an upstream OxiLean PR (no public runtime driver
-  in v0.1.3-leo4-ox7); the runner surfaces a clean error
-  pointing at that gap once the rest of the pipeline
-  succeeds.
+  (2026-05-28; #76 P0c-completed 2026-05-31). Folds the
+  cdylib `dlopen` + `EXPORTS`-slice walk + `OxiLeanInvoker`
+  callback registration + `lean/Main.lean` parse + elab
+  into a single `run_main` entry point. The `leo4 create
+  reverse --impl rust-transpile` scaffold's `src/main.rs`
+  collapses to one call. The "drive `main : IO Unit` to its
+  IO effects" step now executes via the fork's
+  `oxilean_runtime::driver` (full monad-transformer-family
+  walker on the fork side); cool-japan upstream tracking of
+  the same API stays in `docs/cool-japan-driver-api-
+  coordination-draft.md`.
 - **`leo4-oxilean-bootstrap/`** — leaf crate for the
   OX5-oxi env bootstrap (`bootstrap_env`,
   `add_leo4_primitives`, `LEO4_PRIMITIVE_TYPES`,
@@ -66,6 +82,15 @@ Current siblings:
   as `leo4-oxilean-bootstrap` (2026-05-28, task #78
   follow-up). Replaces the ~1730-line vendor that used to
   live in each consumer's `src/leo4_translate.rs`.
+- **`leo4-lean4-parse/`** — historical home of the
+  PEG-based Lean 4 parser. As of 2026-05-26 the crate was
+  donated upstream into the `oxilean/` fork submodule as
+  `oxilean-parse-peg` (subtree-imported with history). The
+  directory remains only as a `target/` shell from earlier
+  builds and is no longer a source-of-truth crate; do not
+  edit it. Consumers (`leo4-oxilean-build`,
+  `leo4-oxilean-runner`) depend on `oxilean-parse-peg`
+  directly via the submodule.
 - **`mathlib-bridge-test/`** — Lake package pulling Mathlib +
   `Leo4`. Type-checks every `Leo4.MathlibBridge.*` module
   end-to-end. Mathlib's cold build is 1-2 hours, so this isn't on

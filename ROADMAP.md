@@ -657,34 +657,41 @@ all wait for the v1.0 RC window or later.
       `OxiLeanInvoker::attach_outbound_registry` +
       `invoke_outbound` (`521979e`).
     - **#76 P0c IO walker for `oxilean_runtime::driver` —
-      partial (2026-05-29 update)**. Fork `8b2af9f` lands
-      the v0 walker (`IO.pure` shape); `d357a01` extends
-      coverage to `IO.bind` (arity-4 + arity-2) +
-      `@[extern]` Const dispatch via
-      `dispatch_extern_const`. leo4 main bumps
-      (`c0f81c7`) the submodule + adapts
-      leo4-oxilean-runner's caller. `44bb382` lands the
-      leo4-oxilean outbound dispatch bridge
-      (`register_outbound_dispatch_callback`) — when the
-      walker fires the bridge, the leo4-side
-      `RustCallbackRegistry::invoke` chain runs.
-      Remaining shapes (`EStateM` lowerings,
-      beta-application of `k` with concrete result from
-      `m`, walker-side canonical-ABI encoding of args
-      into resolver buffer) return
-      `DriverError::NotYetImplemented` with offending
-      expr's debug repr.
+      CLOSED 2026-05-31**. The walker now covers the full
+      monad transformer family (`IO.pure` / `EIO.pure` /
+      `EStateM.pure` / `ExceptT.pure` / `StateT.pure` /
+      `ReaderT.pure` + matching `.bind`s), `IO.bind`
+      beta-application against concrete `m` results,
+      canonical-ABI arg encoding (literals / Bool / Unit
+      / sized-integer typeclass projections via
+      `OfNat.ofNat` + `Neg.neg` + `Char.ofNat` /
+      composite ctors `Prod.mk` / `Subtype.mk` /
+      `Option.some`/`none` / `Sum.inl`/`inr` /
+      **user-defined record + inductive ctors via
+      env-lookup of `ConstantInfo::Constructor`**), stdlib
+      `IO.println` family + stdlib `IO.FS.*` family
+      (read / write / append / remove / create / rename)
+      direct dispatch. Out-of-scope-by-design tail
+      (non-IO monad-class run projections /
+      `IO.FS.Handle.*` / compile-time hooks / float-lit
+      lowering) explicitly classified. Fork tests
+      1197 → 1219. Commits: `23176d1` (IO builtin),
+      `469ffea` (IO.FS + user-defined ctor) on fork
+      branch `0.1.3-leo4-ox7`; leo4 main bumps `daf8ba8`
+      + `322ea64`. Earlier in-progress milestones (fork
+      `8b2af9f` v0 walker / `d357a01` `IO.bind` +
+      `@[extern]` / leo4 `c0f81c7` runner adapt /
+      `44bb382` outbound dispatch bridge) all subsumed
+      by the closure.
     - **Cool-japan API coordination** — discussion
       posted at
       [cool-japan/oxilean#2](https://github.com/cool-japan/oxilean/issues/2)
       on 2026-05-28; `docs/cool-japan-driver-api-
-      coordination-draft.md` revised in sync as the
-      signature evolved (`d357a01`'s `extern_registry`
-      parameter added 2026-05-29). **No maintainer
-      comments yet as of 2026-05-31** (3 days). Body PR
-      submission stays deferred until feedback arrives;
-      the in-fork shape continues to grow in the
-      meantime.
+      coordination-draft.md` continues to track the
+      driver API shape. **No maintainer comments yet
+      as of 2026-05-31**. Body PR submission stays
+      deferred until feedback arrives; the in-fork
+      shape is now stabilised at the 2026-05-31 closure.
     - **mslean4 LECQ/LECR forward+callback runtime** —
       separate sub-phase (post-RC). SPEC §10a text
       generalisation + IPC frame routing.
@@ -711,11 +718,14 @@ all wait for the v1.0 RC window or later.
   `tests/conformance/reverse/`, and a SPEC quickstart page
   alongside `SPEC/reverse-direction.md`.
 
-**Deferred to the v1.0 RC pre-release window**:
+**Sequenced to post-v1.0 RC 1** (decision 2026-05-31 —
+all RC blockers are now CLOSED, so the v1.0 RC 1 tag
+ships without these; manual / CI matrix work happens
+after the tag, not before):
 
 - **C1** Windows runtime CI matrix. Code compiles clean
   against `*-pc-windows-gnullvm`; runtime verification
-  waits for CI infra.
+  waits for CI infra. Sequenced post-RC1.
 - **C5** `*-linux-musl*` Tier 1+ support for paths
   with **no `leo4-mslean4` and no lake dependency**
   (locked 2026-05-24). Concretely: the rust-transpile
@@ -736,9 +746,13 @@ all wait for the v1.0 RC window or later.
   leo4-mslean4 runtime path is excluded (Lean ships
   glibc-built libleanshared → musl process can't
   dlopen it). Remaining work: CI matrix row + manual
-  verification + docs.
-- **G2** Publish to crates.io. API surface stabilises
-  through Phase 10 first.
+  verification + docs. Sequenced post-RC1. The
+  `feat/mslean4-lecq-lecr-ipcs` branch work is
+  pushed back to the same window.
+- **G2** Publish to crates.io. API surface stabilised
+  through the v1.0 RC; publish runs post-RC1.
+- **A1** cool-japan upstream PR stays **RC-direct
+  timing** (not pushed to post-RC1).
 - **OX1** `leo4-oxilean-build` invocation wiring (locked
   2026-05-22; step a landed 2026-05-22).
 

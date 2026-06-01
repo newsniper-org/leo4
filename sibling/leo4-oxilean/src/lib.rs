@@ -46,11 +46,24 @@
 //! crossing is just an in-process Rust function call
 //! routed through the registry pair (inbound +
 //! outbound). The matching IO walker on the fork side
-//! (`oxilean_runtime::driver::run_main`, fork commit
-//! `d357a01`) recognises `IO.pure`, `IO.bind` (arity-4 +
-//! arity-2), and `@[extern]` `Const` reductions today;
-//! shape coverage grows incrementally as new use cases
-//! surface.
+//! (`oxilean_runtime::driver::run_main`, latest at fork
+//! commit `469ffea`) recognises the full monad
+//! transformer family (`IO.pure` / `EIO.pure` /
+//! `EStateM.pure` / `ExceptT.pure` / `StateT.pure` /
+//! `ReaderT.pure` + `.bind` siblings), `IO.bind` beta-
+//! application against concrete `m` results, `@[extern]`
+//! `Const` reductions with canonical-ABI arg encoding
+//! (literals + Bool + Unit + sized-integer typeclass
+//! projections + composite ctors + **user-defined
+//! record / inductive ctors via env-lookup**), and the
+//! stdlib `IO.println` / `IO.FS.*` families dispatched
+//! directly against `print!` / `std::fs::*`. The
+//! `NotYetImplemented` arm now fires only for
+//! out-of-scope-by-design shapes (non-IO monad-class
+//! run projections, `IO.FS.Handle.*`, compile-time
+//! hooks, float-lit lowering) — not implementation
+//! gaps. Fork tests 1197 → 1219 across the
+//! 2026-05-31 grow batch.
 //!
 //! ## OxiLean upstream landing
 //!
@@ -574,10 +587,18 @@ fn oxi_name_to_mangled(n: &Name) -> String {
     n.to_string()
 }
 
-/// `LeanProc` implementation for OxiLean. Scaffold —
-/// `call` is stub'd because OxiLean v0.1.2 has no by-name
-/// `@[leo4_export]` dispatch entry point in its evaluator.
-/// See crate docs.
+/// `LeanProc` implementation for OxiLean — the
+/// **forward** (Rust → Lean) direction. `call` is
+/// deliberately not wired through the live OxiLean
+/// evaluator: leo4's rust-transpile production path
+/// for forward direction goes through Lean → Rust
+/// transpile + native compile, not live evaluation.
+/// Invoking `call` returns a clear `LeanError`
+/// diagnostic so callers reaching this surface know to
+/// route through transpile instead. The reverse
+/// direction's `OxiLeanInvoker` (above) IS production-
+/// wired against the fork's CallbackRegistry +
+/// ExternResolver + driver path.
 #[derive(Debug, Clone)]
 pub struct OxiLeanProc {
     schema_hash: String,
@@ -612,10 +633,13 @@ impl LeanProc for OxiLeanProc {
         Err(LeanError::new(
             0x0002_0005,
             format!(
-                "leo4-oxilean: OxiLeanProc::call({mangled}) is not yet wired. \
-                 OxiLean v0.1.2 doesn't expose a by-name `@[leo4_export]` \
-                 invocation entry point in its public runtime API. See \
-                 `README.md` §\"OxiLean upstream prerequisite\"."
+                "leo4-oxilean: OxiLeanProc::call({mangled}) is not the production \
+                 forward path for the rust-transpile impl — Lean → Rust transpile \
+                 + native compile is. Route the call through the transpile output \
+                 (see `sibling/leo4-oxilean-build/` + `leo4-cli`'s `run` runner) \
+                 instead of invoking the live evaluator. Reverse direction (`@[leo4::export]` \
+                 Rust fns called from Lean) goes through `OxiLeanInvoker` and is \
+                 production-wired."
             ),
         ))
     }

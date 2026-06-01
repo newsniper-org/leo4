@@ -1,6 +1,14 @@
 # OX7 (1b) — elab-side bloat: diagnosis
 
-Opened: 2026-05-27. Status: **DIAGNOSIS COMPLETE**, fix scope under review.
+Opened: 2026-05-27. **Status (2026-05-31): RESOLVED — OX7
+closed**. Fix 1b-α landed leo4-side in `unfold_decl`
+(re-substitution path, kept leo4-side per the
+`docs/cool-japan-upstream-pr-draft.md` §3.2 note for a
+follow-up upstream PR once the substitution algorithm
+stabilises). Fix 1b-β landed on the fork as commit
+`81a0fdc` (`Proj("add", _, Const("UInt64"))` →
+`Const("UInt64.add")`). Diagnosis below is preserved as
+the historical record.
 
 ## Symptom
 
