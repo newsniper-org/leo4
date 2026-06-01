@@ -3,9 +3,14 @@
 > Working notes on how to lift the leo4 IDL out of the Lean ↔ Rust interop
 > setting and reuse it for other "this is the shape of an interface"
 > use cases — most concretely, declaring the I/O of AI model blocks /
-> layers / sub-graphs. Written from leo4's current state (Phase 5,
-> W7-2c) so concrete file paths line up with what is in the tree
-> today.
+> layers / sub-graphs. Originally written against Phase 5 / W7-2c;
+> reuse advice unchanged through Phases 6–9 and v1.0 RC.1–RC.4
+> (2026-05-31). The reverse-direction expansion (RC.2 typed-enum
+> mirror emit via `USER_TYPES` `linkme::distributed_slice`,
+> RC.3 multi-candidate `rust_type_to_idl_candidates`, RC.4
+> `#[leo4::export]` accepting user-defined types) is leo4-internal
+> and does not alter the grammar / canonical-ABI / mangling
+> surface this guide reuses.
 
 ## 1. What you are actually getting from leo4
 

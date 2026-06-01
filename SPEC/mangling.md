@@ -99,6 +99,27 @@ mangle_type(enum E)          = "E_" ++ fqn(E) ++ "_e"
 mangle_type(flags F)         = "F_" ++ fqn(F) ++ "_f"
 mangle_type(resource R)      = "X_" ++ fqn(R) ++ "_x"
 mangle_type(resource R<T₁,…>)= "X_" ++ fqn(R) ++ "_" ++ join("_", map(mangle_type, [T₁,…])) ++ "_x"
+-- User-defined nominal prefixes (S_/V_/E_/F_/X_) are
+-- fully **bidirectional** as of RC.2 2026-05-31. The
+-- reverse-direction emit pipeline
+-- (`leo4-rust-emit::lean_type_of_mangle`, commit
+-- `b260ed8`) decodes a mangle string back into the
+-- carrier kind + FQN so the Lean wrapper module can be
+-- auto-emitted from the Rust side alone. The schema
+-- channel that carries the per-decl field / ctor /
+-- variant shape is `leo4_abi::rust_exports::USER_TYPES`
+-- (a `linkme::distributed_slice` of
+-- `UserTypeEntry { fqn, kind, fields, ctors }`,
+-- surfaced through the FFI symbol
+-- `leo4_rust_describe_user_types`). The `linkme` dep on
+-- `leo4-abi` + `leo4` is unconditional after RC.2
+-- follow-up `cfda354` (the `rust-exports` cargo feature
+-- stays as a no-op alias). Users no longer hand-write a
+-- Lean mirror module for `#[derive(LeanMarshal)]`-tagged
+-- types; the wrapper Lean file emitted by
+-- `leo4-rust-emit` carries real `structure` / `inductive`
+-- decls with `deriving Leo4.LeanMarshal`. See
+-- `SPEC/reverse-direction.md` §8a + §13.
 
 mangle_type(io<T>)           = "I_" ++ mangle_type(T) ++ "_i"
 -- Wire mangle for `io<T>` is unchanged for cross-impl conformance.

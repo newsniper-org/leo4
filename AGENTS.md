@@ -123,11 +123,27 @@ unless stated otherwise.
    with `toMathlib` / `fromMathlib` functions. Keep
    `Leo4` core Mathlib-independent.
 
-For **reverse direction** new types: in addition,
-`rust_type_to_idl` in `crates/leo4-macros-backend/src/lib.rs`
-and `lean_type_of_mangle` in `crates/leo4-rust-emit/src/main.rs`
-both need a new arm. Otherwise the wrapper emits a `panic!`
-stub.
+For **reverse direction** new types:
+
+- **User-defined types** (`#[derive(LeanMarshal)]` records /
+  variants / unit enums / unit structs) work out of the box
+  since RC.2 / RC.3 / RC.4 (2026-05-31). The strict
+  `rust_type_to_idl` (RC.4 `5d786f0`) lowers user idents to
+  `IDLType::Record { fqn, args }`; `lean_type_of_mangle`
+  (RC.2 `b260ed8`) decodes all 5 user-defined-nominal mangle
+  prefixes (`S_…_s` record, `V_…_v` variant, `E_…_e` enum,
+  `F_…_f` flags, `X_…_x` resource); and the `USER_TYPES`
+  `linkme::distributed_slice` carries the real
+  `UserTypeKind` + fields + ctor source-text. `leo4-rust-emit`
+  emits real Lean `structure` / `inductive` mirror
+  declarations with `deriving Leo4.LeanMarshal` — no hand-
+  written mirror code required.
+- **New built-in IDL primitives**: `rust_type_to_idl` (strict)
+  and `rust_type_to_idl_candidates` (multi-candidate, RC.3
+  `29a941f`) in `crates/leo4-macros-backend/src/lib.rs` both
+  need a new arm. `lean_type_of_mangle` in
+  `crates/leo4-rust-emit/src/main.rs` needs the matching
+  decode. Otherwise the wrapper emits a `panic!` stub.
 
 ## 4. Adding a new OS-specific layer
 
@@ -812,8 +828,58 @@ would be expensive to relitigate:
       KB install is downstream's deployment concern,
       not leo4's. CI matrix focus stays on NT ≥ 10.0
       (cheap-image policy, not support floor).
+  - **2026-05-31 — RC.2 / RC.3 / RC.4 typed-enum mirror
+    + multi-candidate import + export accepts user types
+    (post-RC.1 same-day batch)**:
+    - **RC.2 (`b260ed8` + `cfda354`)** — `lean_type_of_mangle`
+      decodes all 5 user-defined-nominal mangle prefixes
+      (record / variant / enum / flags / resource); new
+      `leo4_abi::rust_exports::USER_TYPES` `linkme::
+      distributed_slice` per `#[derive(LeanMarshal)]` site
+      carrying fqn / `UserTypeKind` / fields / ctors with
+      source-text field types; new FFI symbol
+      `leo4_rust_describe_user_types`; `leo4-rust-emit` emits
+      real Lean `structure` / `inductive` mirror decls
+      with `deriving Leo4.LeanMarshal`. New Rust-type-string
+      → Lean-type translator (`rust_type_to_lean_type`) walks
+      syn AST: scalars, `Vec<u8> → ByteArray`, `Vec<T> →
+      Array T`, `Option<T> → Option T`, `Result<T,E> →
+      Except E T`, `Box<T> → T`, tuples right-assoc as
+      `Prod`, `BigInt/BigNat → Int/Nat`. `cfda354` drops the
+      `#[cfg(feature = "rust-exports")]` gate from
+      `rust_exports` / `__private` / `emit_user_type_schema`
+      — root cause was `unexpected_cfg` lint per-derive-site
+      in every downstream crate; `rust-exports` cargo feature
+      stays as a no-op alias for backward compat.
+    - **RC.3 (`29a941f`)** —
+      `rust_type_to_idl_candidates(ty) -> Option<Vec<IDLType>>`
+      returns all 5 candidate kinds for user-defined idents;
+      nested generics produce the Cartesian product of inner
+      candidates. `leo4::import!` macro Tier 2 lookup drives
+      this list against the mangling JSON; Tier 3 single-fname
+      fallback unchanged. `cartesian_product` helper added.
+      Strict `rust_type_to_idl` remained `None` for user
+      idents at this point (changed in RC.4).
+    - **RC.4 (`5d786f0`)** — strict `rust_type_to_idl` now
+      lowers user-defined idents to `IDLType::Record { fqn,
+      args: <recursed_inner_args> }`. Reverse direction's
+      mangle is produced solely by the macro — `leo4-rust-emit`
+      decodes the mangle back to a bare fqn, and the real kind
+      reaches Lean via the independent `USER_TYPES` schema
+      slice. **Scope (user-locked 2026-05-31)**:
+      `#[leo4::export]` on `fn` accepts user-defined types in
+      param/return positions. `#[leo4::export]` on `enum` /
+      `struct` items themselves stays as an `ItemFn` parse
+      error by design — type-side wire format is
+      `#[derive(LeanMarshal)]`'s job, not export's. Lifetime-
+      bearing paths (`Cow<'static, str>`, `Ref<'a, T>`) still
+      rejected.
+    - Test counts: workspace 254 → 260 (RC.3) → 262 (RC.4).
+      Translate (`leo4-oxilean-translate`): 56. OxiLean fork:
+      1219.
+
   - **2026-05-31 — RC blockers all CLOSED; v1.0 RC 1
-    about to tag**.
+    tagged, RC.4 follow-ups landed same day**.
     - **#76 P0c IO walker CLOSED**. Walker now covers
       the full monad transformer family (`IO.pure` /
       `EIO.pure` / `EStateM.pure` / `ExceptT.pure` /

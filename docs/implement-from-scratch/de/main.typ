@@ -1519,3 +1519,130 @@ Option<BinOpMapping>`), wird die *Aufrufstelle* zu einem
 Pattern-Match, das die Komposition-Shapes natürlich
 dokumentiert. Der Diff ist größer, aber das Production-
 Reasoning wird klarer. Den Trade wert.
+
+= Update — 2026-05-31: RC.2~RC.4 typed-enum closure
+
+Das Flagship-Szenario, das diese Charge schließt:
+Ein Nutzer schreibt eine Rust-Enum mit Varianten,
+die benannte Felder tragen (Struct-Variant-Summentyp),
+und verwendet sie direkt in `#[leo4::export]`.
+Konkret etwas wie:
+
+```rust
+#[derive(Clone, Debug, LeanMarshal)]
+pub enum AdsmtVerdict {
+    Sat { model: Vec<(String, String)> },
+    Unsat { core: Vec<String>, cert: String },
+    Abductive { candidates: Vec<AbductiveCandidate> },
+    Unknown { reason: String },
+}
+
+#[leo4::export]
+pub fn solve(v: AdsmtVerdict) -> u64 { … }
+```
+
+Vor RC.2 stieß dies hintereinander auf vier separate
+Wände: `leo4-rust-emit::lean_type_of_mangle`
+decodierte keine benutzerdefiniert-nominalen Mangle-
+Präfixe (`S_<fqn>_s`, `V_<fqn>_v` etc.) und fiel zu
+einem `panic!`-Body-Stub-Wrapper durch;
+`leo4-rust-emit` hatte keinen Pfad, eine Spiegel-
+Lean-`inductive` für `AdsmtVerdict` zu emittieren,
+sodass der Nutzer die Lean-Seite von Hand schreiben
+musste; `leo4::import!`s `rust_type_to_idl` gab
+`None` für benutzerdefinierte Identifier zurück, was
+Multi-Instantiation-Importe ohne `#[leo4(args =
+"…")]`-Hinweise brach; und `#[leo4::export]` selbst
+lehnte benutzerdefinierte Typen in Param-/Return-
+Positionen ab.
+
+== Was jetzt steht
+
+- *Patch 1* (`b260ed8`) — `lean_type_of_mangle`
+  decodiert alle 5 benutzerdefiniert-nominalen
+  Mangle-Präfixe, sodass die Wrapper-Signatur den
+  richtigen Lean-Typ erhält, anstatt zu einem
+  `panic!`-Stub durchzufallen.
+- *Patch 2* (`b260ed8`) — ein neuer
+  `linkme::distributed_slice`-Kanal
+  `leo4_abi::rust_exports::USER_TYPES` trägt einen
+  `UserTypeEntry` pro `#[derive(LeanMarshal)]`-Stelle
+  mit `(fqn, kind, fields, ctors)`. Das Derive-Makro
+  emittiert den Eintrag automatisch;
+  `leo4-rust-emit` liest den Slice über das neue
+  FFI-Symbol `leo4_rust_describe_user_types` und
+  emittiert echte Lean-`structure`- /
+  `inductive`-Spiegel-Decls mit `deriving
+  Leo4.LeanMarshal`. Ein neuer
+  `rust_type_to_lean_type`-Übersetzer (syn-basierter
+  AST-Walk) behandelt verschachtelte Typen:
+  `Vec<(String, String)>` → `Array ((String ×
+  String))`, `Vec<u8>` → `ByteArray`, `Result<T, E>`
+  → `Except E T` usw.
+- *Patch 2 Follow-up* (`cfda354`) — entfernt
+  `#[cfg(feature = "rust-exports")]` aus dem
+  Derive-Emit, damit nachgelagerte User-Crates keine
+  `unexpected_cfg`-Lints sehen. `linkme` wird zu
+  einer unbedingten Abhängigkeit; das Feature
+  `rust-exports` bleibt als No-Op-Alias für
+  Rückwärtskompatibilität.
+- *Patch 3* (`29a941f`) — `leo4::import!`s
+  `rust_type_to_idl_candidates` liefert alle 5 Kind-
+  Kandidaten für benutzerdefinierte Identifier. Das
+  Makro nimmt das kartesische Produkt über die Args,
+  dann gewinnt der erste Mangling-JSON-Treffer.
+  `leo4::import! { fn solve(v: AdsmtVerdict) ->
+  AdsmtVerdict; }` löst Variant nun per Kandidaten-
+  Iteration auf, selbst wenn der Export mehrere
+  Instantiierungen hat.
+- *Patch 4* (`5d786f0`) — ein strenges
+  `rust_type_to_idl` senkt benutzerdefinierte
+  Identifier zu `Record { fqn, args }`, sodass
+  `#[leo4::export]` sie in Fn-Param-/Return-
+  Positionen akzeptiert. Pfade mit Lifetime-Args
+  (Cow etc.) werden weiterhin abgelehnt. Scope-
+  festgezurrt: das Anbringen von `#[leo4::export]`
+  an Enum-/Struct-Items selbst ist absichtlich
+  weiterhin ein Parse-Fehler — das Typ-Wireformat
+  ist die Aufgabe von `#[derive(LeanMarshal)]`.
+
+== Lessons
+
+Zwei Design-Lessons stechen aus dieser Charge hervor:
+
+1. *Die Mangle-Kind-Koordination zwischen Makro und
+   Plugin ist asymmetrisch.* Die Reverse-Richtung
+   (`#[leo4::export]`) ist Single-Producer — das
+   Makro emittiert den Mangle allein, kann also für
+   den Präfix jede Kind wählen, und
+   `leo4-rust-emit` decodiert einfach zur nackten
+   fqn zurück. Die Forward-Richtung
+   (`leo4::import!`) ist Dual-Producer — das Lean-
+   Plugin emittiert einen Mangle, das Makro einen
+   anderen, und die beiden müssen Bit-für-Bit
+   übereinstimmen. Deshalb probiert der Import-Pfad
+   alle 5 Kandidaten-Kinds durch, während der
+   Export-Pfad eine wählt und weitergeht. Gleiche
+   Oberflächennotation, aber unterschiedliche Zahl
+   von Übereinstimmungspunkten darunter.
+
+2. *Out-of-Band-Schema-Kanäle schlagen In-Band-Kind-
+   Inferenz.* Das Kind-Präfix des Mangles ist nur
+   ein opaker Token zwischen Makro und Wrapper-
+   Decoder — es muss die *echte* Struktur des Typs
+   nicht codieren. Die echte Kind (Variant vs Record
+   vs Enum) erreicht die Lean-Seite über den
+   unabhängigen `USER_TYPES`-Schema-Slice. Diese
+   Trennung lässt den Mangle schlicht (keine
+   Feldnamen-Codierung, keine Ctor-Aufzählung) und
+   das Schema reichhaltig (vollständige Feldtypen,
+   Ctor-Shapes, Derive-Hinweise) bleiben. Wenn Sie
+   versucht sind, mehr Semantik in ein Name-
+   Mangling-Schema zu stopfen, fragen Sie zuerst, ob
+   ein Seitenkanal die Arbeit sauberer erledigen
+   würde.
+
+Die Workspace-Test-Anzahl wanderte von 254 → 260
+(RC.3) → 262 (RC.4); die relevantesten Crates sind
+`leo4-macros-backend` 16 → 22 → 24 und
+`leo4-rust-emit` 20 → 29.

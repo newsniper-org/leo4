@@ -1,9 +1,12 @@
 # leo4 — Design Document
 
 > **Status**: v0.1.0 released 2026-05-21 (Phases 0–8). Phase 9
-> reverse direction landed 2026-05-23. **v1.0 RC 1 about to tag
-> (2026-05-31)** — all RC blockers closed; C1 / C5 / G2 sequenced
-> post-RC1.
+> reverse direction landed 2026-05-23. **v1.0 RC 1 tagged
+> 2026-05-31; RC.2 / RC.3 / RC.4 same-day post-RC.1 follow-ups
+> landed (typed-enum mirror emit + multi-candidate import +
+> `#[leo4::export]` accepts user-defined types); about to tag
+> `v1.0.0-rc.4-1`.** All RC blockers closed; C1 / C5 / G2
+> sequenced post-RC1.
 > All major design decisions resolved.
 > Owner: 병익 (Honey-Be). Begin date: 2026-05.
 >

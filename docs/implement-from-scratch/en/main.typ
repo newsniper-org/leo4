@@ -1577,3 +1577,123 @@ the *call site* becomes a pattern-match that
 naturally documents the composition shapes. The
 diff is bigger, but production reasoning gets
 clearer. Worth the trade.
+
+= Update --- 2026-05-31: RC.2~RC.4 typed-enum closure
+
+The flagship scenario this batch closes: a user
+writes a Rust enum with named-field variants
+(struct-variant sum type) and uses it directly in
+`#[leo4::export]`. Concretely, something like
+
+```rust
+#[derive(Clone, Debug, LeanMarshal)]
+pub enum AdsmtVerdict {
+    Sat { model: Vec<(String, String)> },
+    Unsat { core: Vec<String>, cert: String },
+    Abductive { candidates: Vec<AbductiveCandidate> },
+    Unknown { reason: String },
+}
+
+#[leo4::export]
+pub fn solve(v: AdsmtVerdict) -> u64 { … }
+```
+
+Pre-RC.2 this hit four separate walls in series:
+`leo4-rust-emit::lean_type_of_mangle` didn't decode
+user-defined-nominal mangle prefixes (`S_<fqn>_s`,
+`V_<fqn>_v`, etc.) and fell through to a
+`panic!`-bodied stub wrapper; `leo4-rust-emit` had
+no path to emit a mirror Lean `inductive` for
+`AdsmtVerdict` so the user had to hand-write the
+Lean side; `leo4::import!`'s `rust_type_to_idl`
+returned `None` for user-defined idents which broke
+multi-instantiation imports without `#[leo4(args =
+"…")]` hints; and `#[leo4::export]` itself rejected
+user-defined types in param/return positions.
+
+== What's now in place
+
+- *Patch 1* (`b260ed8`) --- `lean_type_of_mangle`
+  decodes all 5 user-defined-nominal mangle
+  prefixes, so the wrapper signature gets the right
+  Lean type instead of falling through to a
+  `panic!` stub.
+- *Patch 2* (`b260ed8`) --- a new
+  `linkme::distributed_slice` channel
+  `leo4_abi::rust_exports::USER_TYPES` carries one
+  `UserTypeEntry` per `#[derive(LeanMarshal)]` site
+  with `(fqn, kind, fields, ctors)`. The derive
+  macro auto-emits the entry; `leo4-rust-emit`
+  reads the slice via the new FFI symbol
+  `leo4_rust_describe_user_types` and emits real
+  Lean `structure` / `inductive` mirror decls with
+  `deriving Leo4.LeanMarshal`. A new
+  `rust_type_to_lean_type` translator (syn-based
+  AST walk) handles nested types: `Vec<(String,
+  String)>` → `Array ((String × String))`,
+  `Vec<u8>` → `ByteArray`, `Result<T, E>` →
+  `Except E T`, etc.
+- *Patch 2 follow-up* (`cfda354`) --- removed
+  `#[cfg(feature = "rust-exports")]` from the
+  derive emit so downstream user crates don't see
+  `unexpected_cfg` lints. `linkme` becomes an
+  unconditional dependency; the `rust-exports`
+  feature stays as a no-op alias for backward
+  compatibility.
+- *Patch 3* (`29a941f`) ---
+  `leo4::import!`'s `rust_type_to_idl_candidates`
+  returns all 5 kind candidates for user-defined
+  idents. The macro takes the Cartesian product
+  over args, then the first mangling-JSON hit wins.
+  `leo4::import! { fn solve(v: AdsmtVerdict) ->
+  AdsmtVerdict; }` now resolves Variant via
+  candidate iteration even when the export has
+  multiple instantiations.
+- *Patch 4* (`5d786f0`) --- a strict
+  `rust_type_to_idl` lowers user-defined idents to
+  `Record { fqn, args }` so `#[leo4::export]`
+  accepts them in fn param/return positions.
+  Lifetime-arg paths (Cow, etc.) still reject.
+  Scope locked: attaching `#[leo4::export]` to
+  enum/struct items themselves still parse-errors
+  on purpose --- type wire format is
+  `#[derive(LeanMarshal)]`'s job.
+
+== Lessons
+
+Two design lessons stand out from this batch:
+
+1. *Macro vs plugin mangle-kind coordination is
+   asymmetric.* The reverse direction
+   (`#[leo4::export]`) is single-producer --- the
+   macro alone emits the mangle, so it can pick any
+   kind for the prefix and `leo4-rust-emit` simply
+   decodes back to the bare fqn. The forward
+   direction (`leo4::import!`) is dual-producer ---
+   the Lean plugin emits one mangle, the macro
+   emits another, and the two must match
+   bit-for-bit. That's why the import path tries
+   all 5 candidate kinds while the export path
+   picks one and moves on. Same surface notation,
+   different number of agreement points
+   underneath.
+
+2. *Out-of-band schema channels beat in-band kind
+   inference.* The mangle's kind prefix is just an
+   opaque token between the macro and the wrapper
+   decoder --- it doesn't have to encode the *real*
+   structure of the type. The real kind (Variant vs
+   Record vs Enum) reaches the Lean side via the
+   independent `USER_TYPES` schema slice. This
+   separation lets the mangle stay simple (no
+   field-name encoding, no ctor enumeration) while
+   the schema stays rich (full field types, ctor
+   shapes, derive hints). When you're tempted to
+   stuff more semantics into a name-mangling
+   scheme, ask whether a side channel would do the
+   work more cleanly.
+
+Workspace test count moved 254 → 260 (RC.3) → 262
+(RC.4); the most relevant crates are
+`leo4-macros-backend` 16 → 22 → 24 and
+`leo4-rust-emit` 20 → 29.

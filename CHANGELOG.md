@@ -7,6 +7,105 @@ and this project adheres to Semantic Versioning once it reaches 0.1.0.
 
 ## [Unreleased]
 
+### Added — RC.4 `#[leo4::export]` on `fn` accepts user-defined types (2026-05-31)
+
+Commit `5d786f0`. Strict `rust_type_to_idl` in
+`crates/leo4-macros-backend/src/lib.rs` now lowers user-defined
+idents to `IDLType::Record { fqn: <ident>, args: <recursed_inner_args> }`
+rather than returning `None`. This unblocks `#[leo4::export]` on
+`fn` items that take or return user-defined types (e.g.
+`AdsmtVerdict`, `Term`, …) without requiring upfront plugin
+coordination.
+
+The reverse direction's mangle is produced solely by the macro —
+no admit-set / plugin handshake needed for the kind. The real
+`UserTypeKind` (Record / TupleRecord / Variant / UnitEnum /
+UnitStruct) reaches Lean via the independent `USER_TYPES`
+schema slice (RC.2 channel); `leo4-rust-emit` decodes the mangle
+back to a bare fqn at wrapper-emit time and reads the kind from
+the slice.
+
+Lifetime-bearing paths (`Cow<'static, str>`, `Ref<'a, T>`, etc.)
+are still rejected — they're typically std types without
+`#[derive(LeanMarshal)]`. The strict path treats unbounded
+generic constructors as still-unmappable.
+
+**Scope clarification (user-locked 2026-05-31)**:
+`#[leo4::export]` on `fn` accepts user-defined types in param /
+return positions. `#[leo4::export]` on `enum` / `struct` items
+themselves stays as an `ItemFn` parse error (current intent) —
+type-side wire format is `#[derive(LeanMarshal)]`'s job, not
+export's.
+
+Workspace test count 260 → 262.
+
+### Added — RC.3 input-side multi-candidate IDL resolution in `leo4::import!` (2026-05-31)
+
+Commit `29a941f`. New `rust_type_to_idl_candidates(ty) ->
+Option<Vec<IDLType>>` in `crates/leo4-macros-backend/src/lib.rs`
+returns the full 5-kind candidate list (Record / Variant / Enum /
+Flags / Resource) for user-defined idents — single-element list
+for primitives / unambiguous mappings, Cartesian product across
+nested generics that themselves carry user idents.
+
+`leo4::import!` macro-expand's Tier 2 path now drives the
+multi-candidate lookup: collect per-arg candidate lists →
+Cartesian product → try each combo against the mangling JSON →
+first match wins → Tier 3 (single-instantiation fname lookup)
+fallback. `cartesian_product` helper added alongside.
+
+Strict `rust_type_to_idl` continues returning `None` for
+user-defined idents at this commit — the strict path was still
+the `#[leo4::export]` (forward direction) entry point.
+Resolution for the strict path lands in RC.4 (`5d786f0`).
+
+Workspace test count 254 → 260.
+
+### Added — RC.2 typed-enum mirror emit + `linkme::distributed_slice` USER_TYPES channel (2026-05-31)
+
+Commits `b260ed8` (patch 1+2) + `cfda354` (cfg gate removal).
+Closes the long-standing gap where `#[derive(LeanMarshal)]`
+required hand-writing a matching Lean mirror declaration in the
+consumer's `lean/` directory. After this batch, **zero
+hand-written Lean mirror code is needed for any
+`#[derive(LeanMarshal)]` Rust type.**
+
+  - **`lean_type_of_mangle`** in
+    `crates/leo4-rust-emit/src/main.rs` now decodes all 5
+    user-defined-nominal mangle prefixes: `S_<fqn>_s` (record),
+    `V_<fqn>_v` (variant), `E_<fqn>_e` (enum), `F_<fqn>_f`
+    (flags), `X_<fqn>_x` (resource). Generic instantiations
+    still defer (heuristic `mangle_segment_is_plain_fqn`
+    detects embedded primitive tokens).
+  - **New `linkme::distributed_slice` channel** —
+    `leo4_abi::rust_exports::USER_TYPES` — carries one
+    `UserTypeEntry` per `#[derive(LeanMarshal)]` site. Per-entry:
+    `fqn`, `UserTypeKind` (Record / TupleRecord / Variant /
+    UnitEnum / UnitStruct), `fields`, `ctors` (each carrying
+    Rust source-text of the field type, whitespace-normalised).
+  - **New FFI introspection symbol** `leo4_rust_describe_user_types`
+    mirrors the existing `leo4_rust_describe_exports`.
+  - **`leo4-rust-emit`** reads the slice and emits real Lean
+    `structure` / `inductive` mirror declarations with
+    `deriving Leo4.LeanMarshal` into the wrapper file.
+  - **New Rust-type-string → Lean-type translator**
+    (`rust_type_to_lean_type`) — syn-based AST walk handling
+    scalars, `Vec<u8> → ByteArray`, `Vec<T> → Array T`,
+    `Option<T> → Option T`, `Result<T,E> → Except E T`,
+    `Box<T> → T`, tuples right-assoc as `Prod`, `BigInt/BigNat
+    → Int/Nat`. Unknown idents pass through verbatim.
+  - **`cfda354` cfg gate removal** — `linkme` is now an
+    unconditional dep of `leo4-abi` and `leo4` (was
+    `optional = true`); `leo4-abi::rust_exports` module is
+    unconditional (was `#[cfg(feature = "rust-exports")]`);
+    `leo4::__private` module is unconditional;
+    `leo4-macros-backend`'s `emit_user_type_schema` drops the
+    `#[cfg(feature = "rust-exports")]` guard. Root cause was
+    an `unexpected_cfg` lint per-derive-site in every downstream
+    user crate that hadn't declared the feature. The
+    `rust-exports` cargo feature stays as a no-op alias for
+    backward compat.
+
 ### Closed — #76 P0c IO walker + #72 OX7 OxiLean codegen; all v1.0 RC blockers cleared (2026-05-31)
 
 v1.0 RC 1 about to tag. The two remaining RC blockers

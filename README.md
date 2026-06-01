@@ -17,14 +17,57 @@ byte-identical mangling across **70 mangled instantiations**
 the Lean plugin and the Rust `schema-idl` crate.
 
 **v1.0 RC progress (2026-05-31 update)** — **all v1.0
-RC blockers cleared; v1.0 RC 1 about to tag.** C1 /
-C5 / G2 sequencing moved to **post-RC1** (decision
-2026-05-31) — Windows runtime CI, the musl matrix row,
-and the crates.io publish all happen *after* the RC 1
-tag rather than as gating items. The `feat/mslean4-
-lecq-lecr-ipcs` branch work is pushed back accordingly.
-The A1 cool-japan upstream PR remains RC-direct timing.
-Recent batch:
+RC blockers cleared; v1.0 RC 1 already tagged, RC.2 / RC.3 / RC.4
+follow-ups landed same day**. C1 / C5 / G2 sequencing moved to
+**post-RC1** (decision 2026-05-31) — Windows runtime CI, the musl
+matrix row, and the crates.io publish all happen *after* the RC 1
+tag rather than as gating items. The `feat/mslean4-lecq-lecr-ipcs`
+branch work is pushed back accordingly. The A1 cool-japan
+upstream PR remains RC-direct timing.
+
+Post-RC1 batch landed 2026-05-31 (about to tag `v1.0.0-rc.4-1`):
+
+- **RC.4** (`5d786f0`) — `#[leo4::export]` on `fn` items now
+  accepts user-defined types in param/return positions. Strict
+  `rust_type_to_idl` lowers user idents to `IDLType::Record { fqn,
+  args }`; the reverse direction's mangle is produced solely by the
+  macro, with `leo4-rust-emit` decoding the mangle back to a bare
+  fqn and the real `UserTypeKind` reaching Lean via the independent
+  `USER_TYPES` slice. Lifetime-bearing paths (`Cow<'static, str>`,
+  `Ref<'a, T>`) still rejected. `#[leo4::export]` on `enum` /
+  `struct` items themselves stays as an `ItemFn` parse error by
+  design — type-side wire format is `#[derive(LeanMarshal)]`'s job.
+- **RC.3** (`29a941f`) — input-side multi-candidate IDL resolution
+  in `leo4::import!`. New `rust_type_to_idl_candidates` returns the
+  full 5-kind candidate list (Record / Variant / Enum / Flags /
+  Resource) for user-defined idents; nested generics produce the
+  Cartesian product of inner candidates. The macro's Tier 2 lookup
+  drives this list against the mangling JSON and falls back to
+  Tier 3 fname-only lookup on miss.
+- **RC.2** (`b260ed8` + `cfda354`) — typed-enum mirror emit. New
+  `linkme::distributed_slice` channel `leo4_abi::rust_exports::
+  USER_TYPES` carries one `UserTypeEntry` per `#[derive(LeanMarshal)]`
+  site (fqn / kind / fields / ctors with Rust source-text field
+  types). New FFI symbol `leo4_rust_describe_user_types` mirrors
+  `leo4_rust_describe_exports`. `leo4-rust-emit` reads the slice
+  and emits real Lean `structure` / `inductive` mirror declarations
+  with `deriving Leo4.LeanMarshal` — zero hand-written Lean mirror
+  needed. The new Rust-type-string → Lean-type translator
+  (`rust_type_to_lean_type`) walks the syn AST handling scalars,
+  `Vec<u8> → ByteArray`, `Vec<T> → Array T`, `Option<T> → Option T`,
+  `Result<T,E> → Except E T`, `Box<T> → T`, tuples right-assoc as
+  `Prod`, `BigInt/BigNat → Int/Nat`. `linkme` is now unconditional
+  (was `optional = true`); `leo4-abi::rust_exports` and
+  `leo4::__private` modules are unconditional (were
+  `#[cfg(feature = "rust-exports")]`). Root cause was an
+  `unexpected_cfg` lint per-derive-site in every downstream crate
+  that hadn't declared the feature. The `rust-exports` cargo
+  feature stays as a no-op alias for backward compat.
+
+Workspace test count: 254 → 260 (RC.3) → 262 (RC.4).
+Translate (`leo4-oxilean-translate`): 56. OxiLean fork: 1219.
+
+Pre-RC.1 batch (still part of the 2026-05-31 closure):
 
 - **#76 P0c IO walker — CLOSED 2026-05-31**. The walker
   now covers the full monad transformer family
@@ -394,7 +437,9 @@ See `LEO4-DESIGN.md` §0 for the longer version.
 │   ├── leo4-abi/           # LeanMarshal + LeanError + scalars / composites /
 │   │                       # bignat / bigint / LeanRat / LeanU128/I128 /
 │   │                       # LeanComplexF{32,64}x2 (+ optional nightly floats);
-│   │                       # rust_exports module under `rust-exports` feature
+│   │                       # rust_exports module unconditional since RC.2
+│   │                       # (cfda354); USER_TYPES distributed_slice carries
+│   │                       # mirror metadata for #[derive(LeanMarshal)] sites
 │   ├── leo4-mslean4/        # native loader (libloading) + Arena + LeanRef
 │   ├── leo4-macros/        # user-facing proc-macros (leo4::import!,
 │   │                       # leo4::export, derive LeanMarshal)

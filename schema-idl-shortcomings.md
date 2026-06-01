@@ -4,12 +4,19 @@
 > 2026-05-23 after the Phase 9 reverse-direction pipeline ran
 > end-to-end for the first time (declarative Lake `extern_lib`
 > integration + handshake-consume + glue-shim ABI all landed
-> 2026-05-23). Phases 0–9 are done; this ledger keeps the
-> residual schema-idl / plugin / runtime items distinct from
-> the released surface. Each item is labelled by ownership
-> (`schema-idl` / `leo4-plugin` / `leo4-runtime`); the cascade
-> table in §"Dependency graph" makes the inter-item order
-> explicit.
+> 2026-05-23). **Re-audited 2026-05-31 against v1.0 RC.1–RC.4:**
+> no new schema-idl shortcomings introduced; the RC.2–RC.4
+> reverse-direction work (typed-enum mirror via `USER_TYPES`
+> `linkme::distributed_slice`, multi-candidate
+> `rust_type_to_idl_candidates`, `#[leo4::export]` accepting
+> user-defined types) operates entirely on the Rust-side
+> macro / emit boundary — schema-idl grammar / IDLType /
+> mangling all unchanged. Phases 0–9 are done; this ledger
+> keeps the residual schema-idl / plugin / runtime items
+> distinct from the released surface. Each item is labelled
+> by ownership (`schema-idl` / `leo4-plugin` /
+> `leo4-runtime`); the cascade table in §"Dependency graph"
+> makes the inter-item order explicit.
 >
 > Companion docs:
 > - `for-general-interface-descriptions.md` — reuse guide + decision log

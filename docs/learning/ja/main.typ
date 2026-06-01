@@ -563,3 +563,103 @@ Instance Term body / Open multi-item / Dsl / HashCommand /
 Omit / Include) は説明的メッセージを持つが deferred 継続
 — クリーンに閉じるには 1→N translate-API 変更か
 oxilean 側 variant サポートのいずれかが必要。
+
+= 更新 — 2026-05-31: RC.2~RC.4 typed-enum closure
+
+このバッチが閉じる flagship シナリオ: ユーザが
+named-field variant (struct-variant sum type) を持つ
+Rust enum を書いて、それを直接 `#[leo4::export]` で
+使うケース。具体的にはこのような形:
+
+```rust
+#[derive(Clone, Debug, LeanMarshal)]
+pub enum AdsmtVerdict {
+    Sat { model: Vec<(String, String)> },
+    Unsat { core: Vec<String>, cert: String },
+    Abductive { candidates: Vec<AbductiveCandidate> },
+    Unknown { reason: String },
+}
+
+#[leo4::export]
+pub fn solve(v: AdsmtVerdict) -> u64 { … }
+```
+
+RC.2 以前はこのシナリオが 4 箇所で順に詰まっていた。
+`leo4-rust-emit::lean_type_of_mangle` が user-defined-
+nominal mangle prefix (`S_<fqn>_s`, `V_<fqn>_v` 等)
+を decode できず `panic!`-bodied stub wrapper に fall
+through; `leo4-rust-emit` が `AdsmtVerdict` 用の
+mirror Lean `inductive` を emit する経路を持たず、
+Lean 側はユーザの手書き; `leo4::import!` の
+`rust_type_to_idl` が user-defined ident に対して
+`None` を返し、`#[leo4(args = "…")]` ヒントなしでは
+multi-instantiation インポートが壊れた; そして
+`#[leo4::export]` 自体も user-defined 型を
+param/return 位置で拒否していた。
+
+== 今や定位置にあるもの
+
+- *Patch 1* (`b260ed8`) — `lean_type_of_mangle` が
+  5 種の user-defined-nominal mangle prefix を全て
+  decode する。wrapper signature が `panic!` stub に
+  fall through する代わりに正しい Lean 型を得る。
+- *Patch 2* (`b260ed8`) — 新しい
+  `linkme::distributed_slice` チャネル
+  `leo4_abi::rust_exports::USER_TYPES` が
+  `#[derive(LeanMarshal)]` サイトごとに 1 つの
+  `UserTypeEntry` (`(fqn, kind, fields, ctors)`) を
+  carry。derive マクロが entry を自動 emit;
+  `leo4-rust-emit` が新 FFI シンボル
+  `leo4_rust_describe_user_types` 経由で slice を
+  読み、`deriving Leo4.LeanMarshal` 付きの実 Lean
+  `structure` / `inductive` mirror decl を emit。
+  新 `rust_type_to_lean_type` translator (syn ベース
+  の AST walk) がネストした型を処理: `Vec<(String,
+  String)>` → `Array ((String × String))`,
+  `Vec<u8>` → `ByteArray`, `Result<T, E>` →
+  `Except E T` など。
+- *Patch 2 follow-up* (`cfda354`) — derive emit から
+  `#[cfg(feature = "rust-exports")]` を除去、
+  downstream user crate が `unexpected_cfg` lint を
+  見ないように。`linkme` は無条件 dep となり;
+  `rust-exports` feature は backward-compat 用の
+  no-op alias として残る。
+- *Patch 3* (`29a941f`) — `leo4::import!` の
+  `rust_type_to_idl_candidates` が user-defined ident
+  に対して 5 種の kind 候補を全て返す。マクロは
+  args に対して Cartesian product を取り、最初の
+  mangling-JSON ヒットが勝つ。export が multiple
+  instantiation を持っていても `leo4::import! { fn
+  solve(v: AdsmtVerdict) -> AdsmtVerdict; }` が
+  candidate iteration を介して Variant を resolve。
+- *Patch 4* (`5d786f0`) — 厳格な
+  `rust_type_to_idl` が user-defined ident を
+  `Record { fqn, args }` に lower、`#[leo4::export]`
+  が fn param/return 位置で受け入れる。lifetime arg
+  パス (Cow 等) は依然 reject。スコープはロック:
+  enum/struct アイテム自体に `#[leo4::export]` を
+  付けるのは依然 parse-error (意図的) — 型の wire
+  format は `#[derive(LeanMarshal)]` の仕事。
+
+== 結果
+
+flagship `AdsmtVerdict` シナリオがいまや reverse
+direction で *手書き Lean ゼロ行* で出荷される。
+自動生成された wrapper Lean ファイルに mirror
+inductive と typed `IO`-返却 wrapper の両方を含む:
+
+```lean
+inductive AdsmtVerdict where
+  | sat (model : Array ((String × String))) : AdsmtVerdict
+  | unsat (core : Array String) (cert : String) : AdsmtVerdict
+  | abductive (candidates : Array AbductiveCandidate) : AdsmtVerdict
+  | unknown (reason : String) : AdsmtVerdict
+  deriving Leo4.LeanMarshal
+
+def solve (a0 : AdsmtVerdict) : IO (UInt64) := do …
+```
+
+ワークスペーステスト数が 254 → 260 (RC.3) → 262
+(RC.4) へ移動; 最も関連の深いクレートは
+`leo4-macros-backend` 16 → 22 → 24 と
+`leo4-rust-emit` 20 → 29。

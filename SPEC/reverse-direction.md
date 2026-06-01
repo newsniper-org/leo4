@@ -644,6 +644,48 @@ forward direction's `<pkg>.leo4-mangling` shape:
 - `abi_version` — currently always `1`; bumps lockstep with
   the `ExportEntry` repr-C layout.
 
+## 8a. USER_TYPES schema channel (RC.2 2026-05-31)
+
+Alongside the `EXPORTS` slice, every cdylib that links
+`leo4-abi` carries a second `linkme::distributed_slice`
+named `USER_TYPES`. Each entry has shape:
+
+```rust
+pub struct UserTypeEntry {
+    pub fqn: &'static str,        // dotted FQN (e.g. "Adsmt.Verdict")
+    pub kind: UserTypeKind,       // Struct | Enum | Variant | Flags | Resource
+    pub fields: &'static [UserTypeField],   // for Struct/Resource carriers
+    pub ctors:  &'static [UserTypeCtor],    // for Enum/Variant carriers
+}
+```
+
+`#[derive(LeanMarshal)]` emits one `USER_TYPES` entry at
+every derive site (commit `b260ed8`, RC.2). The FFI surface
+`leo4_rust_describe_user_types(out_ptr, out_len)` exposes
+the slice's in-process pointer + length the same way
+`leo4_rust_describe_exports` does for the function table.
+
+`leo4-rust-emit` reads the slice during reverse-direction
+wrapper generation, decodes user-defined nominal mangle
+prefixes (S_/V_/E_/F_/X_) back into Lean carrier kinds via
+`lean_type_of_mangle`, and emits **real Lean `structure` /
+`inductive` mirror decls with `deriving Leo4.LeanMarshal`
+clauses** as part of the generated `<iface>/Rust.lean`
+wrapper file. Users no longer write a Lean mirror module by
+hand; the wrapper is closed end-to-end on the Rust side.
+
+The Rust source-text → Lean type translator
+(`rust_type_to_lean_type`) is a syn-based AST walk that
+covers everything `#[derive(LeanMarshal)]` accepts.
+
+The `rust-exports` cargo feature on `leo4-abi` / `leo4` is
+a no-op alias after the RC.2 follow-up `cfda354` — the
+`leo4-abi::rust_exports` module and `leo4::__private` are
+unconditionally compiled, and `linkme` is an unconditional
+dependency. The feature flag stays for backward
+compatibility with downstreams that named it explicitly in
+their `Cargo.toml`.
+
 ## 9. cdylib Path Resolution
 
 The dispatcher resolves the cdylib path in this order:
@@ -837,6 +879,34 @@ build is `cc <single-file>` on every supported platform.
 | Callback / function-arrow ABI | Wire + mangling done (Phase 10-B1); outbound + inbound runtime substrate done (Phase 10-B1.x, 2026-05-28); OxiLean transpile-path IO walker done (#76 P0c, 2026-05-31); mslean4 worker-IPC `LECQ`/`LECR` frames v1.x |
 | Stronger isolation (zygote-fork, wasm sandbox) | Out (9.X candidate) |
 | `async fn` reverse exports | Out (no concrete consumer yet) |
+
+## 12a. User-defined types in `#[leo4::export]` signatures (RC.3 / RC.4 2026-05-31)
+
+The proc-macro's IDL lowering layer accepts user-defined
+nominal idents on both sides of the boundary:
+
+- **Import side** (`leo4::import!` Lean-decl arg / ret
+  resolution): `rust_type_to_idl_candidates` returns all 5
+  candidate carrier kinds (Struct / Variant / Enum / Flags /
+  Resource) for any user-defined ident the macro doesn't
+  resolve to a primitive. The macro then does a Cartesian
+  product lookup against the `<pkg>.leo4-mangling` JSON
+  emitted by Lake; first match wins (RC.3 commit `29a941f`).
+- **Export side** (`#[leo4::export] pub fn …(v: MyType) -> …`):
+  strict `rust_type_to_idl` lowers user-defined idents to
+  `Record { fqn, args }`. A signature like
+  `pub fn solve(v: AdsmtVerdict) -> u64` is accepted (no
+  more "user type not lowerable" rejection) — RC.4 commit
+  `5d786f0`. Lifetime-arg paths (`Cow<'_, str>`, etc.) still
+  reject — they are the v0 carrier surface's hard floor.
+
+**Scope decision (RC.4):** `#[leo4::export]` stays
+**function-only**. Tagging a `struct` / `enum` directly with
+`#[leo4::export]` continues to fail at parse time. The
+type-side carrier surface is the domain of
+`#[derive(LeanMarshal)]` (which feeds the USER_TYPES channel
+in §8a). Keeping the two attributes disjoint avoids
+double-source-of-truth for carrier metadata.
 
 ## 13. Future Work
 

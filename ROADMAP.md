@@ -718,6 +718,65 @@ all wait for the v1.0 RC window or later.
   `tests/conformance/reverse/`, and a SPEC quickstart page
   alongside `SPEC/reverse-direction.md`.
 
+**Post-RC.1 same-day batch (landed 2026-05-31; about to
+tag `v1.0.0-rc.4-1`)** — three follow-up commits after
+the RC.1 tag closed long-standing reverse-direction gaps:
+
+- **RC.2 (`b260ed8` typed-enum mirror patches 1+2 +
+  `cfda354` cfg gate removal)** —
+  `lean_type_of_mangle` (in
+  `crates/leo4-rust-emit/src/main.rs`) decodes all 5
+  user-defined-nominal mangle prefixes: `S_<fqn>_s`
+  (record), `V_<fqn>_v` (variant), `E_<fqn>_e` (enum),
+  `F_<fqn>_f` (flags), `X_<fqn>_x` (resource). New
+  `linkme::distributed_slice` channel
+  `leo4_abi::rust_exports::USER_TYPES` per
+  `#[derive(LeanMarshal)]` site (fqn / `UserTypeKind` /
+  fields / ctors with source-text field types). New FFI
+  symbol `leo4_rust_describe_user_types`.
+  `leo4-rust-emit` reads the slice and emits real Lean
+  `structure` / `inductive` mirror decls with
+  `deriving Leo4.LeanMarshal` — zero hand-written Lean
+  mirror code needed. New `rust_type_to_lean_type`
+  syn-based walker (scalars, `Vec<u8> → ByteArray`,
+  `Vec<T> → Array T`, `Option<T> → Option T`,
+  `Result<T,E> → Except E T`, `Box<T> → T`, tuples
+  right-assoc as `Prod`, `BigInt/BigNat → Int/Nat`).
+  `cfda354` drops `#[cfg(feature = "rust-exports")]`
+  from `rust_exports` / `__private` /
+  `emit_user_type_schema` (root cause was
+  `unexpected_cfg` lint per-derive-site in every
+  downstream crate); `rust-exports` cargo feature stays
+  as a no-op alias.
+- **RC.3 (`29a941f`)** — input-side multi-candidate
+  IDL resolution in `leo4::import!`. New
+  `rust_type_to_idl_candidates(ty) -> Option<Vec<IDLType>>`
+  returns the full 5-kind candidate list for user-defined
+  idents; nested generics produce the Cartesian product
+  of inner candidates. Macro's Tier 2 lookup drives this
+  list against the mangling JSON; Tier 3 fname-only
+  fallback unchanged. `cartesian_product` helper added.
+  Strict `rust_type_to_idl` continues returning `None`
+  for user idents at this commit (changed in RC.4).
+- **RC.4 (`5d786f0`)** — strict `rust_type_to_idl` now
+  lowers user-defined idents to `IDLType::Record { fqn,
+  args: <recursed_inner_args> }`. Reverse direction's
+  mangle is produced solely by the macro;
+  `leo4-rust-emit` decodes mangle back to fqn, real
+  `UserTypeKind` reaches Lean via the independent
+  `USER_TYPES` slice. Lifetime-bearing paths
+  (`Cow<'static, str>`, `Ref<'a, T>`) still rejected.
+  **Scope (user-locked 2026-05-31)**: `#[leo4::export]`
+  on `fn` accepts user-defined types in param/return
+  positions. `#[leo4::export]` on `enum` / `struct`
+  items themselves stays as an `ItemFn` parse error by
+  design — type-side wire format is
+  `#[derive(LeanMarshal)]`'s job.
+
+Test counts: workspace 254 → 260 (RC.3) → 262 (RC.4).
+Translate (`leo4-oxilean-translate`): 56. OxiLean fork:
+1219.
+
 **Sequenced to post-v1.0 RC 1** (decision 2026-05-31 —
 all RC blockers are now CLOSED, so the v1.0 RC 1 tag
 ships without these; manual / CI matrix work happens

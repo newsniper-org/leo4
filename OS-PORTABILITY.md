@@ -6,7 +6,11 @@
 > existing layers. **As of 2026-05-31, C1 (Windows runtime CI) and
 > C5 (musl matrix row) are sequenced to post-v1.0 RC 1** — the
 > tier policy below is unchanged; only the CI / verification
-> work-item timing moved.
+> work-item timing moved. RC.1 has tagged; RC.2 / RC.3 / RC.4
+> same-day reverse-direction follow-ups (typed-enum mirror,
+> multi-candidate import, `#[leo4::export]` accepts user-defined
+> types) touched no OS-policy surface — recorded here only as a
+> date marker.
 
 ## 0. Why this document exists
 

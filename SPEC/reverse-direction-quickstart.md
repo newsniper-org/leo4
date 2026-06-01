@@ -65,7 +65,15 @@ works as a `#[leo4::export]` parameter or return type:
 - generics: `Vec<T>`, `Option<T>`, `Result<T>`,
   `(T1, T2, …)` for any supported `T`s
 - nominal: any record/variant/enum/resource that
-  `#[derive(LeanMarshal)]` accepts
+  `#[derive(LeanMarshal)]` accepts — **no Lean mirror
+  module needed.** RC.2 (2026-05-31) closed end-to-end
+  user-type mirror emission: `#[derive(LeanMarshal)]`
+  publishes a `USER_TYPES` entry, `leo4-rust-emit`
+  reads it, and the generated `<iface>/Rust.lean`
+  carries a real `structure` / `inductive` decl with a
+  `deriving Leo4.LeanMarshal` clause. So
+  `#[leo4::export] pub fn solve(v: AdsmtVerdict) -> u64`
+  works without any hand-written `lean/Adsmt/Verdict.lean`.
 - `Option<T>` / `Result<T, E>` return types
 
 What's not yet supported:

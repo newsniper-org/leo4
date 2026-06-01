@@ -1324,3 +1324,114 @@ refactor할 때 (여기선 `&str → Option<BinOpMapping>`),
 *호출 측*이 composition shape을 자연스럽게 문서화하는
 pattern-match가 된다. diff는 크지만 production reasoning
 이 명확해진다. 트레이드 가치 있음.
+
+= 업데이트 — 2026-05-31: RC.2~RC.4 typed-enum closure
+
+이 배치가 닫는 flagship 시나리오: 사용자가 named-
+field variant (struct-variant sum type)를 가진 Rust
+enum을 작성하고, 이를 그대로 `#[leo4::export]`에 사
+용하는 경우. 구체적으로 이런 형태:
+
+```rust
+#[derive(Clone, Debug, LeanMarshal)]
+pub enum AdsmtVerdict {
+    Sat { model: Vec<(String, String)> },
+    Unsat { core: Vec<String>, cert: String },
+    Abductive { candidates: Vec<AbductiveCandidate> },
+    Unknown { reason: String },
+}
+
+#[leo4::export]
+pub fn solve(v: AdsmtVerdict) -> u64 { … }
+```
+
+RC.2 이전엔 이 시나리오가 네 군데서 차례로 막혔다.
+`leo4-rust-emit::lean_type_of_mangle`이 user-defined-
+nominal mangle prefix (`S_<fqn>_s`, `V_<fqn>_v` 등)
+를 decode하지 못하고 `panic!`-bodied stub wrapper로
+fall through; `leo4-rust-emit`이 `AdsmtVerdict`용
+mirror Lean `inductive`를 emit할 경로가 없어서 Lean
+쪽을 사용자가 손으로 작성; `leo4::import!`의
+`rust_type_to_idl`이 user-defined ident에 대해
+`None`을 반환해 `#[leo4(args = "…")]` 힌트 없이는
+multi-instantiation 임포트가 깨졌고; `#[leo4::export]`
+자체도 user-defined 타입을 param/return 위치에서
+거부했다.
+
+== 이제 자리잡은 것들
+
+- *Patch 1* (`b260ed8`) — `lean_type_of_mangle`이
+  5개의 user-defined-nominal mangle prefix를 모두
+  decode. wrapper signature가 `panic!` stub으로 fall
+  through 하지 않고 올바른 Lean 타입을 얻음.
+- *Patch 2* (`b260ed8`) — 새로운
+  `linkme::distributed_slice` 채널
+  `leo4_abi::rust_exports::USER_TYPES`가
+  `#[derive(LeanMarshal)]` site 하나당 `(fqn, kind,
+  fields, ctors)`를 가진 `UserTypeEntry` 하나씩을
+  carry. derive 매크로가 entry를 자동 emit;
+  `leo4-rust-emit`이 새 FFI 심볼
+  `leo4_rust_describe_user_types`로 slice를 읽어
+  `deriving Leo4.LeanMarshal`이 붙은 실제 Lean
+  `structure` / `inductive` mirror decl을 emit. 새
+  `rust_type_to_lean_type` translator (syn 기반 AST
+  walk)가 중첩 타입을 처리: `Vec<(String, String)>`
+  → `Array ((String × String))`, `Vec<u8>` →
+  `ByteArray`, `Result<T, E>` → `Except E T` 등.
+- *Patch 2 follow-up* (`cfda354`) — derive emit에서
+  `#[cfg(feature = "rust-exports")]`를 제거,
+  downstream user crate가 `unexpected_cfg` lint를
+  안 보도록. `linkme`는 무조건적 dep이 되고;
+  `rust-exports` feature는 backward-compat을 위한
+  no-op alias로 잔존.
+- *Patch 3* (`29a941f`) — `leo4::import!`의
+  `rust_type_to_idl_candidates`가 user-defined ident
+  에 대해 5개의 kind 후보를 모두 반환. 매크로는
+  args에 대해 Cartesian product를 만들고, 첫번째
+  mangling-JSON hit가 승리. export가 다중
+  instantiation을 가져도 `leo4::import! { fn solve(v:
+  AdsmtVerdict) -> AdsmtVerdict; }`가 candidate
+  iteration을 통해 Variant를 resolve.
+- *Patch 4* (`5d786f0`) — 엄격한
+  `rust_type_to_idl`이 user-defined ident를 `Record
+  { fqn, args }`로 lower, `#[leo4::export]`가 fn
+  param/return 위치에서 이를 수용. lifetime arg
+  path (Cow 등)는 여전히 reject. 범위는 잠금:
+  enum/struct item 자체에 `#[leo4::export]`를 붙이는
+  건 의도적으로 여전히 parse-error — 타입 wire
+  format은 `#[derive(LeanMarshal)]`의 일.
+
+== Lessons
+
+이 배치에서 두 가지 design lesson이 도드라진다:
+
+1. *Macro와 plugin 간 mangle-kind 조율은 비대칭이다.*
+   Reverse direction (`#[leo4::export]`)은
+   single-producer — mangle을 매크로 혼자 emit
+   하므로 prefix에 어떤 kind를 골라도 무방하고,
+   `leo4-rust-emit`은 단순히 bare fqn으로 decode 한다.
+   Forward direction (`leo4::import!`)은 dual-
+   producer — Lean plugin이 mangle 하나를 emit,
+   매크로가 또 하나를 emit, 둘이 bit-for-bit 일치해
+   야 한다. 그래서 import path는 5개 candidate kind를
+   모두 시도하고, export path는 하나를 골라 그대로
+   넘어간다. 표면 표기는 같지만 그 밑에 깔린
+   agreement point 수는 다르다.
+
+2. *Out-of-band schema 채널이 in-band kind 추론을
+   이긴다.* Mangle의 kind prefix는 매크로와 wrapper
+   decoder 사이의 opaque 토큰일 뿐 — 타입의 *진짜*
+   구조를 encode할 필요가 없다. Real kind (Variant
+   vs Record vs Enum)는 독립적인 `USER_TYPES`
+   schema slice를 통해 Lean 쪽에 도달한다. 이 분리
+   덕분에 mangle은 단순하게 (field 이름 인코딩 없
+   음, ctor 열거 없음) 유지되고 schema는 풍부하게
+   (전체 field 타입, ctor shape, derive 힌트) 유지
+   된다. name-mangling 체계에 의미를 더 욱여넣고
+   싶어질 때, side channel이 더 깔끔히 처리할지
+   먼저 물어보라.
+
+워크스페이스 테스트 수가 254 → 260 (RC.3) → 262
+(RC.4)로 이동; 가장 관련 깊은 크레이트는
+`leo4-macros-backend` 16 → 22 → 24와
+`leo4-rust-emit` 20 → 29.

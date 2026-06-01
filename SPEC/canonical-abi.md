@@ -262,6 +262,20 @@ Lean-passthrough error codes (range `0x0001_0000`..`0x0001_FFFF`):
 |---|---|
 | `0x0001_0001` | `LEO4_ERR_IO_FAILED` — an `IO α` boundary export returned an error result. The shim unwraps `lean_io_result` and surfaces this code instead of the inner value (Phase 7 step 2b, 2026-05-21). |
 
+**User-type schema channel (RC.2, 2026-05-31).** The wire
+formats above (records §8, variants §9, enums §10, flags
+§11, resources §12) are unchanged when the carrier is a
+user-defined type. What changed in RC.2 is the
+**metadata** path that lets the reverse-direction emitter
+auto-emit the Lean mirror module on the user's behalf:
+`#[derive(LeanMarshal)]` writes a `UserTypeEntry` into the
+`leo4_abi::rust_exports::USER_TYPES`
+`linkme::distributed_slice`, exposed via FFI symbol
+`leo4_rust_describe_user_types`. The wire payload itself
+remains exactly as specified above; consumers that don't
+care about reverse-direction emission can ignore the slice
+entirely. Full details in `SPEC/reverse-direction.md` §8a.
+
 Rust-worker passthrough error codes (range `0x0002_0000`..`0x0002_FFFF`,
 reverse direction; full table in `SPEC/reverse-direction.md` §10):
 

@@ -2189,10 +2189,17 @@ fn expand_export_inner(
             syn::Error::new_spanned(
                 ty,
                 format!(
-                    "`#[leo4::export]`: cannot lower parameter #{i} type to IDL — \
-                     `rust_type_to_idl` doesn't recognise it (only scalars, \
-                     `String`, `Vec<T>`, `Option<T>`, `Result<T, E>`, tuples, \
-                     and the LeanU128/I128/Complex* carriers are wired in v9-1)"
+                    "`#[leo4::export]`: cannot lower parameter #{i} type to IDL. \
+                     `rust_type_to_idl` accepts scalars (`u8`..`u128`, `i8`..`i128`, \
+                     `f32`/`f64`, `bool`, `char`, `String`), composites \
+                     (`Vec<T>`, `Option<T>`, `Result<T, E>`, tuples), Phase 10-B1.x \
+                     callbacks (`LeanCallback<R, Args>`, bare `fn(...) -> R`), \
+                     LeanU128/I128/Complex* carriers, and *any user-defined nominal \
+                     type* (`#[derive(LeanMarshal)]` struct or enum — lowers to \
+                     Record-mangle, real kind reaches Lean via `USER_TYPES`). \
+                     Likely cause of this error: a lifetime-bearing std type \
+                     (`Cow<'a, str>`, `Ref<'a, T>`, etc.) without a `LeanMarshal` \
+                     impl, or a qualified path (`<T as Trait>::Assoc`)"
                 ),
             )
         })?;

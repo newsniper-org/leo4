@@ -966,12 +966,19 @@ fn translate_tuple_right_assoc(parts: &[String]) -> String {
 }
 
 fn render_one_export(e: &EntryView) -> Result<String, String> {
-    // Map each parameter / return mangle to a Lean type. v9-5
-    // scope: scalars + `String` + `ByteArray` (= `Vec<u8>`).
-    // Composite payloads are deferred — until 9-X widens the
-    // table, an export whose signature includes an
-    // un-mappable mangle is emitted as a stub with a Lean-level
-    // `panic!` so the build still succeeds.
+    // Map each parameter / return mangle to a Lean type. As of
+    // RC.2 (2026-05-31) `lean_type_of_mangle` covers: scalars,
+    // `String`, `ByteArray` (= `Vec<u8>`), `Array T`, `Option T`,
+    // and all 5 user-defined nominal kinds (record `S_<fqn>_s`,
+    // variant `V_<fqn>_v`, enum `E_<fqn>_e`, flags `F_<fqn>_f`,
+    // resource `X_<fqn>_x`). The matching mirror Lean
+    // declaration is emitted by `render_user_type_mirror_block`
+    // via the cdylib's `USER_TYPES` distributed slice (RC.2
+    // patch 2), so the wrapper file is fully self-contained.
+    // Mangles that still don't decode (generic instantiations
+    // of user types — the RC.2 tokeniser is heuristic) fall
+    // back to a Lean-level `panic!` body so the build still
+    // succeeds.
     let mut param_idents: Vec<String> = Vec::with_capacity(e.param_types.len());
     let mut param_lean_tys: Vec<String> = Vec::with_capacity(e.param_types.len());
     let mut all_mapped = true;
@@ -1006,7 +1013,7 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
 
     if !all_mapped {
         s.push_str(&format!(
-            "  panic! \"leo4-rust-emit (v9-5): export `{}` has an unmapped parameter or return mangle ({:?}); widening lands in 9-X\"\n",
+            "  panic! \"leo4-rust-emit (RC.2+): export `{}` has an unmapped parameter or return mangle ({:?}). Most user-defined nominal types and primitives decode cleanly post-RC.2; failures here typically indicate a generic-instantiation mangle the heuristic tokeniser couldn't split (rename to a flat fqn or wait for the full mangle parser)\"\n",
             e.logical_name, e.param_types
         ));
         return Ok(s);

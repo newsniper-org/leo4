@@ -727,3 +727,108 @@ multi-item / Dsl / HashCommand / Omit / Include)
 carry explanatory messages but stay deferred ---
 they need either a 1→N translate-API change or
 oxilean-side variant support to close cleanly.
+
+= Update --- 2026-05-31: RC.2~RC.4 typed-enum closure
+
+The flagship scenario this batch closes: a user
+writes a Rust enum with named-field variants
+(struct-variant sum type) and uses it directly in
+`#[leo4::export]`. Concretely, something like
+
+```rust
+#[derive(Clone, Debug, LeanMarshal)]
+pub enum AdsmtVerdict {
+    Sat { model: Vec<(String, String)> },
+    Unsat { core: Vec<String>, cert: String },
+    Abductive { candidates: Vec<AbductiveCandidate> },
+    Unknown { reason: String },
+}
+
+#[leo4::export]
+pub fn solve(v: AdsmtVerdict) -> u64 { … }
+```
+
+Pre-RC.2 this hit four separate walls in series:
+`leo4-rust-emit::lean_type_of_mangle` didn't decode
+user-defined-nominal mangle prefixes (`S_<fqn>_s`,
+`V_<fqn>_v`, etc.) and fell through to a
+`panic!`-bodied stub wrapper; `leo4-rust-emit` had
+no path to emit a mirror Lean `inductive` for
+`AdsmtVerdict` so the user had to hand-write the
+Lean side; `leo4::import!`'s `rust_type_to_idl`
+returned `None` for user-defined idents which broke
+multi-instantiation imports without `#[leo4(args =
+"…")]` hints; and `#[leo4::export]` itself rejected
+user-defined types in param/return positions.
+
+== What's now in place
+
+- *Patch 1* (`b260ed8`) --- `lean_type_of_mangle`
+  decodes all 5 user-defined-nominal mangle
+  prefixes, so the wrapper signature gets the right
+  Lean type instead of falling through to a
+  `panic!` stub.
+- *Patch 2* (`b260ed8`) --- a new
+  `linkme::distributed_slice` channel
+  `leo4_abi::rust_exports::USER_TYPES` carries one
+  `UserTypeEntry` per `#[derive(LeanMarshal)]` site
+  with `(fqn, kind, fields, ctors)`. The derive
+  macro auto-emits the entry; `leo4-rust-emit`
+  reads the slice via the new FFI symbol
+  `leo4_rust_describe_user_types` and emits real
+  Lean `structure` / `inductive` mirror decls with
+  `deriving Leo4.LeanMarshal`. A new
+  `rust_type_to_lean_type` translator (syn-based
+  AST walk) handles nested types: `Vec<(String,
+  String)>` → `Array ((String × String))`,
+  `Vec<u8>` → `ByteArray`, `Result<T, E>` →
+  `Except E T`, etc.
+- *Patch 2 follow-up* (`cfda354`) --- removed
+  `#[cfg(feature = "rust-exports")]` from the
+  derive emit so downstream user crates don't see
+  `unexpected_cfg` lints. `linkme` becomes an
+  unconditional dependency; the `rust-exports`
+  feature stays as a no-op alias for backward
+  compatibility.
+- *Patch 3* (`29a941f`) ---
+  `leo4::import!`'s `rust_type_to_idl_candidates`
+  returns all 5 kind candidates for user-defined
+  idents. The macro takes the Cartesian product
+  over args, then the first mangling-JSON hit wins.
+  `leo4::import! { fn solve(v: AdsmtVerdict) ->
+  AdsmtVerdict; }` now resolves Variant via
+  candidate iteration even when the export has
+  multiple instantiations.
+- *Patch 4* (`5d786f0`) --- a strict
+  `rust_type_to_idl` lowers user-defined idents to
+  `Record { fqn, args }` so `#[leo4::export]`
+  accepts them in fn param/return positions.
+  Lifetime-arg paths (Cow, etc.) still reject.
+  Scope locked: attaching `#[leo4::export]` to
+  enum/struct items themselves still parse-errors
+  on purpose --- type wire format is
+  `#[derive(LeanMarshal)]`'s job.
+
+== End-result
+
+The flagship `AdsmtVerdict` scenario now ships with
+*zero hand-written Lean* on the reverse direction.
+The auto-generated wrapper Lean file contains both
+the mirror inductive and the typed `IO`-returning
+wrapper:
+
+```lean
+inductive AdsmtVerdict where
+  | sat (model : Array ((String × String))) : AdsmtVerdict
+  | unsat (core : Array String) (cert : String) : AdsmtVerdict
+  | abductive (candidates : Array AbductiveCandidate) : AdsmtVerdict
+  | unknown (reason : String) : AdsmtVerdict
+  deriving Leo4.LeanMarshal
+
+def solve (a0 : AdsmtVerdict) : IO (UInt64) := do …
+```
+
+Workspace test count moved 254 → 260 (RC.3) → 262
+(RC.4); the most relevant crates are
+`leo4-macros-backend` 16 → 22 → 24 and
+`leo4-rust-emit` 20 → 29.
