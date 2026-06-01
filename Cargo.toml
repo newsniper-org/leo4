@@ -40,7 +40,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0-rc.1"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -57,18 +57,18 @@ pedantic = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 # Internal crates
-schema-idl            = { version = "0.1.0", path = "crates/schema-idl" }
-leo4-idl              = { version = "0.1.0", path = "crates/leo4-idl" }
-leo4-abi              = { version = "0.1.0", path = "crates/leo4-abi" }
-leo4-build            = { version = "0.1.0", path = "crates/leo4-build" }
-leo4-macros           = { version = "0.1.0", path = "crates/leo4-macros" }
-leo4-macros-backend   = { version = "0.1.0", path = "crates/leo4-macros-backend" }
-leo4-mslean4           = { version = "0.1.0", path = "crates/leo4-mslean4" }
-leo4-wasm             = { version = "0.1.0", path = "crates/leo4-wasm" }
-leo4                  = { version = "0.1.0", path = "crates/leo4" }
-leo4-rust-emit        = { version = "0.1.0", path = "crates/leo4-rust-emit" }
-leo4-rust-worker      = { version = "0.1.0", path = "crates/leo4-rust-worker" }
-leo4-rust-bridge      = { version = "0.1.0", path = "crates/leo4-rust-bridge" }
+schema-idl            = { version = "1.0.0-rc.1", path = "crates/schema-idl" }
+leo4-idl              = { version = "1.0.0-rc.1", path = "crates/leo4-idl" }
+leo4-abi              = { version = "1.0.0-rc.1", path = "crates/leo4-abi" }
+leo4-build            = { version = "1.0.0-rc.1", path = "crates/leo4-build" }
+leo4-macros           = { version = "1.0.0-rc.1", path = "crates/leo4-macros" }
+leo4-macros-backend   = { version = "1.0.0-rc.1", path = "crates/leo4-macros-backend" }
+leo4-mslean4           = { version = "1.0.0-rc.1", path = "crates/leo4-mslean4" }
+leo4-wasm             = { version = "1.0.0-rc.1", path = "crates/leo4-wasm" }
+leo4                  = { version = "1.0.0-rc.1", path = "crates/leo4" }
+leo4-rust-emit        = { version = "1.0.0-rc.1", path = "crates/leo4-rust-emit" }
+leo4-rust-worker      = { version = "1.0.0-rc.1", path = "crates/leo4-rust-worker" }
+leo4-rust-bridge      = { version = "1.0.0-rc.1", path = "crates/leo4-rust-bridge" }
 
 # External
 thiserror   = "2"
