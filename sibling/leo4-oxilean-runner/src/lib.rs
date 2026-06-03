@@ -400,35 +400,21 @@ fn run_main_inner(
         Err(e) => return Err(e),
     };
 
-    // RC.5 (2026-05-31) — walk USER_TYPES alongside EXPORTS
-    // and synthesise stub `Axiom <fqn> : Type` declarations
-    // in the env so Main.lean references to user-defined
-    // types resolve by name. Cdylibs pre-dating RC.2's
-    // schema channel (no `leo4_rust_describe_user_types`
-    // symbol) report a missing symbol — treated as no-op
-    // here, not fatal.
+    // RC.5 (2026-05-31) — walk USER_TYPES alongside EXPORTS.
+    // RC.6 F4 (2026-05-31) lifts the stub axiom synth to
+    // `ConstantInfo::Inductive` + per-ctor `ConstantInfo::Constructor`
+    // so Main.lean references to user-defined types AND their
+    // constructors resolve by name. Ctor types are the
+    // trivial `Const(parent)` shape (no Pi-chain over field
+    // args) — field-arity-aware type-checking still requires
+    // wrapper-Lean-file loading; the `leo4 run` happy path
+    // loads the wrapper file alongside Main.lean. Cdylibs
+    // pre-dating RC.2's schema channel (no
+    // `leo4_rust_describe_user_types` symbol) report a
+    // missing symbol — treated as no-op, not fatal.
     let user_types = unsafe { describe_user_types(&lib) }.unwrap_or(&[]);
     diag.user_types_seen = user_types.len();
-    for ut in user_types {
-        // Add as `Axiom <fqn> : Type` (Sort 1). Constructors
-        // + pattern-match support require parsing the
-        // auto-generated wrapper Lean file's full
-        // `inductive` decls — that's handled by users
-        // running through `leo4 run` (which loads the
-        // wrapper file ahead of Main.lean). Direct-library
-        // callers get the name-resolution stub only.
-        let decl = Declaration::Axiom {
-            name: oxilean_kernel::Name::str(ut.fqn),
-            univ_params: Vec::new(),
-            ty: oxilean_kernel::Expr::Sort(oxilean_kernel::Level::succ(
-                oxilean_kernel::Level::zero(),
-            )),
-        };
-        // DuplicateDeclaration ignored — same name from
-        // multiple cdylibs (rare) or the user's Lean source
-        // declaring the type independently is fine.
-        let _ = env.add(decl);
-    }
+    synthesise_user_type_decls(&mut env, user_types);
 
     let main_src = std::fs::read_to_string(main_lean_path).map_err(|e| {
         LeanError::new(
@@ -452,6 +438,129 @@ fn run_main_inner(
     //    wire-up is a one-line addition.
 
     Ok((invoker, env, diag))
+}
+
+/// RC.6 F4 (2026-05-31) — synthesise kernel `ConstantInfo`
+/// declarations for each `UserTypeEntry` so Main.lean
+/// references to user-defined types AND their constructors
+/// resolve by name. Per entry:
+///
+/// - One `ConstantInfo::Inductive(InductiveVal)` for the type
+///   itself, with `ctors` listing the ctor names.
+/// - One `ConstantInfo::Constructor(ConstructorVal)` per ctor,
+///   with `cidx`, `num_fields`, and a trivial `Const(parent)`
+///   common.ty (no Pi-chain over field types).
+///
+/// The trivial ctor type means `AdsmtVerdict.sat` resolves
+/// as a constant of type `AdsmtVerdict`, but
+/// `AdsmtVerdict.sat <field_args>` won't type-check against
+/// the field arity. Users hitting that case load the wrapper
+/// Lean file alongside Main.lean (the `leo4 run` path emits
+/// the wrapper with full `inductive` decls including ctor
+/// arg signatures + `deriving Leo4.LeanMarshal` — that path
+/// is the fully-typed one). Direct-library callers using
+/// `run_main` against `USER_TYPES` alone get name resolution
+/// + ctor enumeration; field-arity-aware type-checking stays
+/// a follow-up.
+///
+/// `Record` / `TupleRecord` / `UnitStruct` synthesise a
+/// single ctor named `<fqn>.mk` mirroring Lean 4 stdlib
+/// convention.
+fn synthesise_user_type_decls(
+    env: &mut Environment,
+    user_types: &[UserTypeEntry],
+) {
+    use oxilean_kernel::{
+        ConstantInfo, ConstantVal, ConstructorVal, Expr, InductiveVal, Level, Name,
+    };
+    use leo4_abi::rust_exports::UserTypeKind;
+
+    let type_sort = Expr::Sort(Level::succ(Level::zero()));
+
+    for ut in user_types {
+        let parent_name = Name::str(ut.fqn);
+        // Collect ctor names + per-ctor field counts.
+        let ctor_specs: Vec<(Name, u32)> = match ut.kind {
+            UserTypeKind::Record
+            | UserTypeKind::TupleRecord
+            | UserTypeKind::UnitStruct => {
+                // Single anonymous ctor `<fqn>.mk` with
+                // num_fields = entry.fields.len().
+                let ctor = Name::str(&format!("{}.mk", ut.fqn));
+                vec![(ctor, ut.fields.len() as u32)]
+            }
+            UserTypeKind::Variant | UserTypeKind::UnitEnum => {
+                ut.ctors
+                    .iter()
+                    .map(|c| {
+                        // Lean stdlib convention: lowercase
+                        // first char on ctor name (matches
+                        // the wrapper-file emit's
+                        // `lowercase_first`).
+                        let lc = lowercase_first(c.name);
+                        let ctor =
+                            Name::str(&format!("{}.{lc}", ut.fqn));
+                        (ctor, c.fields.len() as u32)
+                    })
+                    .collect()
+            }
+        };
+
+        let inductive = ConstantInfo::Inductive(InductiveVal {
+            common: ConstantVal {
+                name: parent_name.clone(),
+                level_params: Vec::new(),
+                ty: type_sort.clone(),
+            },
+            num_params: 0,
+            num_indices: 0,
+            all: vec![parent_name.clone()],
+            ctors: ctor_specs.iter().map(|(n, _)| n.clone()).collect(),
+            num_nested: 0,
+            is_rec: false,
+            is_unsafe: false,
+            is_reflexive: false,
+            is_prop: false,
+        });
+        // DuplicateDeclaration ignored — user Lean source
+        // might separately declare the same inductive
+        // (common when the user has both a hand-written and
+        // a USER_TYPES-derived path).
+        let _ = env.add_constant(inductive);
+
+        for (cidx, (ctor_name, num_fields)) in ctor_specs.iter().enumerate() {
+            let ctor = ConstantInfo::Constructor(ConstructorVal {
+                common: ConstantVal {
+                    name: ctor_name.clone(),
+                    level_params: Vec::new(),
+                    // Trivial ctor type: just the parent
+                    // inductive's `Const(name)` — no Pi-
+                    // chain over field types. The wrapper-
+                    // file emit covers the fully-typed
+                    // ctor signature; this stub gets us
+                    // name resolution.
+                    ty: Expr::Const(parent_name.clone(), Vec::new()),
+                },
+                induct: parent_name.clone(),
+                cidx: cidx as u32,
+                num_params: 0,
+                num_fields: *num_fields,
+                is_unsafe: false,
+            });
+            let _ = env.add_constant(ctor);
+        }
+    }
+}
+
+/// Lowercase the first ASCII alphabetic char in `s`. Mirrors
+/// the wrapper emit's `lowercase_first` so ctor names match
+/// between the runtime synth and the wrapper file.
+fn lowercase_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_ascii_lowercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 /// RC.5 (2026-05-31) — resolve and call
@@ -860,6 +969,116 @@ pub fn run_main_os(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use leo4_abi::rust_exports::{CtorEntry, FieldEntry, UserTypeKind};
+
+    fn mk_user_type(
+        fqn: &'static str,
+        kind: UserTypeKind,
+        fields: &'static [FieldEntry],
+        ctors: &'static [CtorEntry],
+    ) -> UserTypeEntry {
+        UserTypeEntry {
+            fqn,
+            kind,
+            fields,
+            ctors,
+        }
+    }
+
+    /// RC.6 F4 — synth registers `ConstantInfo::Inductive` +
+    /// `Constructor` decls per UserTypeEntry. Verify against a
+    /// flagship typed-enum (`AdsmtVerdict`).
+    #[test]
+    fn synthesise_user_type_decls_emits_inductive_plus_ctors_for_variant() {
+        use oxilean_kernel::Name;
+
+        let user_types = vec![mk_user_type(
+            "AdsmtVerdict",
+            UserTypeKind::Variant,
+            &[],
+            &[
+                CtorEntry { name: "Sat", fields: &[] },
+                CtorEntry { name: "Unsat", fields: &[] },
+                CtorEntry { name: "Unknown", fields: &[] },
+            ],
+        )];
+        let mut env = bootstrap_env().expect("bootstrap");
+        synthesise_user_type_decls(&mut env, &user_types);
+
+        // Inductive registered.
+        let av = env.find(&Name::str("AdsmtVerdict"))
+            .expect("AdsmtVerdict registered");
+        assert!(av.is_inductive(), "AdsmtVerdict must be Inductive");
+        let iv = av.to_inductive_val().unwrap();
+        assert_eq!(iv.ctors.len(), 3, "3 ctors registered on parent");
+
+        // Each ctor registered with lowercased first char.
+        for (i, expected_name) in
+            ["AdsmtVerdict.sat", "AdsmtVerdict.unsat", "AdsmtVerdict.unknown"]
+                .iter()
+                .enumerate()
+        {
+            let ctor = env.find(&Name::str(*expected_name))
+                .unwrap_or_else(|| panic!("missing ctor {expected_name}"));
+            assert!(ctor.is_constructor());
+            let cv = ctor.to_constructor_val().unwrap();
+            assert_eq!(cv.cidx, i as u32);
+            assert_eq!(cv.induct.to_string(), "AdsmtVerdict");
+        }
+    }
+
+    #[test]
+    fn synthesise_user_type_decls_record_emits_mk_ctor() {
+        use oxilean_kernel::Name;
+
+        let user_types = vec![mk_user_type(
+            "Point",
+            UserTypeKind::Record,
+            &[
+                FieldEntry {
+                    name: "x",
+                    type_mangle: "",
+                    rust_type: "u32",
+                },
+                FieldEntry {
+                    name: "y",
+                    type_mangle: "",
+                    rust_type: "u32",
+                },
+            ],
+            &[],
+        )];
+        let mut env = bootstrap_env().expect("bootstrap");
+        synthesise_user_type_decls(&mut env, &user_types);
+
+        let p = env.find(&Name::str("Point")).expect("Point registered");
+        assert!(p.is_inductive());
+        let mk = env.find(&Name::str("Point.mk")).expect("Point.mk registered");
+        let cv = mk.to_constructor_val().unwrap();
+        assert_eq!(cv.num_fields, 2, "record ctor carries num_fields");
+    }
+
+    #[test]
+    fn synthesise_user_type_decls_unit_enum_emits_lowercased_ctors() {
+        use oxilean_kernel::Name;
+
+        let user_types = vec![mk_user_type(
+            "Color",
+            UserTypeKind::UnitEnum,
+            &[],
+            &[
+                CtorEntry { name: "Red", fields: &[] },
+                CtorEntry { name: "Green", fields: &[] },
+                CtorEntry { name: "Blue", fields: &[] },
+            ],
+        )];
+        let mut env = bootstrap_env().expect("bootstrap");
+        synthesise_user_type_decls(&mut env, &user_types);
+
+        assert!(env.find(&Name::str("Color.red")).is_some());
+        assert!(env.find(&Name::str("Color.green")).is_some());
+        assert!(env.find(&Name::str("Color.blue")).is_some());
+    }
 
     /// `RunDiagnostics::default` is all-zero / all-false.
     /// Lightweight check — the smoke test that exercises
