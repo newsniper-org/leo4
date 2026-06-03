@@ -208,10 +208,16 @@ pub fn render_reverse_wrapper(
         s.push_str(&render_user_type_mirror_block(user_types));
     }
 
+    // RC.6 F3 (2026-05-31) — extract the user-type fqn list
+    // so the mangle decoder resolves generic-instantiation
+    // mangles via `known_fqns` lookup.
+    let known_fqns: Vec<String> =
+        user_types.iter().map(|t| t.fqn.clone()).collect();
+
     let mut sorted: Vec<&ExportEntryView> = entries.iter().collect();
     sorted.sort_by(|a, b| a.logical_name.cmp(&b.logical_name));
     for e in sorted {
-        s.push_str(&render_one_extern(e));
+        s.push_str(&render_one_extern(e, &known_fqns));
         s.push('\n');
     }
 
@@ -221,8 +227,8 @@ pub fn render_reverse_wrapper(
 
 /// Render one `@[extern] opaque` per export. The signature is
 /// reconstructed from the entry's `param_types` / `ret_type`
-/// mangles via `lean_type_of_mangle`.
-fn render_one_extern(e: &ExportEntryView) -> String {
+/// mangles via `lean_type_of_mangle_with_user_fqns`.
+fn render_one_extern(e: &ExportEntryView, known_fqns: &[String]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "/-- `{}` (mangled: `{}`). -/\n",
@@ -233,14 +239,14 @@ fn render_one_extern(e: &ExportEntryView) -> String {
     let fname = lean_safe_ident(&e.logical_name);
     s.push_str(&format!("opaque {fname}"));
     for (i, m) in e.param_types.iter().enumerate() {
-        let lean_ty = lean_type_of_mangle(m)
+        let lean_ty = lean_type_of_mangle_with_user_fqns(m, known_fqns)
             .unwrap_or_else(|| format!("/- unmapped: {m} -/ String"));
         s.push_str(&format!(" (a{i} : {lean_ty})"));
     }
     let ret_ty = if e.ret_type.is_empty() {
         "Unit".to_string()
     } else {
-        lean_type_of_mangle(&e.ret_type)
+        lean_type_of_mangle_with_user_fqns(&e.ret_type, known_fqns)
             .unwrap_or_else(|| format!("/- unmapped: {} -/ Unit", e.ret_type))
     };
     s.push_str(&format!(" : {ret_ty}\n"));
@@ -249,11 +255,17 @@ fn render_one_extern(e: &ExportEntryView) -> String {
 
 // ─── RC.5 patch 1 — `lean_type_of_mangle` user-defined arms ─────
 
-/// Mirror of `leo4-rust-emit`'s mangle → Lean type map. Duplicated
-/// here rather than depending on `leo4-rust-emit` because
-/// `leo4-oxilean-build` is a standalone sibling crate (not a
-/// workspace member) and pulling in the `leo4-rust-emit` crate
-/// would drag the full main-workspace dep graph in.
+/// Backward-compat wrapper — calls
+/// [`lean_type_of_mangle_with_user_fqns`] with empty fqns.
+pub fn lean_type_of_mangle(mangle: &str) -> Option<String> {
+    lean_type_of_mangle_with_user_fqns(mangle, &[])
+}
+
+/// Mirror of `crates/leo4-rust-emit/src/main.rs::lean_type_of_mangle_with_user_fqns`.
+/// Duplicated here rather than depending on `leo4-rust-emit`
+/// because `leo4-oxilean-build` is a standalone sibling crate
+/// (not a workspace member) and pulling in the `leo4-rust-emit`
+/// crate would drag the full main-workspace dep graph in.
 ///
 /// Recognises:
 ///
@@ -263,13 +275,14 @@ fn render_one_extern(e: &ExportEntryView) -> String {
 /// - **RC.5 (2026-05-31)** — `S_<fqn>_s` (record), `V_<fqn>_v`
 ///   (variant), `E_<fqn>_e` (enum), `F_<fqn>_f` (flags), `X_<fqn>_x`
 ///   (resource) decode to the bare fqn name (underscored).
-///   Generic-instantiation mangles are rejected via the
-///   `mangle_segment_is_plain_fqn` heuristic — the user-side
-///   IDL would need a full mangle tokeniser to split FQN from
-///   generic args unambiguously. The matching mirror Lean decls
-///   are emitted by `render_user_type_mirror_block` from the
-///   cdylib's `USER_TYPES` slice.
-pub fn lean_type_of_mangle(mangle: &str) -> Option<String> {
+/// - **RC.6 F3 (2026-05-31)** — generic instantiations like
+///   `S_My_Pair_u32_str_s` resolve when a matching FQN is in
+///   `known_fqns`, via greedy longest-match tokeniser. Without
+///   `known_fqns` the heuristic-only RC.5 behaviour applies.
+pub fn lean_type_of_mangle_with_user_fqns(
+    mangle: &str,
+    known_fqns: &[String],
+) -> Option<String> {
     Some(match mangle {
         "u8" => "UInt8".into(),
         "u16" => "UInt16".into(),
@@ -293,38 +306,34 @@ pub fn lean_type_of_mangle(mangle: &str) -> Option<String> {
                 if rest == "u8" {
                     return Some("ByteArray".into());
                 }
-                let inner = lean_type_of_mangle(rest)?;
-                return Some(format!("Array {inner}"));
+                let inner = lean_type_of_mangle_with_user_fqns(rest, known_fqns)?;
+                return Some(format!("Array {}", paren_if_multi_token(&inner)));
             }
             if let Some(rest) =
                 other.strip_prefix("O_").and_then(|r| r.strip_suffix("_o"))
             {
-                let inner = lean_type_of_mangle(rest)?;
-                return Some(format!("Option {inner}"));
+                let inner = lean_type_of_mangle_with_user_fqns(rest, known_fqns)?;
+                return Some(format!("Option {}", paren_if_multi_token(&inner)));
             }
-            // RC.5 — user-defined nominal type mangle prefixes.
-            // Plain (no-generics) fqn only; generic
-            // instantiations defer to a future tokeniser.
+            // RC.6 F3 — user-defined nominal mangle decoder
+            // with `known_fqns`-driven generic-instantiation
+            // resolution.
             if let Some(rest) =
                 other.strip_prefix("S_").and_then(|r| r.strip_suffix("_s"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
-                    return Some(rest.to_string());
-                }
-                return None;
+                return decode_nominal_with_args(rest, known_fqns);
             }
             if let Some(rest) =
                 other.strip_prefix("V_").and_then(|r| r.strip_suffix("_v"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
-                    return Some(rest.to_string());
-                }
-                return None;
+                return decode_nominal_with_args(rest, known_fqns);
             }
             if let Some(rest) =
                 other.strip_prefix("E_").and_then(|r| r.strip_suffix("_e"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
+                if known_fqns.iter().any(|f| f == rest)
+                    || mangle_segment_is_plain_fqn(rest)
+                {
                     return Some(rest.to_string());
                 }
                 return None;
@@ -332,7 +341,9 @@ pub fn lean_type_of_mangle(mangle: &str) -> Option<String> {
             if let Some(rest) =
                 other.strip_prefix("F_").and_then(|r| r.strip_suffix("_f"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
+                if known_fqns.iter().any(|f| f == rest)
+                    || mangle_segment_is_plain_fqn(rest)
+                {
                     return Some(rest.to_string());
                 }
                 return None;
@@ -340,14 +351,196 @@ pub fn lean_type_of_mangle(mangle: &str) -> Option<String> {
             if let Some(rest) =
                 other.strip_prefix("X_").and_then(|r| r.strip_suffix("_x"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
-                    return Some(rest.to_string());
-                }
-                return None;
+                return decode_nominal_with_args(rest, known_fqns);
             }
             return None;
         }
     })
+}
+
+/// RC.6 F3 helper — wrap a Lean type expression in parens
+/// when it contains a space (App). Single-token types pass
+/// through unwrapped to preserve the RC.5-era `Array UInt32`
+/// / `Option String` rendering.
+fn paren_if_multi_token(t: &str) -> String {
+    if t.contains(' ') {
+        format!("({t})")
+    } else {
+        t.to_string()
+    }
+}
+
+/// RC.6 F3 helper — split a nominal-kind mangle's middle
+/// segment into (fqn, [arg_types]). Greedy longest-match
+/// against `known_fqns`; falls back to the plain-fqn
+/// heuristic. Mirror of `leo4-rust-emit::decode_nominal_with_args`.
+fn decode_nominal_with_args(
+    rest: &str,
+    known_fqns: &[String],
+) -> Option<String> {
+    if known_fqns.iter().any(|f| f == rest) {
+        return Some(rest.to_string());
+    }
+    let mut sorted_fqns: Vec<&String> = known_fqns.iter().collect();
+    sorted_fqns.sort_by_key(|f| std::cmp::Reverse(f.len()));
+    for fqn in &sorted_fqns {
+        if let Some(args_rest) = rest.strip_prefix(fqn.as_str())
+            && let Some(args_str) = args_rest.strip_prefix('_')
+        {
+            if let Some(args) = tokenise_arg_list(args_str, known_fqns) {
+                let arg_lean: Vec<String> = args
+                    .iter()
+                    .map(|a| {
+                        lean_type_of_mangle_with_user_fqns(a, known_fqns)
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let arg_block: Vec<String> =
+                    arg_lean.iter().map(|t| format!("({t})")).collect();
+                return Some(format!("{fqn} {}", arg_block.join(" ")));
+            }
+        }
+    }
+    if mangle_segment_is_plain_fqn(rest) {
+        return Some(rest.to_string());
+    }
+    None
+}
+
+/// RC.6 F3 helper — split an underscore-joined arg list into
+/// individual top-level arg mangles. Mirror of
+/// `leo4-rust-emit::tokenise_arg_list`.
+fn tokenise_arg_list(
+    s: &str,
+    known_fqns: &[String],
+) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut remaining = s;
+    while !remaining.is_empty() {
+        let (tok, rest) = take_one_arg_mangle(remaining, known_fqns)?;
+        out.push(tok.to_string());
+        if rest.is_empty() {
+            return Some(out);
+        }
+        remaining = rest.strip_prefix('_')?;
+    }
+    Some(out)
+}
+
+/// Take one arg mangle off the front. Mirror of
+/// `leo4-rust-emit::take_one_arg_mangle`.
+fn take_one_arg_mangle<'a>(
+    s: &'a str,
+    known_fqns: &[String],
+) -> Option<(&'a str, &'a str)> {
+    for p in &[
+        "self", "bI", "bN", "u128", "u64", "u32", "u16", "u8",
+        "i128", "i64", "i32", "i16", "i8", "f64", "f32", "str",
+        "b", "c",
+    ] {
+        if let Some(rest) = s.strip_prefix(p) {
+            if rest.is_empty() || rest.starts_with('_') {
+                return Some((&s[..p.len()], rest));
+            }
+        }
+    }
+    if let Some(rest) = s.strip_prefix('c') {
+        let digit_end = rest
+            .bytes()
+            .position(|b| !b.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if digit_end > 0 {
+            let rest_after_digits = &rest[digit_end..];
+            if let Some(after_c) = rest_after_digits.strip_prefix('c') {
+                if after_c.is_empty() || after_c.starts_with('_') {
+                    return Some((&s[..1 + digit_end + 1], after_c));
+                }
+            }
+        }
+    }
+    for (prefix, suffix) in &[
+        ("L_", "_l"),
+        ("O_", "_o"),
+        ("Rz_", "_z"),
+        ("T_", "_t"),
+        ("S_", "_s"),
+        ("V_", "_v"),
+        ("E_", "_e"),
+        ("F_", "_f"),
+        ("X_", "_x"),
+        ("I_", "_i"),
+        ("A_", "_a"),
+    ] {
+        if s.starts_with(prefix) {
+            if let Some(end) = find_matching_suffix(s, prefix, suffix) {
+                return Some((&s[..end], &s[end..]));
+            }
+            return None;
+        }
+    }
+    for fqn in known_fqns {
+        if let Some(rest) = s.strip_prefix(fqn.as_str()) {
+            if rest.is_empty() || rest.starts_with('_') {
+                return Some((&s[..fqn.len()], rest));
+            }
+        }
+    }
+    None
+}
+
+/// Find the byte index where the matching outer suffix
+/// closes. Balances nested kind prefix/suffix pairs.
+fn find_matching_suffix(
+    s: &str,
+    _prefix: &str,
+    suffix: &str,
+) -> Option<usize> {
+    let openers = [
+        ("L_", "_l"),
+        ("O_", "_o"),
+        ("Rz_", "_z"),
+        ("T_", "_t"),
+        ("S_", "_s"),
+        ("V_", "_v"),
+        ("E_", "_e"),
+        ("F_", "_f"),
+        ("X_", "_x"),
+        ("I_", "_i"),
+        ("A_", "_a"),
+    ];
+    let mut depth: i32 = 0;
+    let mut i = 0;
+    while i < s.len() {
+        let tail = &s[i..];
+        let mut matched_open = None;
+        for (op, _) in &openers {
+            if tail.starts_with(op) {
+                matched_open = Some(op.len());
+                break;
+            }
+        }
+        if let Some(skip) = matched_open {
+            depth += 1;
+            i += skip;
+            continue;
+        }
+        let mut matched_close = None;
+        for (_, suf) in &openers {
+            if tail.starts_with(suf) {
+                matched_close = Some((suf.len(), *suf));
+                break;
+            }
+        }
+        if let Some((skip, suf)) = matched_close {
+            depth -= 1;
+            i += skip;
+            if depth == 0 && suf == suffix {
+                return Some(i);
+            }
+            continue;
+        }
+        i += s[i..].chars().next()?.len_utf8();
+    }
+    None
 }
 
 /// RC.5 patch 1 helper — same heuristic as `leo4-rust-emit`'s

@@ -649,10 +649,18 @@ fn render_lean_wrapper(
     s.push_str("    ((buf.get! 2).toUInt32 <<< 16) |||\n");
     s.push_str("    ((buf.get! 3).toUInt32 <<< 24)\n\n");
 
+    // RC.6 F3 (2026-05-31) — extract the cdylib's user-type
+    // fqn list so the mangle decoder can resolve generic-
+    // instantiation mangles via `known_fqns` lookup.
+    let known_fqns: Vec<String> = user_types
+        .iter()
+        .map(|t| t.fqn.clone())
+        .collect();
+
     let mut sorted: Vec<&EntryView> = entries.iter().collect();
     sorted.sort_by(|a, b| a.logical_name.cmp(&b.logical_name));
     for e in sorted {
-        s.push_str(&render_one_export(e)?);
+        s.push_str(&render_one_export(e, &known_fqns)?);
         s.push('\n');
     }
 
@@ -965,7 +973,10 @@ fn translate_tuple_right_assoc(parts: &[String]) -> String {
     }
 }
 
-fn render_one_export(e: &EntryView) -> Result<String, String> {
+fn render_one_export(
+    e: &EntryView,
+    known_fqns: &[String],
+) -> Result<String, String> {
     // Map each parameter / return mangle to a Lean type. As of
     // RC.2 (2026-05-31) `lean_type_of_mangle` covers: scalars,
     // `String`, `ByteArray` (= `Vec<u8>`), `Array T`, `Option T`,
@@ -984,7 +995,9 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
     let mut all_mapped = true;
     for (i, m) in e.param_types.iter().enumerate() {
         param_idents.push(format!("a{i}"));
-        if let Some(t) = lean_type_of_mangle(m) { param_lean_tys.push(t) } else {
+        if let Some(t) = lean_type_of_mangle_with_user_fqns(m, known_fqns) {
+            param_lean_tys.push(t)
+        } else {
             all_mapped = false;
             param_lean_tys.push(format!("/- unmapped: {m} -/ String"));
         }
@@ -992,7 +1005,7 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
     let ret_ty = if e.ret_type.is_empty() {
         Some("Unit".to_string())
     } else {
-        lean_type_of_mangle(&e.ret_type)
+        lean_type_of_mangle_with_user_fqns(&e.ret_type, known_fqns)
     };
     let ret_ty_str = ret_ty.clone().unwrap_or_else(|| format!("/- unmapped: {} -/ Unit", e.ret_type));
     if ret_ty.is_none() {
@@ -1048,7 +1061,10 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
     if e.ret_type.is_empty() {
         s.push_str("  return ()\n");
     } else {
-        let lean_ret = lean_type_of_mangle(&e.ret_type).unwrap();
+        let lean_ret = lean_type_of_mangle_with_user_fqns(
+            &e.ret_type,
+            known_fqns,
+        ).unwrap();
         // Decode starting at offset 4 (after the status prefix).
         s.push_str(&format!(
             "  match (Leo4.LeanMarshal.canonicalDecode (T := {lean_ret}) resp 4) with\n"
@@ -1064,7 +1080,48 @@ fn render_one_export(e: &EntryView) -> Result<String, String> {
 
 /// Map an IDL mangle token to a Lean type identifier. Mirrors the
 /// `surface_form` table but produces Lean-side names.
+/// Backward-compat wrapper — calls
+/// [`lean_type_of_mangle_with_user_fqns`] with an empty
+/// `known_fqns` list. Generic instantiations of user-defined
+/// types still hit the heuristic-only path; for accurate
+/// splits the caller should use the `_with_user_fqns` variant
+/// directly with the cdylib's `USER_TYPES`-derived fqn list.
+#[cfg(test)]
 fn lean_type_of_mangle(mangle: &str) -> Option<String> {
+    lean_type_of_mangle_with_user_fqns(mangle, &[])
+}
+
+/// RC.6 F3 (2026-05-31) — mangle decoder with an explicit
+/// list of *known user-defined fqns* (post-`fqn_seg`
+/// normalisation, i.e. with dots and dashes already collapsed
+/// to underscores). When the input is a record / variant /
+/// resource mangle (`S_…_s` / `V_…_v` / `X_…_x` — Enum and
+/// Flags are kind-only and carry no generic args by SPEC
+/// design), the decoder:
+///
+/// 1. Greedily matches the longest known fqn that is a prefix
+///    of the middle segment (after stripping the kind prefix
+///    and suffix).
+/// 2. Treats the remainder as the generic-arg list, each arg
+///    itself a recursively-decodable mangle.
+/// 3. Renders `<fqn> (<arg1>) (<arg2>) ... (<argN>)`.
+///
+/// When no known fqn matches (or `known_fqns` is empty), falls
+/// back to the RC.2 patch 1 `mangle_segment_is_plain_fqn`
+/// heuristic. The heuristic rejects mangles with embedded
+/// primitive tokens (the generic-instantiation case) and
+/// accepts plain alphabetic fqn-only mangles.
+///
+/// Lossy round-trip: `fqn_seg` collapses `.` and `-` to `_`
+/// (`Sample.Color` and `Sample_Color` both mangle to
+/// `Sample_Color`). The decoder cannot distinguish them; the
+/// `USER_TYPES` slice carries the macro-emitted ident form
+/// (typically the flat Rust ident with no dots), so the
+/// `known_fqns` match returns whatever the macro recorded.
+fn lean_type_of_mangle_with_user_fqns(
+    mangle: &str,
+    known_fqns: &[String],
+) -> Option<String> {
     Some(match mangle {
         "u8" => "UInt8".into(),
         "u16" => "UInt16".into(),
@@ -1089,68 +1146,59 @@ fn lean_type_of_mangle(mangle: &str) -> Option<String> {
                 if rest == "u8" {
                     return Some("ByteArray".into());
                 }
-                let inner = lean_type_of_mangle(rest)?;
-                return Some(format!("Array {inner}"));
+                let inner = lean_type_of_mangle_with_user_fqns(rest, known_fqns)?;
+                return Some(format!("Array {}", paren_if_multi_token(&inner)));
             }
             if let Some(rest) =
                 other.strip_prefix("O_").and_then(|r| r.strip_suffix("_o"))
             {
-                let inner = lean_type_of_mangle(rest)?;
-                return Some(format!("Option {inner}"));
+                let inner = lean_type_of_mangle_with_user_fqns(rest, known_fqns)?;
+                return Some(format!("Option {}", paren_if_multi_token(&inner)));
             }
-            // User-defined nominal types — RC.2 patch 1
-            // (2026-05-31). Mangle prefixes per
+            // User-defined nominal types — RC.6 F3
+            // (2026-05-31) lifted RC.2 patch 1's heuristic
+            // with a proper tokeniser that consults
+            // `known_fqns`. Mangle prefixes per
             // `crates/schema-idl/src/mangle.rs::mangle_type`:
             //
-            // - `S_<fqn>_s` — record (no generics) →
-            //   Lean type ident `<fqn>` (underscored).
-            // - `V_<fqn>_v` — variant (no generics).
-            // - `E_<fqn>_e` — enum (all-unit C-style).
-            // - `F_<fqn>_f` — flags (bitfield).
-            // - `X_<fqn>_x` — resource handle.
+            // - `S_<fqn>_s` / `S_<fqn>_<args>_s` — record.
+            // - `V_<fqn>_v` / `V_<fqn>_<args>_v` — variant.
+            // - `E_<fqn>_e` — enum (all-unit; no generics
+            //   by SPEC design).
+            // - `F_<fqn>_f` — flags (no generics by design).
+            // - `X_<fqn>_x` / `X_<fqn>_<args>_x` — resource.
             //
-            // RC.2 scope: no-generics cases only. The FQN
-            // is the underscored form
-            // (`fqn_seg(fqn).replace(['.','-'], '_')`) —
-            // round-trip dot-restoration is lossy (an
-            // underscore could come from a dot, a dash, or
-            // a literal underscore in the source ident),
-            // so the emitter passes through as-is. The
-            // matching mirror Lean decl (`inductive` /
-            // `structure` / etc.) gets emitted by Patch 2
-            // alongside the wrapper, so the resulting
-            // `Rust.lean` is self-contained.
+            // Strategy: greedy-match the longest known FQN
+            // that prefixes `rest` (after stripping kind
+            // prefix + suffix). Split rest into FQN +
+            // remaining; treat remaining as the `_arg1_arg2_…`
+            // generic-arg sequence, each arg itself a
+            // recursively-decodable mangle. When no known
+            // FQN matches (or `known_fqns` is empty),
+            // fall back to the original
+            // `mangle_segment_is_plain_fqn` heuristic.
             //
-            // Generic instantiations (`S_<fqn>_<arg1>_<arg2>_..._s`,
-            // `V_<fqn>_<args>_v`, `X_<fqn>_<args>_x`) need
-            // a full mangle tokeniser to split FQN from
-            // generic args unambiguously (mangle is
-            // ambiguous under simple split because FQN
-            // segments can collide with arg-mangle tokens
-            // like `u32` if a user picks `def u32 := …` as
-            // a type alias). RC.2 defers — returns `None`
-            // for those, falling back to the stub-panic
-            // path; RC.3 lifts the tokeniser.
+            // Round-trip is lossy on `.`/`-` → `_` collapse;
+            // see `lean_type_of_mangle_with_user_fqns` doc.
             if let Some(rest) =
                 other.strip_prefix("S_").and_then(|r| r.strip_suffix("_s"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
-                    return Some(rest.to_string());
-                }
-                return None;
+                return decode_nominal_with_args(rest, known_fqns);
             }
             if let Some(rest) =
                 other.strip_prefix("V_").and_then(|r| r.strip_suffix("_v"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
-                    return Some(rest.to_string());
-                }
-                return None;
+                return decode_nominal_with_args(rest, known_fqns);
             }
             if let Some(rest) =
                 other.strip_prefix("E_").and_then(|r| r.strip_suffix("_e"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
+                // Enums never carry generic args per SPEC §
+                // mangling.md — fall straight back to the
+                // plain-fqn or known-fqn match.
+                if known_fqns.iter().any(|f| f == rest)
+                    || mangle_segment_is_plain_fqn(rest)
+                {
                     return Some(rest.to_string());
                 }
                 return None;
@@ -1158,7 +1206,9 @@ fn lean_type_of_mangle(mangle: &str) -> Option<String> {
             if let Some(rest) =
                 other.strip_prefix("F_").and_then(|r| r.strip_suffix("_f"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
+                if known_fqns.iter().any(|f| f == rest)
+                    || mangle_segment_is_plain_fqn(rest)
+                {
                     return Some(rest.to_string());
                 }
                 return None;
@@ -1166,14 +1216,257 @@ fn lean_type_of_mangle(mangle: &str) -> Option<String> {
             if let Some(rest) =
                 other.strip_prefix("X_").and_then(|r| r.strip_suffix("_x"))
             {
-                if mangle_segment_is_plain_fqn(rest) {
-                    return Some(rest.to_string());
-                }
-                return None;
+                return decode_nominal_with_args(rest, known_fqns);
             }
             return None;
         }
     })
+}
+
+/// RC.6 F3 helper — wrap a Lean type expression in parens
+/// when it contains a space (i.e. it's an App, like
+/// `My_Pair (UInt32) (String)`) so outer composite wrappers
+/// (`Array T` / `Option T`) parse correctly. Single-token
+/// types (`UInt32`, `String`, `AdsmtVerdict`) pass through
+/// unwrapped to keep backward compat with the RC.2-era
+/// `Array UInt32` / `Option String` test expectations.
+fn paren_if_multi_token(t: &str) -> String {
+    if t.contains(' ') {
+        format!("({t})")
+    } else {
+        t.to_string()
+    }
+}
+
+/// RC.6 F3 helper — split a nominal-kind mangle's middle
+/// segment (after stripping kind prefix + suffix) into
+/// (fqn, [arg_types]). Uses `known_fqns` for greedy longest-
+/// match; falls back to the plain-fqn heuristic for no-
+/// generics cases.
+///
+/// Returns `Some(rendered)` when:
+///
+/// - `rest` exactly matches a known fqn (no args), OR
+/// - `rest` exactly matches the plain-fqn heuristic, OR
+/// - a known fqn is a prefix of `rest` followed by `_`, and
+///   every trailing arg recursively decodes.
+///
+/// Returns `None` when the split is ambiguous (no known fqn
+/// prefix matches, heuristic rejects).
+fn decode_nominal_with_args(
+    rest: &str,
+    known_fqns: &[String],
+) -> Option<String> {
+    // Case 1: exact known-fqn match (no generic args).
+    if known_fqns.iter().any(|f| f == rest) {
+        return Some(rest.to_string());
+    }
+    // Case 2: a known fqn is a prefix followed by `_<args>`.
+    // Greedy longest-match — sort by length desc so
+    // `My_Pair` wins over `My` when both are registered.
+    let mut sorted_fqns: Vec<&String> = known_fqns.iter().collect();
+    sorted_fqns.sort_by_key(|f| std::cmp::Reverse(f.len()));
+    for fqn in &sorted_fqns {
+        if let Some(args_rest) = rest.strip_prefix(fqn.as_str())
+            && let Some(args_str) = args_rest.strip_prefix('_')
+        {
+            // Tokenise args_str into individual arg mangles +
+            // recursively decode.
+            if let Some(args) = tokenise_arg_list(args_str, known_fqns) {
+                let arg_lean: Vec<String> = args
+                    .iter()
+                    .map(|a| {
+                        lean_type_of_mangle_with_user_fqns(a, known_fqns)
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let arg_block: Vec<String> =
+                    arg_lean.iter().map(|t| format!("({t})")).collect();
+                return Some(format!("{fqn} {}", arg_block.join(" ")));
+            }
+        }
+    }
+    // Case 3: heuristic fallback — no known fqn knew about
+    // this mangle.
+    if mangle_segment_is_plain_fqn(rest) {
+        return Some(rest.to_string());
+    }
+    None
+}
+
+/// RC.6 F3 helper — split an underscore-joined arg-list
+/// string (`u32_str_L_u8_l` etc.) into individual top-level
+/// arg mangles. Tracks balanced kind prefix/suffix pairs so a
+/// nested `L_u8_l` doesn't get mis-split.
+///
+/// Returns `Some(args)` when every char is consumed by valid
+/// args, `None` if the parse hits a syntactic dead-end.
+///
+/// Note: balancing tracks `L_/_l`, `O_/_o`, `Rz_/_z`,
+/// `T_/_t`, `S_/_s`, `V_/_v`, `E_/_e`, `F_/_f`, `X_/_x`,
+/// `I_/_i`, `A_/_a` opening/closing pairs. Primitive tokens
+/// (`u8`, `u16`, …, `str`, `bI`, `bN`, `c<i>c`, `self`) are
+/// recognised as zero-depth atoms.
+fn tokenise_arg_list(
+    s: &str,
+    known_fqns: &[String],
+) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut remaining = s;
+    while !remaining.is_empty() {
+        let (tok, rest) = take_one_arg_mangle(remaining, known_fqns)?;
+        out.push(tok.to_string());
+        if rest.is_empty() {
+            return Some(out);
+        }
+        // After consuming one arg, the next byte must be `_`
+        // (the separator joining args). Strip it.
+        remaining = rest.strip_prefix('_')?;
+    }
+    Some(out)
+}
+
+/// RC.6 F3 helper — take exactly one arg mangle off the front
+/// of `s`, returning `(token, rest_after_token)`. Stops at
+/// the first valid mangle boundary, respecting balanced
+/// kind prefix/suffix pairs.
+fn take_one_arg_mangle<'a>(
+    s: &'a str,
+    known_fqns: &[String],
+) -> Option<(&'a str, &'a str)> {
+    // Primitives: try the longest first
+    // (`bI`/`bN`/`u128`/`u64`/`u32`/`u16`/`u8`/`i128`/`i64`/
+    // `i32`/`i16`/`i8`/`f64`/`f32`/`str`/`b`/`c`/`self`).
+    for p in &[
+        "self", "bI", "bN", "u128", "u64", "u32", "u16", "u8",
+        "i128", "i64", "i32", "i16", "i8", "f64", "f32", "str",
+        "b", "c",
+    ] {
+        if let Some(rest) = s.strip_prefix(p) {
+            // Boundary check: next char must be `_` or end-
+            // of-string (so `u8` doesn't match `u8s_…`).
+            if rest.is_empty() || rest.starts_with('_') {
+                return Some((&s[..p.len()], rest));
+            }
+        }
+    }
+    // Cyc: `c<digits>c`.
+    if let Some(rest) = s.strip_prefix('c') {
+        let digit_end = rest
+            .bytes()
+            .position(|b| !b.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if digit_end > 0 {
+            let rest_after_digits = &rest[digit_end..];
+            if let Some(after_c) = rest_after_digits.strip_prefix('c') {
+                if after_c.is_empty() || after_c.starts_with('_') {
+                    return Some((&s[..1 + digit_end + 1], after_c));
+                }
+            }
+        }
+    }
+    // Kind-prefix mangles: scan for the matching close.
+    for (prefix, suffix) in &[
+        ("L_", "_l"),
+        ("O_", "_o"),
+        ("Rz_", "_z"),
+        ("T_", "_t"),
+        ("S_", "_s"),
+        ("V_", "_v"),
+        ("E_", "_e"),
+        ("F_", "_f"),
+        ("X_", "_x"),
+        ("I_", "_i"),
+        ("A_", "_a"),
+    ] {
+        if s.starts_with(prefix) {
+            if let Some(end) = find_matching_suffix(s, prefix, suffix) {
+                return Some((&s[..end], &s[end..]));
+            }
+            return None;
+        }
+    }
+    // Fallback: known-fqn prefix (bare-no-prefix, only used
+    // in nominal-with-args contexts where the outer kind
+    // prefix has already been stripped — this branch only
+    // fires for recursion into `tokenise_arg_list` when the
+    // caller mistakenly forwards a non-mangle bare ident; the
+    // SPEC mangle scheme always wraps idents in `S_/V_/X_`
+    // kind tags at arg position, so this is dead in
+    // practice. Kept for robustness against future SPEC
+    // changes.).
+    for fqn in known_fqns {
+        if let Some(rest) = s.strip_prefix(fqn.as_str()) {
+            if rest.is_empty() || rest.starts_with('_') {
+                return Some((&s[..fqn.len()], rest));
+            }
+        }
+    }
+    None
+}
+
+/// Find the byte index in `s` where the matching `suffix` for
+/// the opening `prefix` ends. Balances nested kind prefix /
+/// suffix pairs by counting depth on every recognised
+/// opener / closer pair.
+fn find_matching_suffix(s: &str, _prefix: &str, suffix: &str) -> Option<usize> {
+    let openers = [
+        ("L_", "_l"),
+        ("O_", "_o"),
+        ("Rz_", "_z"),
+        ("T_", "_t"),
+        ("S_", "_s"),
+        ("V_", "_v"),
+        ("E_", "_e"),
+        ("F_", "_f"),
+        ("X_", "_x"),
+        ("I_", "_i"),
+        ("A_", "_a"),
+    ];
+    let mut depth: i32 = 0;
+    let mut i = 0;
+    while i < s.len() {
+        // Check for an opening prefix at position i.
+        let tail = &s[i..];
+        let mut matched_open = None;
+        for (op, _) in &openers {
+            if tail.starts_with(op) {
+                matched_open = Some(op.len());
+                break;
+            }
+        }
+        if let Some(skip) = matched_open {
+            depth += 1;
+            i += skip;
+            continue;
+        }
+        // Check for a closing suffix at position i. The outer
+        // `suffix` we're looking for closes when depth would
+        // drop to 0; nested suffixes balance.
+        let mut matched_close = None;
+        for (op, suf) in &openers {
+            if tail.starts_with(suf) {
+                // Confirm it's actually a close, not an
+                // ident segment containing the letters — by
+                // construction `_<letter>` at depth>0
+                // closes one level.
+                let _ = op;
+                matched_close = Some((suf.len(), *suf));
+                break;
+            }
+        }
+        if let Some((skip, suf)) = matched_close {
+            depth -= 1;
+            i += skip;
+            if depth == 0 && suf == suffix {
+                return Some(i);
+            }
+            continue;
+        }
+        // Neither opener nor closer at this byte; advance one
+        // char (multibyte-safe via char_indices boundary).
+        i += s[i..].chars().next()?.len_utf8();
+    }
+    None
 }
 
 /// RC.2 patch 1 helper — heuristic check that `rest`
@@ -1537,13 +1830,11 @@ mod tests {
     }
 
     #[test]
-    fn lean_type_of_mangle_generic_instantiation_returns_none() {
-        // Generic instantiations like `S_My_Kv_Pair_u32_str_s`
-        // require a full mangle tokeniser to split FQN from
-        // generic args — `mangle_segment_is_plain_fqn`
-        // detects the embedded primitive-mangle tokens
-        // (`u32`, `str`) and rejects. Falls back to the
-        // stub-panic path; RC.3 lifts.
+    fn lean_type_of_mangle_generic_instantiation_returns_none_without_known_fqns() {
+        // Without `known_fqns`, generic instantiations still
+        // fall to the heuristic path which rejects on
+        // embedded primitive-mangle tokens. Backward-compat
+        // with the RC.2-era behaviour.
         assert_eq!(
             lean_type_of_mangle("S_My_Kv_Pair_u32_str_s"),
             None,
@@ -1551,6 +1842,136 @@ mod tests {
         assert_eq!(
             lean_type_of_mangle("V_Result2_u32_v"),
             None,
+        );
+    }
+
+    // ─── RC.6 F3 — generic-instantiation tokeniser ─────
+
+    #[test]
+    fn lean_type_of_mangle_generic_record_resolves_with_known_fqns() {
+        // `My.Kv.Pair<u32, String>` mangles to
+        // `S_My_Kv_Pair_u32_str_s`. With `known_fqns=["My_Kv_Pair"]`
+        // (the `fqn_seg`-normalised form), the tokeniser
+        // splits the FQN from the generic args and emits
+        // `My_Kv_Pair (UInt32) (String)`.
+        let known = vec!["My_Kv_Pair".to_string()];
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "S_My_Kv_Pair_u32_str_s",
+                &known,
+            )
+            .as_deref(),
+            Some("My_Kv_Pair (UInt32) (String)"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_generic_variant_resolves_with_known_fqns() {
+        let known = vec!["Result2".to_string()];
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "V_Result2_u32_v",
+                &known,
+            )
+            .as_deref(),
+            Some("Result2 (UInt32)"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_no_generics_resolves_with_known_fqns_exact_match() {
+        // No-generics case (`S_AdsmtVerdict_s`) — exact match
+        // in known_fqns wins, no args.
+        let known = vec!["AdsmtVerdict".to_string()];
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "S_AdsmtVerdict_s",
+                &known,
+            )
+            .as_deref(),
+            Some("AdsmtVerdict"),
+        );
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "V_AdsmtVerdict_v",
+                &known,
+            )
+            .as_deref(),
+            Some("AdsmtVerdict"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_nested_generic_in_list_resolves() {
+        // `Vec<My_Pair<u32, String>>` → `L_S_My_Pair_u32_str_s_l`.
+        // Outer is List → recurse on inner; inner is the
+        // generic record. Result: `Array (My_Pair (UInt32)
+        // (String))` — outer paren added by
+        // `paren_if_multi_token` since inner has spaces.
+        let known = vec!["My_Pair".to_string()];
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "L_S_My_Pair_u32_str_s_l",
+                &known,
+            )
+            .as_deref(),
+            Some("Array (My_Pair (UInt32) (String))"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_greedy_longest_match_wins() {
+        // `S_My_Pair_u32_s` with both `My` and `My_Pair` in
+        // known_fqns — longest match wins: `My_Pair (UInt32)`,
+        // not `My _Pair_u32` (the latter would fail to
+        // tokenise).
+        let known = vec!["My".to_string(), "My_Pair".to_string()];
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "S_My_Pair_u32_s",
+                &known,
+            )
+            .as_deref(),
+            Some("My_Pair (UInt32)"),
+        );
+    }
+
+    #[test]
+    fn lean_type_of_mangle_unknown_generic_falls_back_to_none() {
+        // Even with the tokeniser, unknown user types are
+        // not resolved without `known_fqns` entry.
+        let known = vec!["OtherType".to_string()];
+        assert_eq!(
+            lean_type_of_mangle_with_user_fqns(
+                "S_My_Pair_u32_str_s",
+                &known,
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn tokenise_arg_list_splits_primitives() {
+        let r = tokenise_arg_list("u32_str", &[]).unwrap();
+        assert_eq!(r, vec!["u32".to_string(), "str".to_string()]);
+        let r = tokenise_arg_list("u8_u16_u32_u64", &[]).unwrap();
+        assert_eq!(r, vec!["u8", "u16", "u32", "u64"]);
+    }
+
+    #[test]
+    fn tokenise_arg_list_splits_nested_composites() {
+        // `L_u8_l_str` → two args: `L_u8_l` and `str`.
+        let r = tokenise_arg_list("L_u8_l_str", &[]).unwrap();
+        assert_eq!(r, vec!["L_u8_l".to_string(), "str".to_string()]);
+    }
+
+    #[test]
+    fn paren_if_multi_token_wraps_only_apps() {
+        assert_eq!(paren_if_multi_token("UInt32"), "UInt32");
+        assert_eq!(paren_if_multi_token("AdsmtVerdict"), "AdsmtVerdict");
+        assert_eq!(
+            paren_if_multi_token("My_Pair (UInt32) (String)"),
+            "(My_Pair (UInt32) (String))",
         );
     }
 
@@ -1580,7 +2001,7 @@ mod tests {
             isolated: false,
             abi_version: 1,
         };
-        let s = render_one_export(&e).unwrap();
+        let s = render_one_export(&e, &[]).unwrap();
         assert!(s.contains("def add (a0 : UInt64) (a1 : UInt64) : IO (UInt64)"));
         assert!(s.contains("leo4_rust__add__u64_u64"));
         assert!(s.contains("canonicalEncode a0"));
@@ -1603,7 +2024,7 @@ mod tests {
             isolated: false,
             abi_version: 1,
         };
-        let s = render_one_export(&e).unwrap();
+        let s = render_one_export(&e, &[]).unwrap();
         // Wrapper signature is still emitted, but the body
         // panic!s rather than dispatching with garbage.
         assert!(s.contains("def solve"), "wrapper definition missing: {s}");
