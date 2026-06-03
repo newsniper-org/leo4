@@ -1812,22 +1812,31 @@ fn main_rs_reverse_rust_transpile(name: &str, iface: &str) -> String {
     r#"//! Runner binary — `leo4 run --impl rust-transpile`
 //! invokes this after emitting `lean/<Iface>/Rust.lean`.
 //!
-//! All four dispatch-loop steps that the prior scaffold
-//! placeholder TODO'd live inside
+//! All five pipeline steps live inside
 //! `leo4_oxilean_runner::run_main`:
-//!  1. dlopen the cdylib at `LEO4_OXILEAN_CDYLIB`,
-//!  2. walk its `EXPORTS` slice via `leo4_rust_describe_exports`,
+//!
+//!  1. dlopen the cdylib at `LEO4_OXILEAN_CDYLIB`.
+//!  2. walk its `EXPORTS` slice via
+//!     `leo4_rust_describe_exports`.
 //!  3. pair-register every entry with `OxiLeanInvoker`
 //!     (`register_export` + `register_export_callback`
-//!     wrapping a `dlsym`-driven Rust closure),
-//!  4. parse + elaborate `lean/Main.lean` against the
-//!     OxiLean prelude + leo4 boundary primitives.
-//!
-//! The final "actually execute `main : IO Unit`" step is
-//! pending upstream OxiLean (no public `run_main` driver
-//! today); `run_main` reports a clean `LeanError(0x0002_0005)`
-//! once everything *up to* that step succeeds. See the
-//! `leo4-oxilean-runner` crate docs.
+//!     wrapping a `dlsym`-driven Rust closure).
+//!  4. walk the `USER_TYPES` slice (RC.5, 2026-05-31) and
+//!     synthesise stub `Axiom <fqn> : Type` decls in the
+//!     elab env so Main.lean references to user-defined
+//!     types name-resolve.
+//!  5. parse + elaborate `lean/Main.lean` against the
+//!     OxiLean prelude + leo4 boundary primitives, then
+//!     drive `main : IO α` to its IO effects via the fork's
+//!     `oxilean_runtime::driver::run_main` IO walker.
+//!     (The walker recognises the full monad-transformer
+//!     family, `IO.bind` beta-application, `@[extern]`
+//!     Const dispatch with canonical-ABI arg encoding,
+//!     stdlib `IO.println` / `IO.FS.*` direct dispatch, and
+//!     user-defined record / inductive ctor encoding via
+//!     env-lookup. Shapes outside the recognised set
+//!     surface as `LeanError(0x0002_0005)` with the
+//!     offending sub-expression's debug repr.)
 
 fn main() {
     let cdylib = std::env::var("LEO4_OXILEAN_CDYLIB").unwrap_or_else(|_| {
@@ -1844,25 +1853,25 @@ fn main() {
         std::path::Path::new(&cdylib),
         std::path::Path::new(&main_lean),
     ) {
-        Ok(()) => {
-            // Once upstream OxiLean exposes a `main : IO Unit`
-            // driver this branch fires on completion.
-            std::process::exit(0);
-        }
+        Ok(()) => std::process::exit(0),
         Err(e) => {
             eprintln!("runner: leo4_oxilean_runner::run_main failed: {e}");
-            // 0x0002_0005 is the "upstream driver missing"
-            // sentinel — surface it distinctly so wrapping
-            // scripts can detect "everything wired, only
-            // last step blocked" vs. real failures.
-            let upstream_blocked = e.code == 0x0002_0005
-                && e.message.contains("doesn't yet expose");
-            if upstream_blocked {
+            // 0x0002_0005 carries two related but distinct
+            // sub-conditions: pre-RC.5 it meant "upstream
+            // driver missing"; today it means the walker
+            // hit an unrecognised expression shape. Surface
+            // the shape diagnostic distinctly so wrapping
+            // scripts can detect "everything wired except
+            // this one shape" vs. real wiring failures.
+            let walker_gap = e.code == 0x0002_0005
+                && (e.message.contains("walker hit an unrecognised shape")
+                    || e.message.contains("doesn't yet expose"));
+            if walker_gap {
                 eprintln!(
-                    "runner: note — cdylib + EXPORTS + invoker + parse + \
-                     elab all completed successfully. The remaining \
-                     `main : IO Unit` execution step is gated on an \
-                     upstream OxiLean PR."
+                    "runner: note — cdylib + EXPORTS + invoker + USER_TYPES \
+                     + parse + elab all completed successfully. The IO \
+                     walker hit a shape outside its recognised set; the \
+                     error message above carries the offending sub-expression."
                 );
                 std::process::exit(75); // EX_TEMPFAIL
             }

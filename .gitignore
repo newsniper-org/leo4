@@ -36,6 +36,9 @@ Cargo.lock.bak
 # Claude Code per-session state (lock files, local settings).
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+# Claude Code agent worktrees — checked out via `git worktree add`
+# for parallel agent runs; never meant to be tracked.
+.claude/worktrees/
 
 # Spike scratch — do NOT gitignore SPIKE-*.md findings
 /spike/lake-hook/.lake
